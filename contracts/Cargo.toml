@@ -1,0 +1,26 @@
+[workspace]
+members = [
+  "shared",
+  "oracle",
+  "vault",
+  "loan-manager",
+  "marketplace",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+publish = false
+
+[workspace.dependencies]
+soroban-sdk = "25.3.1"
+nexus-contracts-shared = { path = "shared" }
+
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+lto = true
+codegen-units = 1
+panic = "abort"
+

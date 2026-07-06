@@ -1,0 +1,172 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  LENDER
+  BORROWER
+  LIQUIDATOR
+}
+
+enum OfferStatus {
+  Draft
+  Funding
+  Active
+  Matched
+  Cancelled
+  Expired
+}
+
+enum LoanStatus {
+  PendingCollateral
+  Active
+  Warning
+  LiquidationPlanning
+  Repaid
+  Closed
+  Expired
+  Defaulted
+  Liquidated
+}
+
+enum RiskZone {
+  SAFE
+  WARNING
+  LIQUIDATION_PLANNING
+}
+
+enum TransactionType {
+  CONNECT_WALLET
+  CREATE_OFFER
+  FUND_OFFER
+  ACTIVATE_OFFER
+  CANCEL_OFFER
+  EXPIRE_OFFER
+  ACCEPT_OFFER
+  ACTIVATE_LOAN
+  BORROW_LOAN
+  BORROW
+  ADD_COLLATERAL
+  PARTIAL_REPAY
+  FULL_REPAY
+  REPAY
+  LIQUIDATE
+  UPDATE_ORACLE
+  ORACLE_UPDATE
+  HEALTH_RECALCULATION
+  CLAIM_REPAYMENT
+}
+
+model User {
+  id          String    @id @default(cuid())
+  wallet      String    @unique
+  role        UserRole?
+  displayName String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model LoanOffer {
+  id                       String      @id @default(cuid())
+  contractOfferId          BigInt?     @unique
+  lenderWallet             String
+  loanAsset                String
+  loanAmount               Decimal     @db.Decimal(30, 7)
+  fixedAprBps              Int
+  durationDays             Int
+  collateralAsset          String
+  maxLtvBps                Int
+  liquidationThresholdBps  Int
+  liquidationBonusBps      Int
+  gracePeriodDays          Int
+  minHealthFactorBps       Int         @default(14000)
+  status                   OfferStatus @default(Draft)
+  description              String?
+  txHash                   String?
+  explorerUrl              String?
+  createdAt                DateTime    @default(now())
+  updatedAt                DateTime    @updatedAt
+
+  loans Loan[]
+
+  @@index([lenderWallet])
+  @@index([status])
+}
+
+model Loan {
+  id                       String     @id @default(cuid())
+  contractLoanId           BigInt?    @unique
+  offerId                  String?
+  contractOfferId          BigInt?
+  lenderWallet             String
+  borrowerWallet           String
+  loanAsset                String
+  principal                Decimal    @db.Decimal(30, 7)
+  outstandingDebt          Decimal    @db.Decimal(30, 7)
+  fixedAprBps              Int
+  collateralAsset          String
+  collateralAmount         Decimal    @db.Decimal(30, 7)
+  startTime                DateTime?
+  dueTime                  DateTime?
+  maxLtvBps                Int
+  liquidationThresholdBps  Int
+  liquidationBonusBps      Int
+  minHealthFactorBps       Int        @default(14000)
+  gracePeriodDays          Int
+  healthFactor             Decimal    @default(0) @db.Decimal(18, 6)
+  ltv                      Decimal    @default(0) @db.Decimal(18, 6)
+  riskZone                 RiskZone   @default(SAFE)
+  status                   LoanStatus @default(PendingCollateral)
+  txHash                   String?
+  explorerUrl              String?
+  claimedByLender          Boolean    @default(false)
+  closedAt                 DateTime?
+  createdAt                DateTime   @default(now())
+  updatedAt                DateTime   @updatedAt
+
+  offer     LoanOffer? @relation(fields: [offerId], references: [id])
+
+  @@index([borrowerWallet])
+  @@index([lenderWallet])
+  @@index([status])
+  @@index([riskZone])
+}
+
+model OraclePrice {
+  id         String   @id @default(cuid())
+  assetPair  String   @unique
+  baseAsset  String?
+  quoteAsset String?
+  price      Decimal  @db.Decimal(30, 12)
+  decimals   Int
+  source     String
+  updatedAt  DateTime
+  createdAt  DateTime @default(now())
+
+  @@index([baseAsset, quoteAsset])
+}
+
+model Transaction {
+  id          String          @id @default(cuid())
+  txHash      String          @unique
+  explorerUrl String?
+  type        TransactionType
+  wallet      String
+  offerId     String?
+  loanId      String?
+  asset       String?
+  amount      Decimal?        @db.Decimal(30, 7)
+  status      String          @default("CONFIRMED")
+  metadata    Json?
+  createdAt   DateTime        @default(now())
+
+  @@index([wallet])
+  @@index([type])
+  @@index([loanId])
+  @@index([offerId])
+}

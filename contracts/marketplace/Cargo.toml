@@ -1,0 +1,20 @@
+[package]
+name = "nexus-marketplace-contract"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+nexus-contracts-shared = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+nexus-loan-manager-contract = { path = "../loan-manager" }
+nexus-oracle-contract = { path = "../oracle" }
+nexus-vault-contract = { path = "../vault" }
+
