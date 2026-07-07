@@ -89,6 +89,8 @@ model LoanOffer {
   description              String?
   txHash                   String?
   explorerUrl              String?
+  ledger                   Int?
+  blockTimestamp           DateTime?
   createdAt                DateTime    @default(now())
   updatedAt                DateTime    @updatedAt
 
@@ -124,6 +126,8 @@ model Loan {
   status                   LoanStatus @default(PendingCollateral)
   txHash                   String?
   explorerUrl              String?
+  ledger                   Int?
+  blockTimestamp           DateTime?
   claimedByLender          Boolean    @default(false)
   closedAt                 DateTime?
   createdAt                DateTime   @default(now())
@@ -155,6 +159,8 @@ model Transaction {
   id          String          @id @default(cuid())
   txHash      String          @unique
   explorerUrl String?
+  contract    String?
+  ledger      Int?
   type        TransactionType
   wallet      String
   offerId     String?
@@ -162,6 +168,7 @@ model Transaction {
   asset       String?
   amount      Decimal?        @db.Decimal(30, 7)
   status      String          @default("CONFIRMED")
+  blockTimestamp DateTime?
   metadata    Json?
   createdAt   DateTime        @default(now())
 

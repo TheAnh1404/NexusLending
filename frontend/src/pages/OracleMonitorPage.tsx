@@ -4,6 +4,7 @@ import type { OracleImpact } from '../contexts/LendingContext';
 import { calculateHealthFactor, getRiskZone, isOpenLoanStatus } from '../utils/finance';
 import { RiskBadge } from '../components/common/RiskBadge';
 import { EmptyState } from '../components/common/CommonStates';
+import { CONTRACTS } from '../services/soroban/config';
 import {
   Card,
   Row,
@@ -17,39 +18,28 @@ import {
   Space,
 } from 'antd';
 import {
-  LineChart as RechartsLineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip as ChartTooltip,
-  ResponsiveContainer,
-} from 'recharts';
-import {
-  Activity,
   TrendingDown,
   TrendingUp,
 } from 'lucide-react';
-import { generateXlmPriceHistory } from '../data/mockOracle';
 
 const { Title, Paragraph, Text } = Typography;
 
 export const OracleMonitorPage: React.FC = () => {
-  const { oraclePrices, loans, updateOraclePrice } = useAppContext();
+  const { oraclePrices, loans, updateOraclePrice, wallet, transactions } = useAppContext();
   const [form] = Form.useForm();
 
   const xlmPriceInfo = oraclePrices.find((p) => p.asset === 'XLM');
   const xlmPrice = xlmPriceInfo?.price || 0.125;
   const usdcPrice = oraclePrices.find((p) => p.asset === 'USDC')?.price || 1.0;
 
-  // Chart data
-  const [chartData] = useState(() => generateXlmPriceHistory());
-
   // Input state for new price
   const [newPrice, setNewPrice] = useState<number>(xlmPrice);
   const [lastImpacts, setLastImpacts] = useState<OracleImpact[]>([]);
 
   const activeLoans = loans.filter((l) => isOpenLoanStatus(l.status));
+
+  // Find latest update oracle price transaction
+  const lastUpdateTx = transactions.find((tx) => tx.type === 'UPDATE_ORACLE');
 
   // Preview what loans would look like under the new price
   const previewLoansData = activeLoans.map((loan) => {
@@ -104,41 +94,16 @@ export const OracleMonitorPage: React.FC = () => {
 
   const columns = [
     {
-      title: 'Contract ID',
+      title: 'Loan',
       dataIndex: 'id',
       key: 'id',
-      render: (text: string) => <Text strong style={{ fontFamily: 'var(--font-mono)' }}>{text}</Text>,
-    },
-    {
-      title: 'Borrower',
-      dataIndex: 'borrower',
-      key: 'borrower',
-      render: (text: string) => <Text style={{ fontFamily: 'var(--font-mono)' }}>{text.slice(0, 6)}...{text.slice(-6)}</Text>,
-    },
-    {
-      title: 'Debt / Collateral',
-      key: 'debtCollateral',
-      render: (_: any, record: any) => (
-        <span>
-          ${record.debt.toLocaleString()} / {record.collateral.toLocaleString()} XLM
-        </span>
-      ),
+      render: (text: string) => <Text strong style={{ fontFamily: 'var(--font-mono)' }}>#{text}</Text>,
     },
     {
       title: 'Old HF',
       dataIndex: 'oldHF',
       key: 'oldHF',
-      render: (hf: number) => (
-        <Space>
-          <Text strong>{hf.toFixed(2)}</Text>
-        </Space>
-      ),
-    },
-    {
-      title: 'Old Risk',
-      dataIndex: 'oldRisk',
-      key: 'oldRisk',
-      render: (risk: any) => <RiskBadge zone={risk} />,
+      render: (hf: number) => <Text strong>{hf.toFixed(2)}</Text>,
     },
     {
       title: 'New HF',
@@ -160,30 +125,40 @@ export const OracleMonitorPage: React.FC = () => {
       },
     },
     {
+      title: 'Old Risk',
+      dataIndex: 'oldRisk',
+      key: 'oldRisk',
+      render: (risk: any) => <RiskBadge zone={risk} />,
+    },
+    {
       title: 'New Risk',
       dataIndex: 'newRisk',
       key: 'newRisk',
       render: (risk: any) => <RiskBadge zone={risk} />,
     },
     {
-      title: 'Status',
+      title: 'Status after backend recalc',
       dataIndex: 'status',
       key: 'status',
-      render: (status: string) => <Tag color="processing">{status}</Tag>,
+      render: (status: string) => {
+        let color = 'blue';
+        if (status === 'Warning') color = 'orange';
+        if (status === 'LiquidationPlanning') color = 'red';
+        if (status === 'Active') color = 'green';
+        return <Tag color={color} style={{ fontWeight: 600 }}>{status}</Tag>;
+      },
     },
   ];
-
-  const isPositive = xlmPriceInfo ? xlmPriceInfo.change24h >= 0 : true;
 
   if (oraclePrices.length === 0) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
         <div>
-          <Title level={2} style={{ margin: 0, fontFamily: 'var(--font-heading)', fontWeight: 700 }}>
+          <Title level={2} style={{ margin: 0, fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: '28px', letterSpacing: '-0.03em' }}>
             Oracle Monitor
           </Title>
-          <Paragraph type="secondary" style={{ margin: 0 }}>
-            Real-time oracle price feeds and loan health simulation.
+          <Paragraph type="secondary" style={{ margin: '4px 0 0 0', color: 'var(--text-muted)' }}>
+            Oracle price feeds are currently offline or unavailable.
           </Paragraph>
         </div>
         <EmptyState
@@ -198,123 +173,127 @@ export const OracleMonitorPage: React.FC = () => {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
       {/* Page Header */}
       <div>
-        <Title level={2} style={{ margin: 0, fontFamily: 'var(--font-heading)', fontWeight: 700 }}>
+        <Title level={2} style={{ margin: 0, fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: '28px', letterSpacing: '-0.03em' }}>
           Oracle Monitor
         </Title>
-        <Paragraph type="secondary" style={{ margin: 0 }}>
-          Admin demo control room. Simulate Oracle feed updates to test protocol risk management, loan warning zones, and liquidations.
-        </Paragraph>
+        <div style={{ marginTop: '8px', fontSize: '13px', color: 'var(--text-muted)' }}>
+          <Text strong>Current Pair:</Text> XLM/USDC | <Text strong>Oracle Contract:</Text> <span style={{ fontFamily: 'var(--font-mono)' }}>{CONTRACTS.oracle}</span> | <Text strong>Admin:</Text> <Tag color={wallet.connected ? 'success' : 'warning'}>{wallet.connected ? 'Connected' : 'Not Connected'}</Tag>
+        </div>
       </div>
 
       <Row gutter={[24, 24]}>
-        {/* Left Side: Simulation form and Price feed */}
-        <Col xs={24} lg={10}>
-          <Card title="Oracle Price Simulation Controls" styles={{ body: { padding: '24px' } }}>
-            <div style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              backgroundColor: 'var(--bg-color)',
-              padding: '20px',
-              borderRadius: '10px',
-              border: '1px solid var(--border-color)',
-              marginBottom: '24px'
-            }}>
-              <div>
-                <Text type="secondary" style={{ fontSize: '11px', display: 'block', textTransform: 'uppercase' }}>
-                  CURRENT ORACLE PRICE
+        {/* Left Side: Price Status */}
+        <Col xs={24} lg={12}>
+          <Card title="Price Status" style={{ border: '1px solid var(--border-color)', backgroundColor: '#FFFFFF', height: '100%' }} styles={{ body: { padding: '24px' } }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '16px' }}>
+                <Text type="secondary" style={{ fontSize: '11px', fontWeight: 700, display: 'block', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Current Price
                 </Text>
-                <Title level={3} style={{ margin: '4px 0 0 0', fontWeight: 800, fontFamily: 'var(--font-heading)' }}>
-                  ${xlmPrice.toFixed(4)} USDC
-                </Title>
+                <div style={{ fontSize: '28px', fontWeight: 800, fontFamily: 'var(--font-heading)', marginTop: '4px' }}>
+                  ${xlmPrice.toFixed(7)} USDC
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div>
+                  <Text type="secondary" style={{ fontSize: '11px', fontWeight: 700, display: 'block', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    Decimals
+                  </Text>
+                  <Text strong style={{ fontSize: '16px' }}>7</Text>
+                </div>
+                <div>
+                  <Text type="secondary" style={{ fontSize: '11px', fontWeight: 700, display: 'block', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    Stale
+                  </Text>
+                  <Tag color="success" style={{ fontWeight: 600 }}>No</Tag>
+                </div>
               </div>
               <div>
-                <Tag color={isPositive ? 'success' : 'error'} style={{ fontSize: '12px', padding: '4px 10px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  {isPositive ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-                  {xlmPriceInfo?.change24h}% (24h)
-                </Tag>
-              </div>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '24px' }}>
-              <div className="metric-panel">
-                <Text type="secondary" style={{ fontSize: '11px', display: 'block', textTransform: 'uppercase' }}>
+                <Text type="secondary" style={{ fontSize: '11px', fontWeight: 700, display: 'block', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                   Last Updated
                 </Text>
-                <Text strong>{xlmPriceInfo ? new Date(xlmPriceInfo.lastUpdated).toLocaleString() : 'N/A'}</Text>
-              </div>
-              <div className="metric-panel">
-                <Text type="secondary" style={{ fontSize: '11px', display: 'block', textTransform: 'uppercase' }}>
-                  Price Source
-                </Text>
-                <Text strong>{xlmPriceInfo?.source || 'N/A'}</Text>
+                <Text style={{ fontSize: '14px' }}>{xlmPriceInfo ? new Date(xlmPriceInfo.lastUpdated).toLocaleString() : 'N/A'}</Text>
               </div>
             </div>
+          </Card>
+        </Col>
 
-            <Form form={form} layout="vertical" initialValues={{ price: xlmPrice }}>
+        {/* Right Side: Admin Update */}
+        <Col xs={24} lg={12}>
+          <Card title="Admin Update" style={{ border: '1px solid var(--border-color)', backgroundColor: '#FFFFFF', height: '100%' }} styles={{ body: { padding: '24px' } }}>
+            <Form form={form} layout="vertical" initialValues={{ price: xlmPrice, decimals: 7, source: 'Nexus Admin' }}>
               <Form.Item
-                label="Simulated XLM Price (USDC)"
+                label="New Price (USDC)"
                 name="price"
-                extra="Change this value to simulate market drops (e.g. $0.09) or market recoveries (e.g. $0.16)."
+                rules={[{ required: true, message: 'Please enter a price' }]}
               >
                 <InputNumber
                   min={0.01}
                   max={1.0}
-                  step={0.005}
+                  step={0.001}
                   style={{ width: '100%' }}
-                  size="large"
                   onChange={(val) => {
                     setNewPrice(val || 0);
                     setLastImpacts([]);
                   }}
                 />
               </Form.Item>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <Form.Item label="Decimals" name="decimals">
+                  <InputNumber style={{ width: '100%' }} disabled />
+                </Form.Item>
+                <Form.Item label="Source" name="source">
+                  <span style={{ display: 'block', padding: '5px 12px', background: 'var(--border-light)', border: '1px solid var(--border-color)', borderRadius: '6px', fontSize: '14px', color: 'var(--text-muted)' }}>
+                    Nexus Admin
+                  </span>
+                </Form.Item>
+              </div>
 
               <Button
                 type="primary"
-                size="large"
                 onClick={handleUpdatePrice}
-                disabled={newPrice <= 0}
-                icon={<Activity size={18} style={{ marginRight: 6 }} />}
-                style={{ width: '100%', height: '48px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                disabled={newPrice <= 0 || !wallet.connected}
+                style={{ width: '100%', height: '40px', marginTop: '8px' }}
               >
                 Update Oracle Price
               </Button>
             </Form>
           </Card>
         </Col>
-
-        {/* Right Side: Price Chart */}
-        <Col xs={24} lg={14}>
-          <Card title="XLM / USDC 30-Day Historical Chart" styles={{ body: { padding: '24px' } }}>
-            {chartData.length === 0 ? (
-              <div style={{ height: '260px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
-                No historical price data available
-              </div>
-            ) : (
-              <div style={{ height: '260px' }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <RechartsLineChart data={chartData}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
-                    <XAxis dataKey="date" stroke="#6B7280" style={{ fontSize: '11px' }} />
-                    <YAxis
-                      stroke="#6B7280"
-                      style={{ fontSize: '11px' }}
-                      domain={['auto', 'auto']}
-                      tickFormatter={(val) => `$${val.toFixed(3)}`}
-                    />
-                    <ChartTooltip formatter={(val: any) => [`$${parseFloat(val).toFixed(4)}`, 'Price']} />
-                    <Line type="monotone" dataKey="price" stroke="var(--primary-color)" strokeWidth={2.5} dot={false} />
-                  </RechartsLineChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-          </Card>
-        </Col>
       </Row>
 
-      {/* Affected Contracts Table */}
-      <Card title="Recalculation Preview of Active Contracts" styles={{ body: { padding: 0 } }}>
+      {/* Transaction Receipt */}
+      {lastUpdateTx && (
+        <Card title="Transaction Receipt" style={{ border: '1px solid var(--border-color)', backgroundColor: '#FFFFFF' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px' }}>
+            <div>
+              <Text type="secondary" style={{ fontSize: '11px', display: 'block', textTransform: 'uppercase' }}>Method Called</Text>
+              <Text strong style={{ fontFamily: 'var(--font-mono)' }}>set_price_for_assets</Text>
+            </div>
+            <div>
+              <Text type="secondary" style={{ fontSize: '11px', display: 'block', textTransform: 'uppercase' }}>Transaction Hash</Text>
+              <Text style={{ fontFamily: 'var(--font-mono)' }} copyable>
+                {lastUpdateTx.txHash}
+              </Text>
+            </div>
+            <div>
+              <Text type="secondary" style={{ fontSize: '11px', display: 'block', textTransform: 'uppercase' }}>Ledger</Text>
+              <Text strong>{lastUpdateTx.ledger ?? 'Confirmed'}</Text>
+            </div>
+            <div>
+              <Text type="secondary" style={{ fontSize: '11px', display: 'block', textTransform: 'uppercase' }}>Explorer</Text>
+              <div>
+                <a href={lastUpdateTx.explorerUrl} target="_blank" rel="noreferrer" style={{ fontWeight: 600 }}>
+                  View on Stellar Expert &rarr;
+                </a>
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {/* Affected Loans Table */}
+      <Card title="Affected Loans Preview" style={{ border: '1px solid var(--border-color)', backgroundColor: '#FFFFFF' }} styles={{ body: { padding: 0 } }}>
         {activeLoans.length === 0 ? (
           <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
             No active loan contracts currently locked on-chain.

@@ -50,6 +50,7 @@ export interface WalletState {
 
 export interface LoanOffer {
   id: string;
+  contractOfferId?: bigint;
   lender: string;
   amount: number;
   asset: string;
@@ -69,6 +70,7 @@ export interface LoanOffer {
 
 export interface Loan {
   id: string;
+  contractLoanId?: bigint;
   offerId: string;
   borrower: string;
   lender: string;
@@ -111,4 +113,9 @@ export interface Transaction {
   loanId?: string;
   offerId?: string;
   txHash?: string;
+  explorerUrl?: string;
+  contract?: string;
+  ledger?: number;
+  status?: 'SUCCESS';
+  blockTimestamp?: string;
 }

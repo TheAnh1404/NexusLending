@@ -19,4 +19,3 @@ export const env = {
   oracleContractId: process.env.ORACLE_CONTRACT_ID ?? '',
   vaultContractId: process.env.VAULT_CONTRACT_ID ?? ''
 };
-

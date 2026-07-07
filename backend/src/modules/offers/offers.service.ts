@@ -4,7 +4,7 @@ import { prisma } from '../../prisma/client';
 import { ApiError } from '../../utils/apiError';
 import { calculateRepaymentAmount } from '../../utils/finance';
 import { buildRiskPatch } from '../loans/loans.service';
-import { sorobanService } from '../soroban/soroban.service';
+import { createLedgerTransaction, requireConfirmedReceipt } from '../transactions/chainReceipt';
 import type {
   AcceptOfferInput,
   CreateOfferInput,
@@ -14,41 +14,10 @@ import type {
 
 const SAFE_HEALTH_FACTOR_BPS = 14_000;
 
-const createMockTxHash = (type: string): string =>
-  `mock_${type.toLowerCase()}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-
 const decimal = (value: Prisma.Decimal.Value): Prisma.Decimal => new Prisma.Decimal(value);
 
 const contractOfferRef = (offer: { contractOfferId: bigint | number | null; id: string }) =>
   offer.contractOfferId?.toString() ?? offer.id;
-
-const ledgerTransaction = (
-  type: TransactionType,
-  wallet: string,
-  input: {
-    offerId?: string;
-    loanId?: string;
-    asset?: string;
-    amount?: Prisma.Decimal.Value;
-    details: string;
-    txHash?: string;
-    explorerUrl?: string;
-    metadata?: Prisma.InputJsonValue;
-  }
-): Prisma.TransactionUncheckedCreateInput => ({
-  txHash: input.txHash ?? createMockTxHash(type),
-  explorerUrl: input.explorerUrl,
-  type,
-  wallet,
-  offerId: input.offerId,
-  loanId: input.loanId,
-  asset: input.asset,
-  amount: input.amount === undefined ? undefined : decimal(input.amount),
-  metadata: {
-    details: input.details,
-    ...(input.metadata && typeof input.metadata === 'object' ? input.metadata : {})
-  }
-});
 
 const requireOfferOwner = (
   offer: { lenderWallet: string },
@@ -100,16 +69,13 @@ export const offersService = {
 
   async create(input: CreateOfferInput) {
     validateCreateOffer(input);
+    const receipt = requireConfirmedReceipt(input);
 
     const data: Prisma.LoanOfferUncheckedCreateInput = {
-      ...input,
-      loanAmount: decimal(input.loanAmount),
-      status: input.status ?? 'Draft'
-    };
-    const sorobanTx = sorobanService.createOfferTx({
-      lender: input.lenderWallet,
+      contractOfferId: input.contractOfferId,
+      lenderWallet: input.lenderWallet,
       loanAsset: input.loanAsset,
-      loanAmount: input.loanAmount,
+      loanAmount: decimal(input.loanAmount),
       fixedAprBps: input.fixedAprBps,
       durationDays: input.durationDays,
       collateralAsset: input.collateralAsset,
@@ -117,29 +83,30 @@ export const offersService = {
       liquidationThresholdBps: input.liquidationThresholdBps,
       liquidationBonusBps: input.liquidationBonusBps,
       gracePeriodDays: input.gracePeriodDays,
-      minHealthFactorBps: input.minHealthFactorBps
-    });
+      minHealthFactorBps: input.minHealthFactorBps,
+      status: input.status ?? 'Draft',
+      description: input.description,
+      txHash: receipt.txHash,
+      explorerUrl: receipt.explorerUrl,
+      ledger: receipt.ledger,
+      blockTimestamp: receipt.blockTimestamp
+    };
 
     return prisma.$transaction(async (tx) => {
       const offer = await tx.loanOffer.create({
-        data: {
-          ...data,
-          txHash: input.txHash ?? sorobanTx.txHash,
-          explorerUrl: input.explorerUrl ?? sorobanTx.explorerUrl
-        },
+        data,
         include: { loans: true }
       });
       await tx.transaction.create({
-        data: ledgerTransaction('CREATE_OFFER', offer.lenderWallet, {
+        data: createLedgerTransaction('CREATE_OFFER', offer.lenderWallet, {
           offerId: offer.id,
           asset: offer.loanAsset,
           amount: offer.loanAmount,
-          txHash: offer.txHash ?? undefined,
-          explorerUrl: offer.explorerUrl ?? undefined,
+          receipt,
           details: `Created Draft offer ${offer.id} for ${offer.loanAmount.toString()} ${offer.loanAsset}.`,
           metadata: {
-            contractFunction: sorobanTx.functionName,
-            mocked: sorobanTx.mocked
+            contractFunction: 'create_offer',
+            contractOfferId: offer.contractOfferId?.toString()
           }
         })
       });
@@ -150,32 +117,33 @@ export const offersService = {
   async fund(id: string, input?: OfferActionWalletInput) {
     const offer = await this.getById(id);
     requireOfferOwner(offer, input);
+    const receipt = requireConfirmedReceipt(input);
     if (offer.status !== 'Draft') {
       throw new ApiError(400, 'Only Draft offers can be funded');
     }
 
-    const sorobanTx = sorobanService.fundOfferTx(contractOfferRef(offer));
     return prisma.$transaction(async (tx) => {
       const updated = await tx.loanOffer.update({
         where: { id },
         data: {
           status: 'Funding',
-          txHash: sorobanTx.txHash,
-          explorerUrl: sorobanTx.explorerUrl
+          txHash: receipt.txHash,
+          explorerUrl: receipt.explorerUrl,
+          ledger: receipt.ledger,
+          blockTimestamp: receipt.blockTimestamp
         },
         include: { loans: true }
       });
       await tx.transaction.create({
-        data: ledgerTransaction('FUND_OFFER', updated.lenderWallet, {
+        data: createLedgerTransaction('FUND_OFFER', updated.lenderWallet, {
           offerId: id,
           asset: updated.loanAsset,
           amount: updated.loanAmount,
-          txHash: sorobanTx.txHash,
-          explorerUrl: sorobanTx.explorerUrl,
+          receipt,
           details: `Funded offer ${id}; lender funds are locked in Vault/Escrow.`,
           metadata: {
-            contractFunction: sorobanTx.functionName,
-            mocked: sorobanTx.mocked
+            contractFunction: 'fund_offer',
+            contractOfferId: contractOfferRef(offer)
           }
         })
       });
@@ -186,32 +154,33 @@ export const offersService = {
   async activate(id: string, input?: OfferActionWalletInput) {
     const offer = await this.getById(id);
     requireOfferOwner(offer, input);
+    const receipt = requireConfirmedReceipt(input);
     if (offer.status !== 'Funding') {
       throw new ApiError(400, 'Only Funding offers can be activated');
     }
 
-    const sorobanTx = sorobanService.activateOfferTx(contractOfferRef(offer));
     return prisma.$transaction(async (tx) => {
       const updated = await tx.loanOffer.update({
         where: { id },
         data: {
           status: 'Active',
-          txHash: sorobanTx.txHash,
-          explorerUrl: sorobanTx.explorerUrl
+          txHash: receipt.txHash,
+          explorerUrl: receipt.explorerUrl,
+          ledger: receipt.ledger,
+          blockTimestamp: receipt.blockTimestamp
         },
         include: { loans: true }
       });
       await tx.transaction.create({
-        data: ledgerTransaction('ACTIVATE_OFFER', updated.lenderWallet, {
+        data: createLedgerTransaction('ACTIVATE_OFFER', updated.lenderWallet, {
           offerId: id,
           asset: updated.loanAsset,
           amount: updated.loanAmount,
-          txHash: sorobanTx.txHash,
-          explorerUrl: sorobanTx.explorerUrl,
+          receipt,
           details: `Activated offer ${id}; it is now visible in the marketplace.`,
           metadata: {
-            contractFunction: sorobanTx.functionName,
-            mocked: sorobanTx.mocked
+            contractFunction: 'activate_offer',
+            contractOfferId: contractOfferRef(offer)
           }
         })
       });
@@ -222,19 +191,27 @@ export const offersService = {
   async cancel(id: string, input?: OfferActionWalletInput) {
     const offer = await this.getById(id);
     requireOfferOwner(offer, input);
+    const receipt = requireConfirmedReceipt(input);
     ensureCancelable(offer.status);
 
     return prisma.$transaction(async (tx) => {
       const updated = await tx.loanOffer.update({
         where: { id },
-        data: { status: 'Cancelled' },
+        data: {
+          status: 'Cancelled',
+          txHash: receipt.txHash,
+          explorerUrl: receipt.explorerUrl,
+          ledger: receipt.ledger,
+          blockTimestamp: receipt.blockTimestamp
+        },
         include: { loans: true }
       });
       await tx.transaction.create({
-        data: ledgerTransaction('CANCEL_OFFER', updated.lenderWallet, {
+        data: createLedgerTransaction('CANCEL_OFFER', updated.lenderWallet, {
           offerId: updated.id,
           asset: updated.loanAsset,
           amount: updated.loanAmount,
+          receipt,
           details: `Cancelled offer ${updated.id}; locked lender funds are released by Vault/Escrow.`
         })
       });
@@ -242,21 +219,29 @@ export const offersService = {
     });
   },
 
-  async expire(id: string) {
+  async expire(id: string, input: OfferActionWalletInput) {
     const offer = await this.getById(id);
+    const receipt = requireConfirmedReceipt(input);
     ensureCancelable(offer.status);
 
     return prisma.$transaction(async (tx) => {
       const updated = await tx.loanOffer.update({
         where: { id },
-        data: { status: 'Expired' },
+        data: {
+          status: 'Expired',
+          txHash: receipt.txHash,
+          explorerUrl: receipt.explorerUrl,
+          ledger: receipt.ledger,
+          blockTimestamp: receipt.blockTimestamp
+        },
         include: { loans: true }
       });
       await tx.transaction.create({
-        data: ledgerTransaction('EXPIRE_OFFER', updated.lenderWallet, {
+        data: createLedgerTransaction('EXPIRE_OFFER', updated.lenderWallet, {
           offerId: updated.id,
           asset: updated.loanAsset,
           amount: updated.loanAmount,
+          receipt,
           details: `Expired offer ${updated.id}; locked lender funds are released by Vault/Escrow.`
         })
       });
@@ -266,6 +251,7 @@ export const offersService = {
 
   async accept(id: string, input: AcceptOfferInput) {
     const offer = await this.getById(id);
+    const receipt = requireConfirmedReceipt(input);
     if (offer.status !== 'Active') {
       throw new ApiError(400, 'Borrowers can only accept Active offers');
     }
@@ -288,11 +274,6 @@ export const offersService = {
       liquidationThresholdBps: offer.liquidationThresholdBps
     });
     const { status: _ignoredStatus, ...riskMetrics } = riskPatch;
-    const sorobanTx = sorobanService.acceptOfferTx({
-      offerId: contractOfferRef(offer),
-      borrower: input.borrowerWallet,
-      collateralAmount: input.collateralAmount
-    });
 
     return prisma.$transaction(async (tx) => {
       const loan = await tx.loan.create({
@@ -314,8 +295,10 @@ export const offersService = {
           minHealthFactorBps: offer.minHealthFactorBps,
           gracePeriodDays: offer.gracePeriodDays,
           status: 'PendingCollateral',
-          txHash: sorobanTx.txHash,
-          explorerUrl: sorobanTx.explorerUrl,
+          txHash: receipt.txHash,
+          explorerUrl: receipt.explorerUrl,
+          ledger: receipt.ledger,
+          blockTimestamp: receipt.blockTimestamp,
           ...riskMetrics
         },
         include: { offer: true }
@@ -325,23 +308,25 @@ export const offersService = {
         where: { id: offer.id },
         data: {
           status: 'Matched',
-          txHash: sorobanTx.txHash,
-          explorerUrl: sorobanTx.explorerUrl
+          txHash: receipt.txHash,
+          explorerUrl: receipt.explorerUrl,
+          ledger: receipt.ledger,
+          blockTimestamp: receipt.blockTimestamp
         }
       });
 
       await tx.transaction.create({
-        data: ledgerTransaction('ACCEPT_OFFER', input.borrowerWallet, {
+        data: createLedgerTransaction('ACCEPT_OFFER', input.borrowerWallet, {
           offerId: offer.id,
           loanId: loan.id,
           asset: offer.collateralAsset,
           amount: collateralAmount,
-          txHash: sorobanTx.txHash,
-          explorerUrl: sorobanTx.explorerUrl,
+          receipt,
           details: `Accepted offer ${offer.id}; loan ${loan.id} is PendingCollateral until borrower activates it.`,
           metadata: {
-            contractFunction: sorobanTx.functionName,
-            mocked: sorobanTx.mocked
+            contractFunction: 'accept_offer',
+            contractOfferId: contractOfferRef(offer),
+            contractLoanId: loan.contractLoanId?.toString()
           }
         })
       });
@@ -352,22 +337,12 @@ export const offersService = {
 
   async updateStatus(id: string, input: UpdateOfferStatusInput) {
     if (input.status === 'Cancelled') {
-      return this.cancel(id);
+      return this.cancel(id, input);
     }
     if (input.status === 'Expired') {
-      return this.expire(id);
+      return this.expire(id, input);
     }
 
-    const offer = await this.getById(id);
-    if (offer.status === 'Matched') {
-      throw new ApiError(400, 'Matched offer status is terminal');
-    }
-
-    return prisma.loanOffer.update({
-      where: { id },
-      data: input,
-      include: { loans: true }
-    });
+    throw new ApiError(400, 'Direct offer status writes are disabled; use a confirmed blockchain action endpoint');
   }
 };
-

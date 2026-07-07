@@ -1,9 +1,10 @@
 import { z } from 'zod';
+import { confirmedChainReceiptSchema } from '../transactions/transactions.schemas';
 
 const decimalInput = z.union([z.string().min(1), z.number()]).transform(String);
 
 export const createOfferSchema = z.object({
-  contractOfferId: z.coerce.bigint().optional(),
+  contractOfferId: z.coerce.bigint(),
   lenderWallet: z.string().min(1),
   loanAsset: z.string().min(1),
   loanAmount: decimalInput,
@@ -19,25 +20,23 @@ export const createOfferSchema = z.object({
     .enum(['Draft', 'Funding', 'Active', 'Matched', 'Cancelled', 'Expired'])
     .default('Draft'),
   description: z.string().optional(),
-  txHash: z.string().optional(),
-  explorerUrl: z.string().url().optional()
-});
+}).merge(confirmedChainReceiptSchema);
 
 export const updateOfferStatusSchema = z.object({
   status: z.enum(['Draft', 'Funding', 'Active', 'Matched', 'Cancelled', 'Expired']),
-  txHash: z.string().optional(),
-  explorerUrl: z.string().url().optional()
-});
+  wallet: z.string().min(1)
+}).merge(confirmedChainReceiptSchema);
 
 export const offerActionWalletSchema = z.object({
-  wallet: z.string().min(1).optional()
-});
+  wallet: z.string().min(1)
+}).merge(confirmedChainReceiptSchema);
 
 export const acceptOfferSchema = z.object({
   borrowerWallet: z.string().min(1),
   collateralAmount: decimalInput,
-  contractLoanId: z.coerce.bigint().optional()
-});
+  contractLoanId: z.coerce.bigint()
+}).merge(confirmedChainReceiptSchema);
+
 
 export type CreateOfferInput = z.infer<typeof createOfferSchema>;
 export type UpdateOfferStatusInput = z.infer<typeof updateOfferStatusSchema>;

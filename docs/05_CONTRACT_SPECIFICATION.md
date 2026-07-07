@@ -180,11 +180,11 @@ pub fn initialize(env: Env, admin: Address, oracle_contract: Address, vault_cont
 
 ---
 
-### 3.2 `create_loan_from_offer`
+### 3.2 `create_pending_loan_from_offer`
 
 **Signature:**
 ```rust
-pub fn create_loan_from_offer(env: Env, offer: LoanOffer, borrower: Address, collateral_amount: i128) -> u64
+pub fn create_pending_loan_from_offer(env: Env, offer: LoanOffer, borrower: Address, collateral_amount: i128) -> u64
 ```
 
 | Parameter | Type | Description | Validation |
@@ -197,16 +197,43 @@ pub fn create_loan_from_offer(env: Env, offer: LoanOffer, borrower: Address, col
 |----------|-------|
 | **Returns** | `u64` — assigned `loan_id` |
 | **Auth** | Called by Marketplace contract (no direct user auth here) |
-| **Errors** | `"amount must be positive"`, `"loan amount must be positive"`, `"collateral below max ltv"`, `"health factor below minimum"`, `"oracle price must be positive"` |
-| **Events** | `("loan_new", loan_id) → outstanding_debt` |
-| **Cross-Contract** | `Oracle.get_price_for_assets()`, `Vault.lock_collateral()`, `Vault.transfer_loan_asset_to_borrower()` |
+| **Errors** | `"amount must be positive"`, `"loan amount must be positive"` |
+| **Events** | `("loan_created", loan_id) → outstanding_debt` |
+| **Cross-Contract** | None |
 
 **Computation:**
 1. `outstanding_debt = principal + (principal × apr_bps × duration_days) / (365 × 10,000)`
-2. `due_time = start_time + (duration_days × 86,400)`
-3. Calculate LTV → reject if > `max_ltv_bps`
-4. Calculate HF → reject if < `min_health_factor_bps`
-5. Set initial status via `status_for_hf()`
+2. Sets `start_time = 0`, `due_time = 0`
+3. Sets status to `LoanStatus::PendingCollateral`
+
+---
+
+### 3.3 `activate_loan`
+
+**Signature:**
+```rust
+pub fn activate_loan(env: Env, loan_id: u64)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `loan_id` | `u64` | ID of the pending loan to activate |
+
+| Property | Value |
+|----------|-------|
+| **Returns** | `()` |
+| **Auth** | `loan.borrower.require_auth()` |
+| **Errors** | `"loan not found"`, `"loan is not pending collateral"`, `"collateral below max ltv"`, `"health factor below minimum"` |
+| **Events** | `("loan_activated", loan_id) → outstanding_debt` |
+| **Cross-Contract** | `Vault.lock_collateral()`, `Vault.transfer_loan_asset_to_borrower()`, `Oracle.get_price_for_assets()` |
+
+**Computation:**
+1. Verifies borrower signature (`borrower.require_auth()`).
+2. Calculates current LTV and HF. Rejects if LTV > `max_ltv_bps` or HF < `min_health_factor_bps` (or 14,000 BPS default).
+3. Locks the collateral in the Vault via `Vault.lock_collateral()`.
+4. Transfers the loan asset to the borrower via `Vault.transfer_loan_asset_to_borrower()`.
+5. Sets `start_time` to ledger timestamp and calculates `due_time`.
+6. Sets status to `status_for_hf()`.
 
 ---
 

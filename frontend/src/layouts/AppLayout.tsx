@@ -8,11 +8,11 @@ import {
   Button,
   Badge,
   Popover,
-  List,
   Tag,
   Typography,
   Grid,
   Alert,
+  Breadcrumb,
 } from 'antd';
 import {
   LayoutDashboard,
@@ -28,6 +28,8 @@ import {
   Bell,
   Layers,
   Activity,
+  Heart,
+  ChevronRight,
 } from 'lucide-react';
 
 const { Header, Content, Sider } = AntLayout;
@@ -35,7 +37,7 @@ const { Text } = Typography;
 const { useBreakpoint } = Grid;
 
 export const AppLayout: React.FC = () => {
-  const { wallet, disconnectWallet, activities } = useAppContext();
+  const { wallet, disconnectWallet, activities, loans, connectWallet } = useAppContext();
   const {
     isConnected,
     isLoading,
@@ -51,6 +53,13 @@ export const AppLayout: React.FC = () => {
   const isDesktop = !!screens.lg;
   const [collapsed, setCollapsed] = useState(false);
 
+  // Sync WalletContext (Freighter connection) with LendingContext (lending state)
+  React.useEffect(() => {
+    if (isConnected && publicKey && !wallet.connected) {
+      connectWallet(publicKey);
+    }
+  }, [isConnected, publicKey, wallet.connected, connectWallet]);
+
   // If wallet is not connected, redirect to /connect
   React.useEffect(() => {
     if (!isLoading && !isConnected) {
@@ -61,48 +70,48 @@ export const AppLayout: React.FC = () => {
   const menuItems = [
     {
       key: '/app',
-      icon: <LayoutDashboard size={18} />,
+      icon: <LayoutDashboard size={16} />,
       label: 'Dashboard',
     },
     {
       key: '/app/marketplace',
-      icon: <ShoppingBag size={18} />,
+      icon: <ShoppingBag size={16} />,
       label: 'Marketplace',
     },
     {
       key: '/app/create-loan',
-      icon: <PlusCircle size={18} />,
+      icon: <PlusCircle size={16} />,
       label: 'Create Loan Offer',
     },
     {
       key: '/app/my-loans',
-      icon: <FileText size={18} />,
+      icon: <FileText size={16} />,
       label: 'My Loans',
     },
     {
       key: '/app/borrower',
-      icon: <UserCheck size={18} />,
-      label: 'Borrower Dashboard',
+      icon: <UserCheck size={16} />,
+      label: 'Borrower',
     },
     {
       key: '/app/lender',
-      icon: <Percent size={18} />,
-      label: 'Lender Dashboard',
+      icon: <Percent size={16} />,
+      label: 'Lender Portfolio',
     },
     {
       key: '/app/liquidation',
-      icon: <Flame size={18} />,
+      icon: <Flame size={16} />,
       label: 'Liquidation Center',
     },
     {
       key: '/app/oracle',
-      icon: <LineChart size={18} />,
+      icon: <LineChart size={16} />,
       label: 'Oracle Monitor',
     },
     {
       key: '/app/settings',
-      icon: <SettingsIcon size={18} />,
-      label: 'Settings',
+      icon: <SettingsIcon size={16} />,
+      label: 'System Status',
     },
   ];
 
@@ -122,31 +131,66 @@ export const AppLayout: React.FC = () => {
     navigate('/connect');
   };
 
+  // Dynamic breadcrumb labels
+  const pathSnippets = location.pathname.split('/').filter((i) => i);
+  const breadcrumbItems = pathSnippets.map((snippet, index) => {
+    const url = `/${pathSnippets.slice(0, index + 1).join('/')}`;
+    const label = snippet.charAt(0).toUpperCase() + snippet.slice(1).replace(/-/g, ' ');
+    return {
+      key: url,
+      title: label === 'App' ? 'Nexus' : label,
+    };
+  });
+
+  // Calculate user's aggregate Health Factor
+  const activeUserLoans = loans.filter(
+    (l) => l.borrower === wallet.address && ['Active', 'Warning', 'LiquidationPlanning'].includes(l.status)
+  );
+  const hasLoans = activeUserLoans.length > 0;
+  const avgHF = hasLoans
+    ? activeUserLoans.reduce((sum, l) => sum + l.healthFactor, 0) / activeUserLoans.length
+    : null;
+
+  const hfStatusColor = !avgHF
+    ? 'default'
+    : avgHF >= 1.4
+    ? 'success'
+    : avgHF >= 1.2
+    ? 'warning'
+    : 'error';
+
+  const hfStatusText = !avgHF
+    ? 'No Active Loans'
+    : avgHF >= 1.4
+    ? 'Healthy'
+    : avgHF >= 1.2
+    ? 'Warning'
+    : 'Liquidation Risk';
+
   // Render recent 5 logs as notifications
   const notificationContent = (
     <div style={{ width: '320px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', borderBottom: '1px solid var(--border-color)', paddingBottom: '8px' }}>
-        <Text strong>Recent Notifications</Text>
-        <Badge status="processing" text="Live" />
+        <Text strong>System Activities</Text>
+        <Badge status="processing" text="Live Syncing" />
       </div>
       {activities.length === 0 ? (
         <div style={{ padding: '16px 0', textAlign: 'center', color: 'var(--text-muted)' }}>
-          No new alerts
+          No recent events.
         </div>
       ) : (
-        <List
-          dataSource={activities.slice(0, 5)}
-          renderItem={(item) => (
-            <List.Item style={{ padding: '8px 0', display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {activities.slice(0, 5).map((item, idx) => (
+            <div key={idx} style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', paddingBottom: '8px', borderBottom: idx < 4 ? '1px solid var(--border-color)' : 'none' }}>
               <div style={{ marginTop: '3px' }}>
                 <Activity size={14} style={{ color: 'var(--primary-color)' }} />
               </div>
               <div style={{ flex: 1 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Text strong style={{ fontSize: '12px' }}>
+                  <Text strong style={{ fontSize: '11px' }}>
                     {item.type.replace(/_/g, ' ')}
                   </Text>
-                  <Text type="secondary" style={{ fontSize: '10px' }}>
+                  <Text type="secondary" style={{ fontSize: '9px' }}>
                     {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </Text>
                 </div>
@@ -154,12 +198,16 @@ export const AppLayout: React.FC = () => {
                   {item.details}
                 </div>
               </div>
-            </List.Item>
-          )}
-        />
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
+
+  // Calculate active loans where user is lender or borrower
+  const lenderLoansCount = loans.filter((l) => l.lender === wallet.address && ['Active', 'Warning', 'PendingCollateral'].includes(l.status)).length;
+  const borrowerLoansCount = loans.filter((l) => l.borrower === wallet.address && ['Active', 'Warning', 'PendingCollateral'].includes(l.status)).length;
 
   return (
     <AntLayout style={{ minHeight: '100vh' }}>
@@ -179,90 +227,101 @@ export const AppLayout: React.FC = () => {
           top: 0,
           bottom: 0,
           zIndex: 1001,
+          backgroundColor: '#FFFFFF',
         }}
       >
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '12px',
-          padding: '24px 20px',
-          height: '70px',
-          borderBottom: '1px solid var(--border-color)'
-        }}>
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+          {/* Logo Section */}
           <div style={{
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
-          width: '32px',
-          height: '32px',
-            background: 'var(--primary-color)',
-            borderRadius: '6px',
-            color: 'white',
+            gap: '12px',
+            padding: '24px 20px',
+            height: '70px',
+            borderBottom: '1px solid var(--border-color)',
             flexShrink: 0
           }}>
-            <Layers size={16} />
-          </div>
-          {!collapsed && (
-            <span style={{
-              fontFamily: 'var(--font-heading)',
-              fontSize: '18px',
-              fontWeight: 700,
-              color: 'var(--text-main)',
-              letterSpacing: '-0.02em',
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '34px',
+              height: '34px',
+              background: 'linear-gradient(135deg, var(--primary-color) 0%, #6366F1 100%)',
+              borderRadius: '8px',
+              color: 'white',
+              flexShrink: 0
             }}>
-              Nexus Protocol
-            </span>
+              <Layers size={18} />
+            </div>
+            {!collapsed && (
+              <span style={{
+                fontFamily: 'var(--font-heading)',
+                fontSize: '18px',
+                fontWeight: 700,
+                color: 'var(--text-main)',
+                letterSpacing: '-0.03em',
+              }}>
+                Nexus Protocol
+              </span>
+            )}
+          </div>
+ 
+          {/* Menu - scrollable */}
+          <div style={{ flex: 1, overflowY: 'auto', paddingBottom: '24px' }}>
+            <Menu
+              mode="inline"
+              selectedKeys={[selectedMenuKey]}
+              items={menuItems}
+              onClick={handleMenuClick}
+              style={{ borderRight: 0 }}
+            />
+          </div>
+ 
+          {/* Wallet Overview at bottom */}
+          {!collapsed && (
+            <div style={{
+              padding: '16px',
+              margin: '16px',
+              background: 'var(--border-light)',
+              border: '1px solid var(--border-color)',
+              borderRadius: 'var(--radius-md)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '10px',
+              flexShrink: 0
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '0.05em' }}>WALLET OVERVIEW</span>
+                <Tag color="blue" style={{ border: 'none', margin: 0, fontSize: '9px', fontWeight: 700 }}>
+                  Multi-role
+                </Tag>
+              </div>
+              <div style={{
+                fontSize: '12px',
+                fontWeight: 600,
+                fontFamily: 'var(--font-mono)',
+                wordBreak: 'break-all',
+                color: 'var(--text-main)'
+              }}>
+                {shortAddress || 'Not connected'}
+              </div>
+              <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '10px', marginTop: '2px', fontSize: '11px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>USDC Balance:</span>
+                  <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>${wallet.balanceUSDC.toLocaleString()}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>XLM Balance:</span>
+                  <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>{wallet.balanceXLM.toLocaleString()} XLM</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed var(--border-color)', paddingTop: '4px', marginTop: '4px', fontSize: '10px' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Lending: {lenderLoansCount} | Borrowing: {borrowerLoansCount}</span>
+                </div>
+              </div>
+            </div>
           )}
         </div>
-
-        <Menu
-          mode="inline"
-          selectedKeys={[selectedMenuKey]}
-          items={menuItems}
-          onClick={handleMenuClick}
-          style={{ marginTop: '16px' }}
-        />
-
-        {!collapsed && (
-          <div style={{
-            position: 'absolute',
-            bottom: '24px',
-            left: '20px',
-            right: '20px',
-            padding: '16px',
-            background: 'var(--bg-color)',
-            border: '1px solid var(--border-color)',
-            borderRadius: 'var(--radius-lg)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '8px'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>DEMO BALANCES</span>
-              <Tag color={wallet.role === 'LENDER' ? 'green' : wallet.role === 'BORROWER' ? 'blue' : 'volcano'} style={{ border: 'none', margin: 0, fontSize: '10px' }}>
-                {wallet.role ?? 'ROLE'}
-              </Tag>
-            </div>
-            <div style={{
-              fontSize: '13px',
-              fontWeight: 600,
-              fontFamily: 'var(--font-mono)',
-              wordBreak: 'break-all'
-            }}>
-              {shortAddress || 'Not connected'}
-            </div>
-            <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '8px', marginTop: '4px', fontSize: '12px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-muted)' }}>USDC:</span>
-                <span style={{ fontWeight: 500 }}>${wallet.balanceUSDC.toLocaleString()}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-muted)' }}>XLM:</span>
-                <span style={{ fontWeight: 500 }}>{wallet.balanceXLM.toLocaleString()}</span>
-              </div>
-            </div>
-          </div>
-        )}
       </Sider>
 
       {/* Main Layout Area */}
@@ -282,66 +341,62 @@ export const AppLayout: React.FC = () => {
             justifyContent: 'space-between',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <span className="nexus-logo-mark">
-                <Layers size={17} />
-              </span>
-              <div>
-                <div style={{ fontFamily: 'var(--font-heading)', fontWeight: 700, lineHeight: 1.1 }}>
-                  Nexus Lending
-                </div>
-                <div className="hide-mobile" style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.1 }}>
-                  P2P collateral markets
-                </div>
-              </div>
-            </div>
-            <Tag color={isTestnet ? 'geekblue' : 'warning'} style={{ display: 'flex', alignItems: 'center', gap: '4px', border: 'none', padding: '4px 12px' }}>
-              <span style={{ display: 'inline-block', width: '6px', height: '6px', backgroundColor: isTestnet ? '#2F80ED' : '#F2994A', borderRadius: '50%', marginRight: '4px' }}></span>
-              {isTestnet ? 'Stellar Testnet' : network ?? 'Wrong Network'}
+          {/* Breadcrumb + Path */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+            <Breadcrumb
+              items={breadcrumbItems}
+              separator={<ChevronRight size={12} style={{ color: 'var(--text-muted)', verticalAlign: 'middle' }} />}
+              style={{ fontSize: '13px', fontWeight: 500 }}
+            />
+            
+            <Tag color={isTestnet ? 'geekblue' : 'warning'} style={{ display: 'inline-flex', alignItems: 'center', border: 'none', padding: '3px 10px', fontSize: '11px', margin: 0 }}>
+              <span style={{ display: 'inline-block', width: '5px', height: '5px', backgroundColor: isTestnet ? '#4F46E5' : '#F59E0B', borderRadius: '50%', marginRight: '6px' }}></span>
+              {isTestnet ? 'Testnet' : network ?? 'Unknown Network'}
             </Tag>
-            <div className="hide-mobile" style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-              Contract Mode: <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>Soroban P2P Multi-collateral v1</span>
-            </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            {/* Live Health Factor Summary */}
+            {hasLoans && avgHF && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '6px 12px',
+                background: 'var(--border-light)',
+                border: '1px solid var(--border-color)',
+                borderRadius: 'var(--radius-md)'
+              }} className="hide-mobile">
+                <Heart size={14} className="pulse-animation" style={{ color: avgHF >= 1.4 ? 'var(--success-color)' : 'var(--warning-color)' }} />
+                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Avg Health:</span>
+                <span style={{ fontSize: '12px', fontWeight: 700, color: avgHF >= 1.4 ? 'var(--success-color)' : avgHF >= 1.2 ? 'var(--warning-color)' : 'var(--danger-color)' }}>
+                  {avgHF.toFixed(2)}
+                </span>
+                <Tag color={hfStatusColor} style={{ border: 'none', margin: 0, fontSize: '9px', padding: '1px 6px' }}>
+                  {hfStatusText}
+                </Tag>
+              </div>
+            )}
+
             {/* Notification Bell */}
-            <Popover content={notificationContent} title="Alerts & Notifications" trigger="click" placement="bottomRight">
+            <Popover content={notificationContent} title="System Alerts" trigger="click" placement="bottomRight">
               <Button
                 type="text"
                 shape="circle"
                 icon={
-                  <Badge count={activities.length > 0 ? Math.min(activities.length, 9) : 0} size="small">
-                    <Bell size={20} style={{ color: 'var(--text-muted)' }} />
+                  <Badge count={activities.length} size="small" offset={[-2, 2]}>
+                    <Bell size={18} style={{ color: 'var(--text-muted)' }} />
                   </Badge>
                 }
               />
             </Popover>
 
-            {/* User Wallet Tag */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '6px 12px',
-              background: 'var(--bg-color)',
-              border: '1px solid var(--border-color)',
-              borderRadius: 'var(--radius-md)'
-            }} className="hide-mobile">
-              <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#27AE60' }}></div>
-              <span style={{ fontSize: '13px', fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
-                {shortAddress || 'Not connected'}
-              </span>
-            </div>
-
             {/* Logout Button */}
             <Button
-              type="text"
-              danger
-              icon={<LogOut size={16} />}
+              type="default"
+              icon={<LogOut size={14} />}
               onClick={handleLogout}
-              style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+              style={{ fontSize: '13px' }}
             >
               Disconnect
             </Button>
@@ -354,12 +409,14 @@ export const AppLayout: React.FC = () => {
             <Alert
               type="warning"
               showIcon
-              message="Freighter is not on Stellar Testnet"
-              description="Switch Freighter to Stellar Testnet before signing real Nexus transactions."
+              message="Freighter connection issue"
+              description="Freighter must be configured for Stellar Testnet to interact with contracts."
               style={{ marginBottom: 24 }}
             />
           )}
-          <Outlet />
+          <div className="animate-fade-in">
+            <Outlet />
+          </div>
         </Content>
       </AntLayout>
     </AntLayout>

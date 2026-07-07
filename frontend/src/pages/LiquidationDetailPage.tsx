@@ -5,6 +5,7 @@ import { calculateHealthFactor, formatCurrency, isLiquidatable } from '../utils/
 import { HealthFactorGauge } from '../components/common/HealthFactorGauge';
 import { EmptyState } from '../components/common/CommonStates';
 import { ConfirmActionModal } from '../components/common/ConfirmActionModal';
+import { TransactionReceiptCard } from '../components/common/TransactionReceiptCard';
 import {
   Card,
   Row,
@@ -22,7 +23,7 @@ const { Title, Paragraph, Text } = Typography;
 export const LiquidationDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { loans, oraclePrices, wallet, liquidateLoan } = useAppContext();
+  const { loans, oraclePrices, wallet, liquidateLoan, transactions } = useAppContext();
 
   const loan = loans.find((l) => l.id === id);
 
@@ -32,6 +33,10 @@ export const LiquidationDetailPage: React.FC = () => {
   const [confirmModalVisible, setConfirmModalVisible] = useState(false);
   const [repayAmount, setRepayAmount] = useState(0);
   const maxRepayAmount = loan ? Math.round(loan.outstandingDebt * 0.5 * 100) / 100 : 0;
+
+  // Stepper transaction status
+  const [txStatus, setTxStatus] = useState<'preparing' | 'signing' | 'submitting' | 'confirming' | 'confirmed' | 'failed' | null>(null);
+  const [errorDetails, setErrorDetails] = useState<string>('');
 
   useEffect(() => {
     if (loan) {
@@ -77,14 +82,36 @@ export const LiquidationDetailPage: React.FC = () => {
     if (!canExecute) {
       throw new Error('Liquidation validation failed');
     }
-    await liquidateLoan(loan.id, repayAmount);
-    setConfirmModalVisible(false);
-    navigate('/app/liquidation');
+    try {
+      setConfirmModalVisible(false);
+      setTxStatus('preparing');
+      
+      // Simulate/trigger ledger transaction pipeline stages
+      await new Promise(r => setTimeout(r, 600));
+      setTxStatus('signing');
+      
+      await new Promise(r => setTimeout(r, 800));
+      setTxStatus('submitting');
+      
+      await new Promise(r => setTimeout(r, 800));
+      setTxStatus('confirming');
+      
+      await liquidateLoan(loan.id, repayAmount);
+      setTxStatus('confirmed');
+    } catch (e: any) {
+      setErrorDetails(e.message || 'Soroban transaction failed.');
+      setTxStatus('failed');
+    }
   };
 
   const eligible = isLiquidatable(loan.healthFactor, loan.status);
   const hasValidRepayAmount = repayAmount > 0 && repayAmount <= maxRepayAmount + 0.01;
   const canExecute = eligible && hasValidRepayAmount && wallet.balanceUSDC >= repayAmount;
+
+  // Retrieve hash of latest liquidation tx for this loan
+  const matchedTx = transactions.find(
+    (tx) => tx.type === 'LIQUIDATE' && tx.loanId === loan.id
+  );
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
@@ -110,26 +137,43 @@ export const LiquidationDetailPage: React.FC = () => {
         {/* Left Side: Summary of Loan */}
         <Col xs={24} lg={15}>
           <Card title="Liquidation Review" styles={{ body: { padding: '28px' } }}>
-            <Descriptions bordered column={1} labelStyle={{ width: '220px', fontWeight: 600 }}>
-              <Descriptions.Item label="Contract ID">
-                <Text style={{ fontFamily: 'var(--font-mono)' }}>{loan.id}</Text>
-              </Descriptions.Item>
-              <Descriptions.Item label="Borrower Address">
-                <Text style={{ fontFamily: 'var(--font-mono)' }}>{loan.borrower}</Text>
-              </Descriptions.Item>
-              <Descriptions.Item label="Lender Address">
-                <Text style={{ fontFamily: 'var(--font-mono)' }}>{loan.lender}</Text>
-              </Descriptions.Item>
-              <Descriptions.Item label="Current Health Factor">
-                <Text strong style={{ color: 'var(--danger-color)' }}>{loan.healthFactor.toFixed(2)}</Text>
-              </Descriptions.Item>
-              <Descriptions.Item label="Total Outstanding Debt">
-                <Text strong>{formatCurrency(loan.outstandingDebt, 'USDC')}</Text>
-              </Descriptions.Item>
-              <Descriptions.Item label="Escrow Locked Collateral">
-                <Text strong>{loan.collateralAmount.toLocaleString()} XLM</Text>
-              </Descriptions.Item>
-            </Descriptions>
+            <Descriptions
+              bordered
+              column={1}
+              styles={{ label: { width: '220px', fontWeight: 600 } }}
+              items={[
+                {
+                  key: 'contractId',
+                  label: 'Contract ID',
+                  children: <Text style={{ fontFamily: 'var(--font-mono)' }}>{loan.id}</Text>,
+                },
+                {
+                  key: 'borrower',
+                  label: 'Borrower Address',
+                  children: <Text style={{ fontFamily: 'var(--font-mono)' }}>{loan.borrower}</Text>,
+                },
+                {
+                  key: 'lender',
+                  label: 'Lender Address',
+                  children: <Text style={{ fontFamily: 'var(--font-mono)' }}>{loan.lender}</Text>,
+                },
+                {
+                  key: 'healthFactor',
+                  label: 'Current Health Factor',
+                  children: <Text strong style={{ color: 'var(--danger-color)' }}>{loan.healthFactor.toFixed(2)}</Text>,
+                },
+                {
+                  key: 'outstandingDebt',
+                  label: 'Total Outstanding Debt',
+                  children: <Text strong>{formatCurrency(loan.outstandingDebt, 'USDC')}</Text>,
+                },
+                {
+                  key: 'collateral',
+                  label: 'Escrow Locked Collateral',
+                  children: <Text strong>{loan.collateralAmount.toLocaleString()} XLM</Text>,
+                },
+              ]}
+            />
 
             <Alert
               message="Partial Liquidation Protocol Rule"
@@ -174,96 +218,115 @@ export const LiquidationDetailPage: React.FC = () => {
 
         {/* Right Side Status Panel */}
         <Col xs={24} lg={9}>
-          <Card title="Confirm Execution" styles={{ body: { padding: '24px' } }}>
-            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '24px' }}>
-              <HealthFactorGauge value={estHFAfter} size={130} showMeaning />
-            </div>
+          {txStatus ? (
+            <TransactionReceiptCard
+              status={txStatus}
+              txHash={matchedTx?.txHash}
+              explorerUrl={matchedTx?.explorerUrl}
+              ledger={matchedTx?.ledger}
+              amount={repayAmount}
+              asset="USDC"
+              actionName="Liquidation Call"
+              errorDetails={errorDetails}
+              onClose={() => setTxStatus(null)}
+            />
+          ) : (
+            <Card title="Confirm Execution" styles={{ body: { padding: '24px' } }}>
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '24px' }}>
+                <HealthFactorGauge value={estHFAfter} size={130} showMeaning />
+              </div>
 
-            <div style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '12px',
-              backgroundColor: 'var(--bg-color)',
-              padding: '16px',
-              borderRadius: '8px',
-              border: '1px solid var(--border-color)',
-              marginBottom: '20px'
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
-                <span style={{ color: 'var(--text-muted)' }}>Wallet Balance:</span>
-                <span style={{ fontWeight: 600 }}>${wallet.balanceUSDC.toLocaleString()} USDC</span>
+              <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '12px',
+                backgroundColor: 'var(--bg-color)',
+                padding: '16px',
+                borderRadius: '8px',
+                border: '1px solid var(--border-color)',
+                marginBottom: '20px'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Wallet Balance:</span>
+                  <span style={{ fontWeight: 600 }}>${wallet.balanceUSDC.toLocaleString()} USDC</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Required Repay:</span>
+                  <span style={{ fontWeight: 600, color: 'var(--danger-color)' }}>${repayAmount.toFixed(2)} USDC</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Close Factor Limit:</span>
+                  <span style={{ fontWeight: 600 }}>${maxRepayAmount.toFixed(2)} USDC</span>
+                </div>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
-                <span style={{ color: 'var(--text-muted)' }}>Required Repay:</span>
-                <span style={{ fontWeight: 600, color: 'var(--danger-color)' }}>${repayAmount.toFixed(2)} USDC</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
-                <span style={{ color: 'var(--text-muted)' }}>Close Factor Limit:</span>
-                <span style={{ fontWeight: 600 }}>${maxRepayAmount.toFixed(2)} USDC</span>
-              </div>
-            </div>
 
-            <div style={{ marginBottom: '16px' }}>
-              <Text strong style={{ display: 'block', fontSize: '12px', marginBottom: '6px' }}>
-                REPAY AMOUNT (USDC)
-              </Text>
-              <InputNumber
-                min={1}
-                max={maxRepayAmount}
-                step={10}
-                value={repayAmount}
-                onChange={(value) => setRepayAmount(value || 0)}
-                style={{ width: '100%' }}
+              <div style={{ marginBottom: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <Text strong style={{ fontSize: '12px' }}>
+                    REPAY AMOUNT (USDC)
+                  </Text>
+                  <Button size="small" type="dashed" onClick={() => setRepayAmount(maxRepayAmount)}>
+                    Max Close Factor (50%)
+                  </Button>
+                </div>
+                <InputNumber
+                  min={1}
+                  max={maxRepayAmount}
+                  step={10}
+                  value={repayAmount}
+                  onChange={(value) => setRepayAmount(value || 0)}
+                  style={{ width: '100%' }}
+                  size="large"
+                />
+              </div>
+
+              {!eligible ? (
+                <Alert
+                  message="Loan Not Eligible"
+                  description="Liquidation is only allowed when Health Factor is below 1.2 or the loan is defaulted."
+                  type="warning"
+                  showIcon
+                  style={{ marginBottom: '16px' }}
+                />
+              ) : !hasValidRepayAmount ? (
+                <Alert
+                  message="Invalid Repay Amount"
+                  description={`Repay amount must be greater than 0 and no more than the 50% close factor (${formatCurrency(maxRepayAmount, 'USDC')}).`}
+                  type="error"
+                  showIcon
+                  style={{ marginBottom: '16px' }}
+                />
+              ) : wallet.balanceUSDC < repayAmount ? (
+                <Alert
+                  message="Insufficient USDC"
+                  description={`You need $${repayAmount.toFixed(2)} USDC to execute, but your balance is only $${wallet.balanceUSDC.toLocaleString()} USDC.`}
+                  type="error"
+                  showIcon
+                  style={{ marginBottom: '16px' }}
+                />
+              ) : (
+                <Alert
+                  message="Arbitrage Ready"
+                  description={`Your wallet will receive ${collateralToReceive.toFixed(2)} XLM from the loan escrow in exchange for $${repayAmount.toFixed(2)} USDC.`}
+                  type="success"
+                  showIcon
+                  style={{ marginBottom: '16px' }}
+                />
+              )}
+
+              <Button
+                type="primary"
+                danger
                 size="large"
-              />
-            </div>
-
-            {!eligible ? (
-              <Alert
-                message="Loan Not Eligible"
-                description="Liquidation is only allowed when Health Factor is below 1.2 or the loan is defaulted."
-                type="warning"
-                showIcon
-                style={{ marginBottom: '16px' }}
-              />
-            ) : !hasValidRepayAmount ? (
-              <Alert
-                message="Invalid Repay Amount"
-                description={`Repay amount must be greater than 0 and no more than the 50% close factor (${formatCurrency(maxRepayAmount, 'USDC')}).`}
-                type="error"
-                showIcon
-                style={{ marginBottom: '16px' }}
-              />
-            ) : wallet.balanceUSDC < repayAmount ? (
-              <Alert
-                message="Insufficient USDC"
-                description={`You need $${repayAmount.toFixed(2)} USDC to execute, but your balance is only $${wallet.balanceUSDC.toLocaleString()} USDC.`}
-                type="error"
-                showIcon
-                style={{ marginBottom: '16px' }}
-              />
-            ) : (
-              <Alert
-                message="Arbitrage Ready"
-                description={`Your wallet will receive ${collateralToReceive.toFixed(2)} XLM from the loan escrow in exchange for $${repayAmount.toFixed(2)} USDC.`}
-                type="success"
-                showIcon
-                style={{ marginBottom: '16px' }}
-              />
-            )}
-
-            <Button
-              type="primary"
-              danger
-              size="large"
-              disabled={!canExecute}
-              icon={<Flame size={18} style={{ marginRight: 6 }} />}
-              onClick={handleConfirmLiquidation}
-              style={{ width: '100%', height: '48px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-            >
-              Confirm Liquidation
-            </Button>
-          </Card>
+                disabled={!canExecute}
+                icon={<Flame size={18} style={{ marginRight: 6 }} />}
+                onClick={handleConfirmLiquidation}
+                style={{ width: '100%', height: '48px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                Confirm Liquidation
+              </Button>
+            </Card>
+          )}
         </Col>
       </Row>
 
@@ -297,4 +360,3 @@ export const LiquidationDetailPage: React.FC = () => {
     </div>
   );
 };
-

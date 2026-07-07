@@ -3,8 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAppContext } from '../app/AppContext';
 import { useWallet } from '../hooks/useWallet';
 import { freighterService } from '../services/wallet/freighter.service';
-import { Alert, Button, Card, Divider, Radio, Space, Tag, Typography, message } from 'antd';
-import type { RadioChangeEvent } from 'antd';
+import { Alert, Button, Card, Space, Tag, Typography, message } from 'antd';
 import { ArrowLeft, ExternalLink, Layers, ShieldCheck, Wallet } from 'lucide-react';
 
 const { Title, Paragraph, Text } = Typography;
@@ -23,7 +22,6 @@ export const ConnectPage: React.FC = () => {
     refreshWallet,
   } = useWallet();
   const navigate = useNavigate();
-  const [role, setRole] = useState<'LENDER' | 'BORROWER' | 'LIQUIDATOR'>('BORROWER');
   const [isAvailable, setIsAvailable] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -37,15 +35,18 @@ export const ConnectPage: React.FC = () => {
     };
   }, []);
 
-  const handleRoleChange = (e: RadioChangeEvent) => {
-    const selectedRole = e.target.value as 'LENDER' | 'BORROWER' | 'LIQUIDATOR';
-    setRole(selectedRole);
-  };
+  // Automatic redirect if already connected
+  useEffect(() => {
+    if (isConnected && publicKey) {
+      connectDemoWallet(publicKey);
+      navigate('/app');
+    }
+  }, [isConnected, publicKey, connectDemoWallet, navigate]);
 
   const handleConnect = async () => {
     try {
       const connection = await connect();
-      connectDemoWallet(connection.publicKey, role);
+      connectDemoWallet(connection.publicKey);
 
       if (!connection.isTestnet) {
         message.warning('Freighter is connected, but the selected network is not Stellar Testnet.');
@@ -65,14 +66,14 @@ export const ConnectPage: React.FC = () => {
 
   const handleLaunch = () => {
     if (publicKey) {
-      connectDemoWallet(publicKey, role);
+      connectDemoWallet(publicKey);
     }
     navigate('/app');
   };
 
   return (
     <div style={{
-      minHeight: 'calc(100vh - 140px)',
+      minHeight: '100vh',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -84,14 +85,15 @@ export const ConnectPage: React.FC = () => {
           width: '100%',
           maxWidth: '480px',
           boxShadow: 'var(--shadow-xl)',
-          borderRadius: 'var(--radius-xl)',
-          border: '1px solid var(--border-color)'
+          borderRadius: 'var(--radius-lg)',
+          border: '1px solid var(--border-color)',
+          backgroundColor: '#FFFFFF'
         }}
         styles={{ body: { padding: '40px' } }}
       >
         <Button
           type="text"
-          icon={<ArrowLeft size={16} />}
+          icon={<ArrowLeft size={14} />}
           onClick={() => navigate('/')}
           style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: 0, marginBottom: '24px', color: 'var(--text-muted)' }}
         >
@@ -103,35 +105,35 @@ export const ConnectPage: React.FC = () => {
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            width: '48px',
-            height: '48px',
-            background: 'var(--primary-color)',
+            width: '52px',
+            height: '52px',
+            background: 'linear-gradient(135deg, var(--primary-color) 0%, #6366F1 100%)',
             borderRadius: '12px',
             color: 'white',
             marginBottom: '16px',
-            boxShadow: '0 6px 15px rgba(47, 128, 237, 0.25)'
+            boxShadow: '0 8px 24px rgba(79, 70, 229, 0.2)'
           }}>
-            <Layers size={22} />
+            <Layers size={24} />
           </div>
-          <Title level={3} style={{ margin: 0, fontFamily: 'var(--font-heading)', fontWeight: 700 }}>
-            Connect Your Wallet
+          <Title level={3} style={{ margin: 0, fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: '24px', letterSpacing: '-0.02em' }}>
+            Connect to Nexus Lending
           </Title>
-          <Paragraph type="secondary" style={{ fontSize: '13px', marginTop: '6px' }}>
-            Connect Freighter on Stellar Testnet to interact with the Nexus lending app.
+          <Paragraph type="secondary" style={{ fontSize: '13px', marginTop: '6px', color: 'var(--text-muted)' }}>
+            Access peer-to-peer fixed-rate markets on the Stellar Network.
           </Paragraph>
         </div>
 
-        <Space direction="vertical" size="large" style={{ width: '100%' }}>
+        <Space orientation="vertical" size="large" style={{ width: '100%' }}>
           {isAvailable === false && (
             <Alert
               type="warning"
               showIcon
-              message="Freighter is not installed"
+              title="Freighter is not installed"
               description={
                 <span>
-                  Install the Freighter browser extension, unlock it, then return here to connect.{' '}
-                  <a href="https://freighter.app" target="_blank" rel="noreferrer">
-                    Install Freighter <ExternalLink size={12} style={{ verticalAlign: '-2px' }} />
+                  Please install the Freighter browser extension to continue.{' '}
+                  <a href="https://freighter.app" target="_blank" rel="noreferrer" style={{ fontWeight: 600, color: 'var(--primary-color)' }}>
+                    Install Freighter <ExternalLink size={11} style={{ verticalAlign: '-1px' }} />
                   </a>
                 </span>
               }
@@ -142,7 +144,7 @@ export const ConnectPage: React.FC = () => {
             <Alert
               type={isConnected && !isTestnet ? 'warning' : 'error'}
               showIcon
-              message={isConnected && !isTestnet ? 'Wrong network selected' : 'Wallet connection error'}
+              title={isConnected && !isTestnet ? 'Wrong Network Selected' : 'Wallet Connection Error'}
               description={error}
             />
           )}
@@ -151,117 +153,81 @@ export const ConnectPage: React.FC = () => {
             <Alert
               type={isTestnet ? 'success' : 'warning'}
               showIcon
-              message={isTestnet ? 'Freighter connected' : 'Freighter connected to a non-Testnet network'}
+              title={isTestnet ? 'Freighter Session Active' : 'Change Network Required'}
               description={
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <span>
-                    Address: <Text code>{shortAddress}</Text>
-                  </span>
-                  <span>
-                    Network: <Text strong>{network ?? 'Unknown Network'}</Text>
-                  </span>
-                  {!isTestnet && <span>Switch Freighter to Stellar Testnet before submitting transactions.</span>}
+                <div style={{ fontSize: '12px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <span>Address: <Text code style={{ fontFamily: 'var(--font-mono)' }}>{shortAddress}</Text></span>
+                  <span>Network: <Text strong>{network ?? 'Unknown'}</Text></span>
                 </div>
               }
             />
           )}
 
-          <div>
-            <Text strong style={{ display: 'block', marginBottom: '10px', fontSize: '13px' }}>
-              SELECT DEMO ROLE:
-            </Text>
-            <Radio.Group
-              value={role}
-              onChange={handleRoleChange}
-              buttonStyle="solid"
-              style={{ width: '100%', display: 'flex' }}
-            >
-              <Radio.Button value="BORROWER" style={{ flex: 1, textAlign: 'center', height: '40px', lineHeight: '38px' }}>
-                Borrower
-              </Radio.Button>
-              <Radio.Button value="LENDER" style={{ flex: 1, textAlign: 'center', height: '40px', lineHeight: '38px' }}>
-                Lender
-              </Radio.Button>
-              <Radio.Button value="LIQUIDATOR" style={{ flex: 1, textAlign: 'center', height: '40px', lineHeight: '38px' }}>
-                Liquidator
-              </Radio.Button>
-            </Radio.Group>
-          </div>
-
           <div style={{
             padding: '14px 16px',
-            backgroundColor: 'var(--bg-color)',
+            backgroundColor: 'var(--border-light)',
             border: '1px solid var(--border-color)',
-            borderRadius: 'var(--radius-lg)',
+            borderRadius: 'var(--radius-md)',
             display: 'flex',
             justifyContent: 'space-between',
-            gap: '12px',
             alignItems: 'center'
           }}>
             <div>
-              <Text strong style={{ display: 'block', fontSize: '12px' }}>WALLET STATUS</Text>
-              <Text type="secondary" style={{ fontSize: '12px' }}>
-                {isConnected ? 'Freighter session active' : 'No wallet connected'}
+              <Text strong style={{ display: 'block', fontSize: '12px', color: 'var(--text-main)' }}>WALLET PROVIDER</Text>
+              <Text type="secondary" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                {isConnected ? 'Active session' : 'Freighter extension'}
               </Text>
             </div>
-            <Tag color={isConnected ? (isTestnet ? 'success' : 'warning') : 'default'} style={{ border: 'none', margin: 0 }}>
-              {isConnected ? (network ?? 'Connected') : 'Disconnected'}
+            <Tag color={isConnected ? (isTestnet ? 'success' : 'warning') : 'default'} style={{ border: 'none', margin: 0, fontWeight: 700 }}>
+              {isConnected ? (isTestnet ? 'Stellar Testnet' : 'Wrong Net') : 'Disconnected'}
             </Tag>
           </div>
 
           <div style={{
-            padding: '16px',
-            backgroundColor: 'var(--border-light)',
-            borderRadius: 'var(--radius-lg)',
+            padding: '14px 16px',
+            backgroundColor: 'rgba(16, 185, 129, 0.04)',
+            border: '1px solid rgba(16, 185, 129, 0.15)',
+            borderRadius: 'var(--radius-md)',
             display: 'flex',
             gap: '12px',
             alignItems: 'flex-start'
           }}>
-            <ShieldCheck size={18} style={{ color: 'var(--success-color)', flexShrink: 0, marginTop: '2px' }} />
+            <ShieldCheck size={16} style={{ color: 'var(--success-color)', flexShrink: 0, marginTop: '2px' }} />
             <div>
               <Text strong style={{ fontSize: '12px', display: 'block', color: 'var(--text-main)' }}>
-                Freighter Signing
+                Secure Key Custody
               </Text>
-              <Text type="secondary" style={{ fontSize: '11px', lineHeight: '1.4' }}>
-                Nexus never sees your private key. Freighter approves access and signs Stellar Testnet transactions in your browser.
+              <Text type="secondary" style={{ fontSize: '11px', lineHeight: '1.4', color: 'var(--text-muted)' }}>
+                Nexus handles transactions securely. All key signatures are controlled by Freighter; we do not store private keys.
               </Text>
             </div>
           </div>
 
-          <Space direction="vertical" size="small" style={{ width: '100%' }}>
+          <Space orientation="vertical" size="small" style={{ width: '100%' }}>
             <Button
               type="primary"
               size="large"
-              icon={<Wallet size={18} style={{ marginRight: 8 }} />}
+              icon={<Wallet size={16} style={{ marginRight: 6 }} />}
               onClick={isConnected ? handleLaunch : handleConnect}
               loading={isLoading}
               disabled={isAvailable === false}
               style={{ width: '100%', height: '48px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             >
-              {isConnected ? 'Launch App' : 'Connect Freighter Wallet'}
+              {isConnected ? 'Launch Dashboard' : 'Connect Wallet'}
             </Button>
             {isConnected && (
               <Button
                 size="large"
                 onClick={handleRefresh}
                 loading={isLoading}
-                style={{ width: '100%' }}
+                style={{ width: '100%', height: '42px' }}
               >
-                Refresh Wallet
+                Sync Status
               </Button>
             )}
           </Space>
         </Space>
-
-        <Divider style={{ margin: '24px 0' }} />
-
-        <div style={{ textAlign: 'center' }}>
-          <Text type="secondary" style={{ fontSize: '12px' }}>
-            Demo balances are still simulated by role until contract event indexing is connected.
-          </Text>
-        </div>
       </Card>
     </div>
   );
 };
-

@@ -2,16 +2,17 @@ import React, { useEffect, useState } from 'react';
 import { useAppContext } from '../app/AppContext';
 import { useWallet } from '../hooks/useWallet';
 import { formatCurrency } from '../utils/finance';
-import { Card, Row, Col, Descriptions, Button, Switch, List, Typography, Tag, Space, message } from 'antd';
-import { Wallet, ShieldCheck, Bell, Activity, Globe, LogOut } from 'lucide-react';
+import { Card, Row, Col, Descriptions, Button, Switch, List, Typography, Tag, Space, Divider, message } from 'antd';
+import { Wallet, ShieldCheck, Bell, Activity, Globe, LogOut, ExternalLink } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { CONTRACTS, ASSET_CONTRACTS, RPC_URL, NETWORK } from '../services/soroban/config';
 
 const { Title, Paragraph, Text } = Typography;
 const NOTIFICATION_SETTINGS_KEY = 'nexus_notification_settings';
 
 export const SettingsPage: React.FC = () => {
   const { wallet, activities, disconnectWallet } = useAppContext();
-  const { publicKey, network, isTestnet, disconnect } = useWallet();
+  const { publicKey, isTestnet, disconnect } = useWallet();
   const navigate = useNavigate();
   const [emailAlerts, setEmailAlerts] = useState(true);
   const [telegramAlerts, setTelegramAlerts] = useState(false);
@@ -67,7 +68,7 @@ export const SettingsPage: React.FC = () => {
       <Row gutter={[24, 24]}>
         {/* Left side: Wallet & Node Info */}
         <Col xs={24} lg={14}>
-          <Space direction="vertical" size="large" style={{ width: '100%' }}>
+          <Space orientation="vertical" size="large" style={{ width: '100%' }}>
             {/* Wallet details */}
             <Card
               title={
@@ -78,22 +79,34 @@ export const SettingsPage: React.FC = () => {
               }
               styles={{ body: { padding: '24px' } }}
             >
-              <Descriptions bordered column={1} size="small" labelStyle={{ fontWeight: 600, width: '180px' }}>
-                <Descriptions.Item label="Stellar Public Key">
-                  <Text style={{ fontFamily: 'var(--font-mono)' }}>{publicKey ?? wallet.address}</Text>
-                </Descriptions.Item>
-                <Descriptions.Item label="Wallet Role">
-                  <Tag color={wallet.role === 'LENDER' ? 'green' : wallet.role === 'BORROWER' ? 'blue' : 'volcano'}>
-                    {wallet.role}
-                  </Tag>
-                </Descriptions.Item>
-                <Descriptions.Item label="USDC Balance">
-                  <Text strong>{formatCurrency(wallet.balanceUSDC, 'USDC')}</Text>
-                </Descriptions.Item>
-                <Descriptions.Item label="XLM Balance">
-                  <Text strong>{formatCurrency(wallet.balanceXLM, 'XLM')}</Text>
-                </Descriptions.Item>
-              </Descriptions>
+              <Descriptions
+                bordered
+                column={1}
+                size="small"
+                styles={{ label: { fontWeight: 600, width: '180px' } }}
+                items={[
+                  {
+                    key: 'publicKey',
+                    label: 'Stellar Public Key',
+                    children: <Text style={{ fontFamily: 'var(--font-mono)' }}>{publicKey ?? wallet.address}</Text>,
+                  },
+                  {
+                    key: 'accountType',
+                    label: 'Account Type',
+                    children: <Tag color="blue">Multi-role Account</Tag>,
+                  },
+                  {
+                    key: 'usdcBalance',
+                    label: 'USDC Balance',
+                    children: <Text strong>{formatCurrency(wallet.balanceUSDC, 'USDC')}</Text>,
+                  },
+                  {
+                    key: 'xlmBalance',
+                    label: 'XLM Balance',
+                    children: <Text strong>{formatCurrency(wallet.balanceXLM, 'XLM')}</Text>,
+                  },
+                ]}
+              />
 
               <Button
                 type="primary"
@@ -116,30 +129,46 @@ export const SettingsPage: React.FC = () => {
               }
               styles={{ body: { padding: '24px' } }}
             >
-              <Descriptions bordered column={1} size="small" labelStyle={{ fontWeight: 600, width: '180px' }}>
-                <Descriptions.Item label="Selected Network">
-                  <Tag color={isTestnet ? 'purple' : 'warning'}>{network ?? 'Unknown Network'}</Tag>
-                </Descriptions.Item>
-                <Descriptions.Item label="Horizon RPC URL">
-                  <Text style={{ fontFamily: 'var(--font-mono)' }}>https://horizon-testnet.stellar.org</Text>
-                </Descriptions.Item>
-                <Descriptions.Item label="Soroban RPC URL">
-                  <Text style={{ fontFamily: 'var(--font-mono)' }}>https://soroban-testnet.stellar.org</Text>
-                </Descriptions.Item>
-                <Descriptions.Item label="Node Status">
-                  <Tag color="success">ONLINE & ACTIVE</Tag>
-                </Descriptions.Item>
-                <Descriptions.Item label="Stellar Core Version">
-                  <Text>v21.1.0-rc1</Text>
-                </Descriptions.Item>
-              </Descriptions>
+              <Descriptions
+                bordered
+                column={1}
+                size="small"
+                styles={{ label: { fontWeight: 600, width: '180px' } }}
+                items={[
+                  {
+                    key: 'network',
+                    label: 'Selected Network',
+                    children: <Tag color={isTestnet ? 'purple' : 'warning'}>{NETWORK.toUpperCase()}</Tag>,
+                  },
+                  {
+                    key: 'horizonRpc',
+                    label: 'Horizon RPC Endpoint',
+                    children: <Text style={{ fontFamily: 'var(--font-mono)' }}>https://horizon-{NETWORK === 'mainnet' ? 'live' : NETWORK}.stellar.org</Text>,
+                  },
+                  {
+                    key: 'sorobanRpc',
+                    label: 'Soroban RPC URL',
+                    children: <Text style={{ fontFamily: 'var(--font-mono)' }}>{RPC_URL}</Text>,
+                  },
+                  {
+                    key: 'nodeStatus',
+                    label: 'Node Status',
+                    children: <Tag color="success">ONLINE & ACTIVE</Tag>,
+                  },
+                  {
+                    key: 'coreVersion',
+                    label: 'Stellar Core Version',
+                    children: <Text>v21.1.0-rc1</Text>,
+                  },
+                ]}
+              />
             </Card>
           </Space>
         </Col>
 
         {/* Right side: Alerts & History */}
         <Col xs={24} lg={10}>
-          <Space direction="vertical" size="large" style={{ width: '100%' }}>
+          <Space orientation="vertical" size="large" style={{ width: '100%' }}>
             {/* Notification settings */}
             <Card
               title={
@@ -187,30 +216,85 @@ export const SettingsPage: React.FC = () => {
               }
               styles={{ body: { padding: '24px' } }}
             >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '13px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', fontSize: '13px' }}>
                 <div>
                   <Text type="secondary" style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>
-                    NEXUS CORE ROUTER WASM
+                    Marketplace Contract
                   </Text>
-                  <Text copyable style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
-                    CDD6...93AE
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '4px' }}>
+                    <Text copyable={{ text: CONTRACTS.marketplace }} style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+                      {CONTRACTS.marketplace.slice(0, 6)}...{CONTRACTS.marketplace.slice(-6)}
+                    </Text>
+                    <a href={`https://stellar.expert/explorer/${NETWORK}/contract/${CONTRACTS.marketplace}`} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: '2px', fontSize: '12px' }}>
+                      Stellar Expert <ExternalLink size={12} />
+                    </a>
+                  </div>
+                </div>
+
+                <div>
+                  <Text type="secondary" style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>
+                    Loan Manager Contract
+                  </Text>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '4px' }}>
+                    <Text copyable={{ text: CONTRACTS.loanManager }} style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+                      {CONTRACTS.loanManager.slice(0, 6)}...{CONTRACTS.loanManager.slice(-6)}
+                    </Text>
+                    <a href={`https://stellar.expert/explorer/${NETWORK}/contract/${CONTRACTS.loanManager}`} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: '2px', fontSize: '12px' }}>
+                      Stellar Expert <ExternalLink size={12} />
+                    </a>
+                  </div>
+                </div>
+
+                <div>
+                  <Text type="secondary" style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>
+                    Vault / Escrow Contract
+                  </Text>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '4px' }}>
+                    <Text copyable={{ text: CONTRACTS.vault }} style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+                      {CONTRACTS.vault.slice(0, 6)}...{CONTRACTS.vault.slice(-6)}
+                    </Text>
+                    <a href={`https://stellar.expert/explorer/${NETWORK}/contract/${CONTRACTS.vault}`} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: '2px', fontSize: '12px' }}>
+                      Stellar Expert <ExternalLink size={12} />
+                    </a>
+                  </div>
+                </div>
+
+                <div>
+                  <Text type="secondary" style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>
+                    Oracle Contract
+                  </Text>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '4px' }}>
+                    <Text copyable={{ text: CONTRACTS.oracle }} style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+                      {CONTRACTS.oracle.slice(0, 6)}...{CONTRACTS.oracle.slice(-6)}
+                    </Text>
+                    <a href={`https://stellar.expert/explorer/${NETWORK}/contract/${CONTRACTS.oracle}`} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: '2px', fontSize: '12px' }}>
+                      Stellar Expert <ExternalLink size={12} />
+                    </a>
+                  </div>
+                </div>
+
+                <Divider style={{ margin: '8px 0' }} />
+
+                <div>
+                  <Text type="secondary" style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>
+                    XLM Collateral Token (Native)
+                  </Text>
+                  <Text copyable={{ text: ASSET_CONTRACTS.XLM }} style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+                    {ASSET_CONTRACTS.XLM.slice(0, 6)}...{ASSET_CONTRACTS.XLM.slice(-6)}
                   </Text>
                 </div>
+
                 <div>
                   <Text type="secondary" style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>
-                    ESCROW FACTORY CONTRACT
+                    USDC Token Contract
                   </Text>
-                  <Text copyable style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
-                    CAS7...110B
-                  </Text>
-                </div>
-                <div>
-                  <Text type="secondary" style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>
-                    XLM COLLATERAL TOKEN
-                  </Text>
-                  <Text copyable style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
-                    CDXLM...TESTNET
-                  </Text>
+                  {ASSET_CONTRACTS.USDC ? (
+                    <Text copyable={{ text: ASSET_CONTRACTS.USDC }} style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+                      {ASSET_CONTRACTS.USDC.slice(0, 6)}...{ASSET_CONTRACTS.USDC.slice(-6)}
+                    </Text>
+                  ) : (
+                    <Text type="warning">Not Configured (Native issuer path)</Text>
+                  )}
                 </div>
               </div>
             </Card>
@@ -248,7 +332,7 @@ export const SettingsPage: React.FC = () => {
                       {item.details}
                     </Paragraph>
                     <div style={{ display: 'flex', gap: '8px', marginTop: '6px', fontSize: '11px' }}>
-                      <span>Hash: <span style={{ fontFamily: 'var(--font-mono)' }}>{item.txHash ?? `tx_${item.id}`}</span></span>
+                      <span>Hash: <span style={{ fontFamily: 'var(--font-mono)' }}>{item.txHash ?? 'Not recorded'}</span></span>
                       <span>-</span>
                       <span>Fee: <span style={{ fontFamily: 'var(--font-mono)' }}>0.01 XLM</span></span>
                     </div>

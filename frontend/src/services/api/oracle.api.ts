@@ -1,5 +1,6 @@
 import type { OraclePrice } from '../../types';
 import { apiClient, toNumber } from './client';
+import type { ConfirmedChainReceiptPayload } from './client';
 
 interface BackendOraclePrice {
   id: string;
@@ -46,7 +47,7 @@ export const oracleApi = {
     return withStablecoinFallback(prices.map(mapBackendPrice));
   },
 
-  async updateXlmPrice(newPrice: number, wallet?: string | null): Promise<{
+  async updateXlmPrice(newPrice: number, wallet: string, receipt: ConfirmedChainReceiptPayload): Promise<{
     prices: OraclePrice[];
     recalculation: RecalculateResponse;
   }> {
@@ -56,9 +57,10 @@ export const oracleApi = {
       quoteAsset: 'USDC',
       price: String(newPrice),
       decimals: 7,
-      source: 'Nexus Frontend Oracle Simulator',
+      source: 'Nexus Oracle Admin',
       updatedAt: new Date().toISOString(),
-      wallet: wallet ?? 'ORACLE_ADMIN',
+      wallet,
+      ...receipt,
     });
     const recalculation = await apiClient.post<RecalculateResponse>('/api/oracle/recalculate-health');
     const prices = await this.list();

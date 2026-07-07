@@ -79,20 +79,15 @@ Transactions:
 - `calculateRepaymentAmount()`
 - `calculateRequiredCollateral()`
 
-## Soroban Integration Stubs
+## Soroban Integration & Event Indexer
 
-`src/modules/soroban/soroban.service.ts` currently returns mock transaction envelopes for the Phase 1 contract ABI:
+The backend is database/indexer only. It never signs transactions, creates transaction hashes, or fabricates explorer URLs. Mutating endpoints accept only confirmed Soroban transaction receipts from the frontend wallet flow: `txHash`, `explorerUrl`, `ledger`, `txStatus=SUCCESS`, contract metadata, and optional block timestamp.
 
-- `createOfferTx`
-- `fundOfferTx`
-- `activateOfferTx`
-- `acceptOfferTx`
-- `activateLoanTx`
-- `addCollateralTx`
-- `partialRepayTx`
-- `fullRepayTx`
-- `updateOraclePriceTx`
-- `liquidateTx`
-- `fetchContractEvents`
+The background `IndexerService` monitors Stellar Testnet RPC for contract events, parses them, and can mirror confirmed on-chain state into PostgreSQL asynchronously.
 
-Replace mock envelopes with Stellar SDK/Soroban RPC unsigned XDR assembly after contract deployment and binding generation.
+### Background Indexer Service
+When the server starts:
+- It connects to Stellar Testnet RPC.
+- Polls events filtered by the deployed `Marketplace`, `Vault`, `Oracle`, and `Loan Manager` contract addresses.
+- Parses topic structures (e.g. `offer_created`, `offer_accepted`, `loan_activated`) and updates database state.
+- Gracefully handles service shutdown.

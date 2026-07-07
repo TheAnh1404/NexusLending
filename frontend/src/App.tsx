@@ -1,6 +1,6 @@
 import React from 'react';
 import { BrowserRouter } from 'react-router-dom';
-import { ConfigProvider } from 'antd';
+import { ConfigProvider, App as AntdApp } from 'antd';
 import { AppProvider } from './app/AppContext';
 import { AppRoutes } from './app/routes';
 import { WalletProvider } from './contexts/WalletContext';
@@ -43,13 +43,15 @@ const App: React.FC = () => {
         },
       }}
     >
-      <AppProvider>
-        <WalletProvider>
-          <BrowserRouter>
-            <AppRoutes />
-          </BrowserRouter>
-        </WalletProvider>
-      </AppProvider>
+      <AntdApp>
+        <AppProvider>
+          <WalletProvider>
+            <BrowserRouter>
+              <AppRoutes />
+            </BrowserRouter>
+          </WalletProvider>
+        </AppProvider>
+      </AntdApp>
     </ConfigProvider>
   );
 };

@@ -5,12 +5,16 @@ interface BackendTransaction {
   id: string;
   txHash: string;
   explorerUrl?: string | null;
+  contract?: string | null;
+  ledger?: number | null;
   type: string;
   wallet: string;
   offerId?: string | null;
   loanId?: string | null;
   asset?: string | null;
   amount?: string | null;
+  status?: string;
+  blockTimestamp?: string | null;
   metadata?: {
     details?: string;
   } | null;
@@ -33,6 +37,11 @@ export const mapBackendTransaction = (transaction: BackendTransaction): Transact
   loanId: transaction.loanId ?? undefined,
   offerId: transaction.offerId ?? undefined,
   txHash: transaction.txHash,
+  explorerUrl: transaction.explorerUrl ?? undefined,
+  contract: transaction.contract ?? undefined,
+  ledger: transaction.ledger ?? undefined,
+  status: transaction.status === 'SUCCESS' ? 'SUCCESS' : undefined,
+  blockTimestamp: transaction.blockTimestamp ?? undefined,
 });
 
 export const transactionsApi = {
@@ -42,14 +51,22 @@ export const transactionsApi = {
   },
 
   async create(input: Transaction): Promise<Transaction> {
+    if (!input.txHash || !input.explorerUrl || !input.ledger || input.status !== 'SUCCESS') {
+      throw new Error('Confirmed transaction metadata is required.');
+    }
     const transaction = await apiClient.post<BackendTransaction>('/api/transactions', {
-      txHash: input.txHash ?? `frontend_${input.type.toLowerCase()}_${Date.now()}`,
+      txHash: input.txHash,
+      explorerUrl: input.explorerUrl,
+      contract: input.contract,
+      ledger: input.ledger,
       type: input.type,
       wallet: input.user,
       offerId: input.offerId,
       loanId: input.loanId,
       asset: input.asset,
       amount: String(input.amount),
+      status: input.status,
+      blockTimestamp: input.blockTimestamp,
       metadata: {
         details: input.details,
       },

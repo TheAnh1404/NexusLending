@@ -1,18 +1,20 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
 :root {
   /* Design Tokens */
-  --primary-color: #2F80ED;
-  --primary-hover: #1e70dd;
-  --secondary-color: #56CCF2;
-  --success-color: #27AE60;
-  --warning-color: #F2994A;
-  --danger-color: #EB5757;
+  --primary-color: #4F46E5;
+  --primary-hover: #4338CA;
+  --secondary-color: #06B6D4;
+  --success-color: #10B981;
+  --warning-color: #F59E0B;
+  --danger-color: #EF4444;
   
   --bg-color: #F8FAFC;
   --surface-color: #FFFFFF;
-  --text-main: #111827;
-  --text-muted: #6B7280;
-  --border-color: #E5E7EB;
-  --border-light: #F3F4F6;
+  --text-main: #0F172A;
+  --text-muted: #64748B;
+  --border-color: #E2E8F0;
+  --border-light: #F1F5F9;
   
   /* Fonts */
   --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -20,18 +22,18 @@
   --font-mono: 'JetBrains Mono', monospace;
 
   /* Shadows */
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.02);
-  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.06), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-  --shadow-premium: 0 20px 40px -15px rgba(47, 128, 237, 0.12);
+  --shadow-sm: 0 1px 2px 0 rgba(15, 23, 42, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(15, 23, 42, 0.05), 0 2px 4px -2px rgba(15, 23, 42, 0.05);
+  --shadow-lg: 0 10px 15px -3px rgba(15, 23, 42, 0.05), 0 4px 6px -4px rgba(15, 23, 42, 0.05);
+  --shadow-xl: 0 20px 25px -5px rgba(15, 23, 42, 0.06), 0 8px 10px -6px rgba(15, 23, 42, 0.06);
+  --shadow-premium: 0 24px 48px -12px rgba(79, 70, 229, 0.08);
   
   /* Radii */
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 8px;
-  --radius-xl: 8px;
-  --radius-2xl: 12px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-2xl: 24px;
 }
 
 * {
@@ -52,6 +54,7 @@ body {
 
 html {
   overflow-x: hidden;
+  scroll-behavior: smooth;
 }
 
 #root {
@@ -62,6 +65,7 @@ h1, h2, h3, h4, h5, h6 {
   font-family: var(--font-heading);
   color: var(--text-main);
   font-weight: 600;
+  letter-spacing: -0.02em;
 }
 
 /* Custom Premium UI classes */
@@ -78,31 +82,38 @@ h1, h2, h3, h4, h5, h6 {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
 }
 
 .card-premium:hover {
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-lg);
-  border-color: rgba(47, 128, 237, 0.28);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-xl);
+  border-color: rgba(79, 70, 229, 0.2);
 }
 
 /* Glassmorphism details */
 .glass-header {
-  background: rgba(255, 255, 255, 0.94);
-  backdrop-filter: blur(10px);
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--border-color);
 }
 
 .public-header {
   width: 100vw !important;
   box-sizing: border-box;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
 }
 
 .page-stack {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 32px;
 }
 
 .page-header {
@@ -115,47 +126,35 @@ h1, h2, h3, h4, h5, h6 {
 .metric-panel {
   background: var(--bg-color);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg);
-  padding: 16px;
+  border-radius: var(--radius-md);
+  padding: 20px;
 }
 
 .nexus-logo-mark {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   color: white;
-  background: var(--primary-color);
-  border-radius: 8px;
-  box-shadow: 0 8px 18px rgba(47, 128, 237, 0.22);
+  background: linear-gradient(135deg, var(--primary-color) 0%, #6366F1 100%);
+  border-radius: 10px;
+  box-shadow: 0 8px 18px rgba(79, 70, 229, 0.25);
+  font-weight: 800;
+  font-family: var(--font-heading);
 }
 
 .landing-hero-title {
-  font-size: 56px !important;
-  overflow-wrap: break-word;
-}
-
-/* Micro-animations */
-@keyframes pulse-subtle {
-  0%, 100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.85;
-    transform: scale(1.02);
-  }
-}
-
-.pulse-animation {
-  animation: pulse-subtle 2s infinite ease-in-out;
+  font-size: 64px !important;
+  line-height: 1.1 !important;
+  letter-spacing: -0.03em !important;
+  font-weight: 800 !important;
 }
 
 /* Custom Scrollbars */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
@@ -163,12 +162,12 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.1);
-  border-radius: 3px;
+  background: rgba(100, 116, 139, 0.2);
+  border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.2);
+  background: rgba(100, 116, 139, 0.35);
 }
 
 /* Ant Design customization overrides */
@@ -181,6 +180,12 @@ h1, h2, h3, h4, h5, h6 {
   border-right: 1px solid var(--border-color) !important;
 }
 
+.ant-layout-sider-children {
+  display: flex !important;
+  flex-direction: column !important;
+  height: 100% !important;
+}
+
 .ant-menu {
   background-color: transparent !important;
   border-inline-end: none !important;
@@ -190,30 +195,50 @@ h1, h2, h3, h4, h5, h6 {
   font-family: var(--font-body) !important;
   border-radius: var(--radius-md) !important;
   margin-inline: 12px !important;
-  margin-block: 4px !important;
+  margin-block: 6px !important;
   width: calc(100% - 24px) !important;
+  color: var(--text-muted) !important;
+  font-weight: 500 !important;
+  transition: all 0.2s ease !important;
+}
+
+.ant-menu-item:hover {
+  color: var(--text-main) !important;
+  background-color: var(--border-light) !important;
 }
 
 .ant-menu-item-selected {
-  background-color: rgba(47, 128, 237, 0.08) !important;
+  background-color: rgba(79, 70, 229, 0.08) !important;
   color: var(--primary-color) !important;
+  font-weight: 600 !important;
 }
 
 .ant-menu-item-selected .ant-menu-item-icon {
   color: var(--primary-color) !important;
 }
 
+.ant-btn {
+  font-family: var(--font-body) !important;
+  border-radius: var(--radius-md) !important;
+  font-weight: 500 !important;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
 .ant-btn-primary {
-  background: var(--primary-color) !important;
-  box-shadow: 0 4px 10px rgba(47, 128, 237, 0.2) !important;
+  background: linear-gradient(135deg, var(--primary-color) 0%, #5a51e6 100%) !important;
+  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.18) !important;
   border: none !important;
-  font-family: var(--font-body);
-  font-weight: 500;
+  color: #ffffff !important;
 }
 
 .ant-btn-primary:hover {
-  background: var(--primary-hover) !important;
-  box-shadow: 0 6px 14px rgba(47, 128, 237, 0.3) !important;
+  background: linear-gradient(135deg, var(--primary-hover) 0%, #4c44cf 100%) !important;
+  box-shadow: 0 6px 16px rgba(79, 70, 229, 0.28) !important;
+  transform: translateY(-1px);
+}
+
+.ant-btn-primary:active {
+  transform: translateY(0);
 }
 
 .ant-table {
@@ -222,24 +247,30 @@ h1, h2, h3, h4, h5, h6 {
 
 .ant-table-thead > tr > th {
   background-color: var(--border-light) !important;
+  color: var(--text-muted) !important;
   font-weight: 600 !important;
   font-family: var(--font-heading) !important;
-  font-size: 13px !important;
+  font-size: 12px !important;
   text-transform: uppercase !important;
-  letter-spacing: 0.05em !important;
+  letter-spacing: 0.06em !important;
+  border-bottom: 1px solid var(--border-color) !important;
+  padding: 16px 20px !important;
 }
 
 .ant-table-tbody > tr > td {
   font-family: var(--font-body) !important;
   font-size: 14px !important;
+  border-bottom: 1px solid var(--border-light) !important;
+  padding: 16px 20px !important;
+  color: var(--text-main) !important;
 }
 
 .ant-table-row {
-  transition: background-color 0.2s ease;
+  transition: background-color 0.15s ease;
 }
 
 .ant-table-row:hover > td {
-  background-color: rgba(47, 128, 237, 0.02) !important;
+  background-color: var(--border-light) !important;
 }
 
 .ant-card {
@@ -247,37 +278,51 @@ h1, h2, h3, h4, h5, h6 {
   border-color: var(--border-color) !important;
   box-shadow: var(--shadow-sm);
   overflow: hidden;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .ant-card-head {
   border-bottom: 1px solid var(--border-color) !important;
-  background-color: rgba(255, 255, 255, 0.5) !important;
+  background-color: rgba(255, 255, 255, 0.4) !important;
+  padding: 0 24px !important;
 }
 
 .ant-card-head-title {
   font-family: var(--font-heading) !important;
   font-weight: 600 !important;
+  font-size: 16px !important;
+  letter-spacing: -0.01em;
+}
+
+.ant-card-body {
+  padding: 24px !important;
 }
 
 .ant-statistic-title {
   font-family: var(--font-heading) !important;
-  font-size: 13px !important;
+  font-size: 12px !important;
   text-transform: uppercase !important;
-  letter-spacing: 0.05em !important;
-  font-weight: 500 !important;
+  letter-spacing: 0.07em !important;
+  font-weight: 600 !important;
   color: var(--text-muted) !important;
+  margin-bottom: 8px !important;
 }
 
 .ant-statistic-content-value {
   font-family: var(--font-heading) !important;
   font-weight: 700 !important;
   color: var(--text-main) !important;
+  font-size: 28px !important;
+  letter-spacing: -0.02em;
 }
 
 .ant-tag {
   border-radius: var(--radius-sm) !important;
-  font-weight: 500 !important;
-  padding: 2px 8px !important;
+  font-weight: 600 !important;
+  padding: 2px 10px !important;
+  font-size: 11px !important;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
 }
 
 .ant-layout-sider-trigger {
@@ -287,17 +332,127 @@ h1, h2, h3, h4, h5, h6 {
   border-top: 1px solid var(--border-color);
 }
 
+/* Page content wrap */
+.app-content {
+  padding: 40px !important;
+  max-width: 1400px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.app-header {
+  padding: 0 40px !important;
+  height: 70px !important;
+  line-height: 70px !important;
+  border-bottom: 1px solid var(--border-color) !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.02) !important;
+}
+
+/* Custom premium elements */
+.gradient-bg-accent {
+  background: linear-gradient(135deg, rgba(79, 70, 229, 0.03) 0%, rgba(6, 182, 212, 0.03) 100%);
+}
+
+.border-gradient-active {
+  border-color: rgba(79, 70, 229, 0.3) !important;
+  box-shadow: var(--shadow-md), 0 0 0 1px rgba(79, 70, 229, 0.1);
+}
+
+.badge-escrow {
+  background-color: rgba(6, 182, 212, 0.08) !important;
+  color: var(--secondary-color) !important;
+  border: 1px solid rgba(6, 182, 212, 0.2) !important;
+}
+
+.badge-active-loan {
+  background-color: rgba(16, 185, 129, 0.08) !important;
+  color: var(--success-color) !important;
+  border: 1px solid rgba(16, 185, 129, 0.2) !important;
+}
+
+.metric-card-styled {
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-color);
+  padding: 24px;
+  background: var(--surface-color);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.metric-card-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  font-family: var(--font-heading);
+}
+
+.metric-card-value {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--text-main);
+  font-family: var(--font-heading);
+  letter-spacing: -0.02em;
+}
+
+.metric-card-sub {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* Health factor circular or linear gauge animations */
+.hf-gauge-container {
+  position: relative;
+  width: 100%;
+  height: 140px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hf-pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 6px;
+}
+
+/* Animations */
+@keyframes hover-lift {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(-4px); }
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
 @media (max-width: 991px) {
   .app-content {
-    padding: 20px !important;
+    padding: 24px !important;
   }
 
   .app-header {
-    padding: 0 20px !important;
+    padding: 0 24px !important;
   }
 
   .page-header {
     flex-direction: column;
+    gap: 12px;
   }
 
   .hide-mobile {
@@ -305,7 +460,7 @@ h1, h2, h3, h4, h5, h6 {
   }
 
   .public-header {
-    padding: 0 20px !important;
+    padding: 0 24px !important;
   }
 }
 
@@ -319,28 +474,16 @@ h1, h2, h3, h4, h5, h6 {
   }
 
   .landing-hero-section {
-    padding: 76px 20px 64px !important;
+    padding: 100px 16px 48px !important;
   }
 
   .landing-hero-title {
-    font-size: 30px !important;
-    line-height: 1.12 !important;
+    font-size: 36px !important;
+    line-height: 1.15 !important;
     max-width: 100% !important;
   }
 
   .public-header {
     padding: 0 16px !important;
-  }
-
-  .public-header .ant-btn {
-    padding-inline: 12px !important;
-  }
-
-  .public-header-actions {
-    display: none !important;
-  }
-
-  .landing-hero-section img {
-    display: none !important;
   }
 }

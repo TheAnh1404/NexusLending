@@ -1,5 +1,16 @@
 export const API_URL = (import.meta.env.VITE_API_URL ?? 'http://localhost:5000').replace(/\/$/, '');
-export const DATA_MODE = import.meta.env.VITE_DATA_MODE === 'api' ? 'api' : 'local';
+export const DATA_MODE = 'api';
+
+export interface ConfirmedChainReceiptPayload {
+  txHash: string;
+  explorerUrl: string;
+  ledger: number;
+  txStatus: 'SUCCESS';
+  contractId: string;
+  blockTimestamp: string;
+  contractReturnValue?: unknown;
+}
+
 
 interface ApiEnvelope<T> {
   data: T;

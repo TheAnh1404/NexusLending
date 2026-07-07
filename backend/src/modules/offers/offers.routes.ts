@@ -71,8 +71,9 @@ offersRouter.post(
 
 offersRouter.post(
   '/:id/expire',
+  validateBody(offerActionWalletSchema),
   asyncHandler(async (req, res) => {
-    const offer = await offersService.expire(req.params.id as string);
+    const offer = await offersService.expire(req.params.id as string, req.body);
     res.json({ data: serialize(offer) });
   })
 );

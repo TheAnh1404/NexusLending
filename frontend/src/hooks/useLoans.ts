@@ -8,7 +8,6 @@ export const useLoans = () => {
     fullRepay,
     repayLoan,
     liquidateLoan,
-    claimRepayment,
     wallet,
   } = useLending();
 
@@ -22,7 +21,6 @@ export const useLoans = () => {
     fullRepay,
     repayLoan,
     liquidateLoan,
-    claimRepayment,
   };
 };
 

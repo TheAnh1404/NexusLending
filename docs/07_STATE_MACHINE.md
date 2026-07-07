@@ -81,7 +81,9 @@ offer.status = OfferStatus::Accepted;
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Active : create_loan_from_offer()<br/>HF ≥ min_hf
+    [*] --> PendingCollateral : accept_offer()
+    PendingCollateral --> Active : activate_loan()<br/>HF ≥ min_hf
+    PendingCollateral --> Warning : activate_loan()<br/>12,000 ≤ HF < min_hf
 
     Active --> Warning : HF drops below min_hf<br/>but ≥ 12,000
     Active --> LiquidationPlanning : HF drops below 12,000
@@ -114,6 +116,7 @@ stateDiagram-v2
 
 | State | Description | Mutable? | Liquidatable? |
 |-------|-------------|----------|---------------|
+| `PendingCollateral` | Loan created but collateral not yet locked and USDC not disbursed | ✅ Yes | ❌ No |
 | `Active` | Loan is healthy — HF ≥ `min_health_factor_bps` | ✅ Yes | ❌ No |
 | `Warning` | HF is declining — between 12,000 and `min_health_factor_bps` | ✅ Yes | ❌ No |
 | `LiquidationPlanning` | HF < 12,000 — collateral is unsafe | ✅ Yes | ✅ Yes |
@@ -127,8 +130,9 @@ stateDiagram-v2
 
 | # | From | To | Trigger Function | Condition |
 |---|------|----|-----------------|-----------|
-| T1 | _(none)_ | `Active` | `create_loan_from_offer()` | HF ≥ `min_hf`, LTV ≤ `max_ltv` |
-| T2 | _(none)_ | `Warning` | `create_loan_from_offer()` | 12,000 ≤ HF < `min_hf` |
+| T0 | _(none)_ | `PendingCollateral` | `accept_offer()` / `create_pending_loan_from_offer()` | Borrower accepts listed offer |
+| T1 | `PendingCollateral` | `Active` | `activate_loan()` | HF ≥ `min_hf`, LTV ≤ `max_ltv` |
+| T2 | `PendingCollateral` | `Warning` | `activate_loan()` | 12,000 ≤ HF < `min_hf` |
 | T3 | `Active` | `Warning` | `refresh_loan_state()` / `update_status()` | 12,000 ≤ HF < `min_hf` |
 | T4 | `Active` | `LiquidationPlanning` | `refresh_loan_state()` / `update_status()` | HF < 12,000 |
 | T5 | `Warning` | `Active` | `add_collateral()` / `partial_repay()` | HF restored ≥ `min_hf` |
@@ -338,9 +342,9 @@ full_repay() → Repaid ■
 | **SM-4** | HF-based transitions (`Active` ↔ `Warning` ↔ `LiquidationPlanning`) are bidirectional |
 | **SM-5** | Time-based transitions are unidirectional (`Active/Warning/LP` → `Expired` → `Defaulted`) |
 | **SM-6** | Time-based status overrides HF-based status in `update_status()` |
-| **SM-7** | Initial status is always determined by `status_for_hf()` — there is no `PendingCollateral` state in the contract |
+| **SM-7** | Initial status upon offer acceptance is always `PendingCollateral` on-chain. |
 
-> **Note on `PendingCollateral`:** The high-level lifecycle includes a `PendingCollateral` state, but the contract implementation does not have this state. Collateral is deposited atomically during `accept_offer()` / `create_loan_from_offer()`, so the loan is never in a pending state on-chain. `PendingCollateral` is a frontend/UX concept for the period when the borrower is preparing their transaction.
+> **Note on `PendingCollateral`:** The smart contracts implement `PendingCollateral` as an on-chain state to separate offer acceptance from funding and collateral locking. The borrower accepts the offer via `accept_offer()`, which establishes the agreement on-chain in a `PendingCollateral` state. The borrower then deposits collateral and draws USDC principal by invoking `activate_loan()`.
 
 ---
 

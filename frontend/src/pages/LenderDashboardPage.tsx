@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppContext } from '../app/AppContext';
 import { calculateInterestAmount, formatCurrency, formatAddress, isOpenLoanStatus } from '../utils/finance';
@@ -7,7 +7,6 @@ import { LoanStatusBadge } from '../components/common/LoanStatusBadge';
 import { OfferStatusBadge } from '../components/common/OfferStatusBadge';
 import { RiskBadge } from '../components/common/RiskBadge';
 import { EmptyState } from '../components/common/CommonStates';
-import { ConfirmActionModal } from '../components/common/ConfirmActionModal';
 import {
   Card,
   Row,
@@ -28,7 +27,7 @@ import {
 const { Title, Paragraph, Text } = Typography;
 
 export const LenderDashboardPage: React.FC = () => {
-  const { wallet, loans, loanOffers, fundOffer, activateOffer, cancelOffer, claimRepayment } = useAppContext();
+  const { wallet, loans, loanOffers, fundOffer, activateOffer, cancelOffer } = useAppContext();
   const navigate = useNavigate();
 
   // Filter loans where this user is the lender
@@ -122,10 +121,10 @@ export const LenderDashboardPage: React.FC = () => {
           <Button size="small" onClick={() => navigate(`/app/loans/${record.id}`)}>
             View Details
           </Button>
-          {record.status === 'Repaid' && !record.claimedByLender && (
-            <Button size="small" type="primary" onClick={() => handleClaimYield(record.id)}>
-              Claim Settled Funds
-            </Button>
+          {record.status === 'Repaid' && (
+            <Text type="success" style={{ fontSize: '12px', fontWeight: 600 }}>
+              Repaid Directly
+            </Text>
           )}
         </Space>
       ),
@@ -191,33 +190,18 @@ export const LenderDashboardPage: React.FC = () => {
     },
   ];
 
-  const [claimModalVisible, setClaimModalVisible] = useState(false);
-  const [claimingLoanId, setClaimingLoanId] = useState<string | null>(null);
 
-  const handleClaimYield = (loanId: string) => {
-    setClaimingLoanId(loanId);
-    setClaimModalVisible(true);
-  };
-
-  const confirmClaim = async () => {
-    if (!claimingLoanId) {
-      throw new Error('No loan selected');
-    }
-    await claimRepayment(claimingLoanId);
-    setClaimModalVisible(false);
-    setClaimingLoanId(null);
-  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
       {/* Page Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <Title level={2} style={{ margin: 0, fontFamily: 'var(--font-heading)', fontWeight: 700 }}>
+          <Title level={2} style={{ margin: 0, fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: '28px', letterSpacing: '-0.03em' }}>
             Lender Portfolio
           </Title>
-          <Paragraph type="secondary" style={{ margin: 0 }}>
-            Monitor outstanding principal, expected yields, and claim payments.
+          <Paragraph type="secondary" style={{ margin: '4px 0 0 0', color: 'var(--text-muted)' }}>
+            Monitor outstanding principal, expected yields, and contract status. Repayment is transferred directly to the lender wallet after confirmation.
           </Paragraph>
         </div>
         <Button type="primary" onClick={() => navigate('/app/create-loan')}>
@@ -228,30 +212,30 @@ export const LenderDashboardPage: React.FC = () => {
       {/* Stats row */}
       <Row gutter={[24, 24]}>
         <Col xs={24} sm={12} lg={4}>
-          <StatisticCard title="Active Lent Principal" value={formatCurrency(totalLentVal, 'USDC')} icon={<Coins size={22} />} />
+          <StatisticCard title="Active Lent Principal" value={formatCurrency(totalLentVal, 'USDC')} icon={<Coins size={18} />} />
         </Col>
         <Col xs={24} sm={12} lg={4}>
           <StatisticCard
             title="Expected Yield Interest"
             value={formatCurrency(totalExpectedInterest, 'USDC')}
-            icon={<TrendingUp size={22} />}
+            icon={<TrendingUp size={18} />}
           />
         </Col>
         <Col xs={24} sm={12} lg={4}>
           <StatisticCard
             title="Accrued Yield Claimed"
             value={formatCurrency(totalInterestEarned, 'USDC')}
-            icon={<CheckCircle size={22} />}
+            icon={<CheckCircle size={18} />}
           />
         </Col>
         <Col xs={12} sm={6} lg={4}>
-          <StatisticCard title="Loans / Active Offers" value={`${activeLoansCount}/${activeOffers.length}`} icon={<FileBadge size={22} />} />
+          <StatisticCard title="Active Loans/Offers" value={`${activeLoansCount}/${activeOffers.length}`} icon={<FileBadge size={18} />} />
         </Col>
         <Col xs={12} sm={6} lg={4}>
-          <StatisticCard title="Funding / Settled" value={`${fundingOffers.length}/${completedLoansCount}`} icon={<CheckCircle size={22} />} />
+          <StatisticCard title="Funding / Settled" value={`${fundingOffers.length}/${completedLoansCount}`} icon={<CheckCircle size={18} />} />
         </Col>
         <Col xs={12} sm={6} lg={4}>
-          <StatisticCard title="Liquidated Loans" value={liquidatedLoansCount} icon={<AlertTriangle size={22} />} />
+          <StatisticCard title="Liquidated Loans" value={liquidatedLoansCount} icon={<AlertTriangle size={18} />} />
         </Col>
       </Row>
 
@@ -281,35 +265,6 @@ export const LenderDashboardPage: React.FC = () => {
         </>
       )}
 
-      {/* Claim Yield Modal */}
-      <ConfirmActionModal
-        visible={claimModalVisible}
-        onCancel={() => setClaimModalVisible(false)}
-        onConfirm={confirmClaim}
-        title="Claim Settled Loan Escrow"
-        actionText="Execute Claim Call"
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <p>The borrower has completed full repayment of their loan contract.</p>
-          <div style={{
-            background: 'var(--bg-color)',
-            padding: '12px',
-            borderRadius: '6px',
-            border: '1px solid var(--border-color)',
-            fontSize: '13px'
-          }}>
-            <div>- <b>Principal to Release:</b> ${loans.find((l) => l.id === claimingLoanId)?.amount.toLocaleString()} USDC</div>
-            <div>- <b>Accrued Interest Yield:</b> +${(
-              (loans.find((l) => l.id === claimingLoanId)?.amount || 0) *
-              ((loans.find((l) => l.id === claimingLoanId)?.apr || 0) / 100) *
-              ((loans.find((l) => l.id === claimingLoanId)?.duration || 0) / 365)
-            ).toFixed(2)} USDC</div>
-          </div>
-          <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px' }}>
-            * This action calls the Soroban contract to withdraw the deposited USDC + interest from the contract escrow into your wallet.
-          </p>
-        </div>
-      </ConfirmActionModal>
     </div>
   );
 };

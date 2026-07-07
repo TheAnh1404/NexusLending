@@ -55,10 +55,11 @@ export const PublicLayout: React.FC = () => {
             </span>
           </Link>
           <nav className="hide-mobile" style={{ display: 'flex', gap: '24px', alignItems: 'center' }}>
-            <a href="#problem" style={{ color: 'var(--text-muted)', fontSize: '14px', fontWeight: 500, textDecoration: 'none' }}>Problem</a>
-            <a href="#solution" style={{ color: 'var(--text-muted)', fontSize: '14px', fontWeight: 500, textDecoration: 'none' }}>Solution</a>
-            <a href="#features" style={{ color: 'var(--text-muted)', fontSize: '14px', fontWeight: 500, textDecoration: 'none' }}>Features</a>
-            <a href="#how-it-works" style={{ color: 'var(--text-muted)', fontSize: '14px', fontWeight: 500, textDecoration: 'none' }}>Process</a>
+            <Link to="/" style={{ color: 'var(--text-muted)', fontSize: '14px', fontWeight: 500, textDecoration: 'none' }}>Overview</Link>
+            <Link to="/app/marketplace" style={{ color: 'var(--text-muted)', fontSize: '14px', fontWeight: 500, textDecoration: 'none' }}>Marketplace</Link>
+            <a href="#how-it-works" style={{ color: 'var(--text-muted)', fontSize: '14px', fontWeight: 500, textDecoration: 'none' }}>How It Works</a>
+            <a href="/docs" style={{ color: 'var(--text-muted)', fontSize: '14px', fontWeight: 500, textDecoration: 'none' }}>Docs</a>
+            <a href="#security" style={{ color: 'var(--text-muted)', fontSize: '14px', fontWeight: 500, textDecoration: 'none' }}>Security</a>
           </nav>
         </div>
 

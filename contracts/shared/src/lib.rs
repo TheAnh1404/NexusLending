@@ -1,6 +1,37 @@
 #![no_std]
 
-use soroban_sdk::{contracttype, Address, String};
+use soroban_sdk::{contracterror, contracttype, Address, String};
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum ContractError {
+    AlreadyInitialized = 1,
+    NotInitialized = 2,
+    Unauthorized = 3,
+    InvalidLoanAmount = 10,
+    InvalidApr = 11,
+    InvalidDuration = 12,
+    InvalidMaxLtv = 13,
+    InvalidLiquidationThreshold = 14,
+    InvalidLiquidationBonus = 15,
+    InvalidMinHealthFactor = 16,
+    InvalidCollateralAmount = 17,
+    InvalidAmount = 18,
+    LtvExceedsThreshold = 19,
+    OfferNotFound = 20,
+    OfferNotDraft = 21,
+    OfferNotFunded = 22,
+    OfferNotActive = 23,
+    OfferAlreadyCancelled = 24,
+    OfferAlreadyExpired = 25,
+    OfferMatched = 26,
+    InsufficientLockedFunds = 27,
+    VaultNotConfigured = 30,
+    LoanManagerNotConfigured = 31,
+    MarketplaceNotConfigured = 32,
+    Overflow = 40,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
@@ -77,6 +108,37 @@ pub struct PriceData {
     pub decimals: u32,
     pub updated_at: u64,
     pub source: String,
+}
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum ContractError {
+  AlreadyInitialized = 1,
+  NotInitialized = 2,
+  Unauthorized = 3,
+  InvalidLoanAmount = 10,
+  InvalidApr = 11,
+  InvalidDuration = 12,
+  InvalidMaxLtv = 13,
+  InvalidLiquidationThreshold = 14,
+  InvalidLiquidationBonus = 15,
+  InvalidMinHealthFactor = 16,
+  InvalidCollateralAmount = 17,
+  InvalidAmount = 18,
+  LtvExceedsThreshold = 19,
+  OfferNotFound = 20,
+  OfferNotDraft = 21,
+  OfferNotFunded = 22,
+  OfferNotActive = 23,
+  OfferAlreadyCancelled = 24,
+  OfferAlreadyExpired = 25,
+  OfferMatched = 26,
+  InsufficientLockedFunds = 27,
+  VaultNotConfigured = 30,
+  LoanManagerNotConfigured = 31,
+  MarketplaceNotConfigured = 32,
+  Overflow = 40,
 }
 
 pub const BPS_DENOMINATOR: u128 = 10_000;

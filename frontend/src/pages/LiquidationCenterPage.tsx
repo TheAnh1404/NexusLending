@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { useAppContext } from '../app/AppContext';
 import { formatCurrency, formatAddress, isLiquidatable, isOpenLoanStatus } from '../utils/finance';
 import { StatisticCard } from '../components/common/StatisticCard';
-import { RiskBadge } from '../components/common/RiskBadge';
 import { EmptyState } from '../components/common/CommonStates';
 import {
   Card,
@@ -91,41 +90,36 @@ export const LiquidationCenterPage: React.FC = () => {
       ),
     },
     {
-      title: 'Risk Level',
-      key: 'risk',
-      render: () => <RiskBadge zone="LIQUIDATION_PLANNING" />,
-    },
-    {
       title: 'Liquidator Bonus',
       dataIndex: 'liquidationBonus',
       key: 'liquidationBonus',
       render: (bonus: number) => <Tag color="green" style={{ fontWeight: 600 }}>+{bonus}% Collateral</Tag>,
     },
     {
-      title: 'Max Repay (50%)',
-      key: 'maxRepay',
-      render: (_: any, record: any) => (
-        <Text strong>{formatCurrency(record.outstandingDebt * 0.5, record.asset)}</Text>
-      ),
+      title: 'Liquidation Reason',
+      key: 'reason',
+      render: (_: any, record: any) => {
+        if (record.status === 'Defaulted' || record.status === 'Expired') {
+          return <Tag color="volcano">Term Maturity Default</Tag>;
+        }
+        if (record.healthFactor < 1.2) {
+          return <Tag color="red">Under-Collateralized (HF &lt; 1.2)</Tag>;
+        }
+        return <Tag color="warning">Critical Health Factor</Tag>;
+      },
     },
     {
       title: 'Action',
       key: 'action',
       render: (_: any, record: any) => (
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          <Button size="small" onClick={() => navigate(`/app/liquidation/${record.id}`)}>
-            Plan Liquidation
-          </Button>
-          <Button
-            type="primary"
-            danger
-            size="small"
-            onClick={() => navigate(`/app/liquidation/${record.id}`)}
-            style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
-          >
-            <Flame size={12} /> Liquidate
-          </Button>
-        </div>
+        <Button
+          type="primary"
+          danger
+          onClick={() => navigate(`/app/liquidation/${record.id}`)}
+          style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
+        >
+          <Flame size={14} /> Review Liquidation
+        </Button>
       ),
     },
   ];
@@ -134,10 +128,10 @@ export const LiquidationCenterPage: React.FC = () => {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
       {/* Page Header */}
       <div>
-        <Title level={2} style={{ margin: 0, fontFamily: 'var(--font-heading)', fontWeight: 700 }}>
+        <Title level={2} style={{ margin: 0, fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: '28px', letterSpacing: '-0.03em' }}>
           Liquidation Center
         </Title>
-        <Paragraph type="secondary" style={{ margin: 0 }}>
+        <Paragraph type="secondary" style={{ margin: '4px 0 0 0', color: 'var(--text-muted)' }}>
           Liquidate stressed positions (Health Factor &lt; 1.2) to protect lender capital and earn bonus collateral.
         </Paragraph>
       </div>
@@ -149,15 +143,15 @@ export const LiquidationCenterPage: React.FC = () => {
             <StatisticCard
               title="Liquidatable Positions"
               value={count}
-              icon={<Flame size={22} style={{ color: count > 0 ? 'var(--danger-color)' : 'var(--text-muted)' }} />}
+              icon={<Flame size={18} style={{ color: count > 0 ? 'var(--danger-color)' : 'var(--text-muted)' }} />}
             />
             {count > 0 && (
               <span style={{
                 position: 'absolute',
-                top: '12px',
-                right: '12px',
-                width: '10px',
-                height: '10px',
+                top: '16px',
+                right: '16px',
+                width: '8px',
+                height: '8px',
                 backgroundColor: 'var(--danger-color)',
                 borderRadius: '50%',
                 display: 'inline-block'
@@ -169,21 +163,21 @@ export const LiquidationCenterPage: React.FC = () => {
           <StatisticCard
             title="Total Debt at Risk"
             value={formatCurrency(totalDebtAtRisk, 'USDC')}
-            icon={<AlertTriangle size={22} />}
+            icon={<AlertTriangle size={18} />}
           />
         </Col>
         <Col xs={24} sm={12} lg={6}>
           <StatisticCard
             title="Est. Arbitrage Profit"
             value={formatCurrency(totalBonusVal, 'USDC')}
-            icon={<Coins size={22} />}
+            icon={<Coins size={18} />}
           />
         </Col>
         <Col xs={24} sm={12} lg={6}>
           <StatisticCard
             title="Average Stressed HF"
             value={count > 0 ? avgHF.toFixed(2) : 'N/A'}
-            icon={<TrendingDown size={22} />}
+            icon={<TrendingDown size={18} />}
           />
         </Col>
       </Row>
@@ -195,7 +189,7 @@ export const LiquidationCenterPage: React.FC = () => {
           description="All positions on the Nexus protocol are currently healthy. Health Factors are above the 1.2 risk line."
         />
       ) : (
-        <Card title="Stressed Positions Ledger" styles={{ body: { padding: 0 } }}>
+        <Card title="Stressed Positions Ledger" styles={{ body: { padding: 0 } }} style={{ border: '1px solid var(--border-color)' }}>
           <Table columns={columns} dataSource={liquidatableLoans.map((item) => ({ ...item, key: item.id }))} pagination={false} />
         </Card>
       )}

@@ -115,12 +115,12 @@ export const HowItWorksSection: React.FC = () => {
           {/* Left Side: Interactive Steps Selector */}
           <Col xs={24} md={10}>
             <Steps
-              direction="vertical"
+              orientation="vertical"
               current={currentStep}
               onChange={setCurrentStep}
               items={stepsDetails.map((s, idx) => ({
                 title: <span style={{ fontWeight: 600, fontSize: '14px' }}>{s.title}</span>,
-                description: <span style={{ display: 'none' }}>{s.desc}</span>, // hide description in steps list
+                content: <span style={{ display: 'none' }}>{s.desc}</span>, // hide content in steps list
                 icon: (
                   <div style={{
                     width: '32px',

@@ -1,9 +1,11 @@
 import type { LoanOffer, OfferStatus } from '../../types';
 import type { CreateOfferInput } from '../offers/offers.service';
 import { apiClient, toBps, toHealthFactorBps, toNumber } from './client';
+import type { ConfirmedChainReceiptPayload } from './client';
 
 interface BackendLoanOffer {
   id: string;
+  contractOfferId?: string | null;
   lenderWallet: string;
   loanAsset: string;
   loanAmount: string;
@@ -23,6 +25,7 @@ interface BackendLoanOffer {
 
 export const mapBackendOffer = (offer: BackendLoanOffer): LoanOffer => ({
   id: offer.id,
+  contractOfferId: offer.contractOfferId ? BigInt(offer.contractOfferId) : undefined,
   lender: offer.lenderWallet,
   amount: toNumber(offer.loanAmount),
   asset: offer.loanAsset,
@@ -40,7 +43,11 @@ export const mapBackendOffer = (offer: BackendLoanOffer): LoanOffer => ({
   acceptedLoanId: offer.loans?.[0]?.id,
 });
 
-const mapCreateOffer = (input: CreateOfferInput, lenderWallet: string) => ({
+const mapCreateOffer = (
+  input: CreateOfferInput,
+  lenderWallet: string,
+  extra: ConfirmedChainReceiptPayload & { contractOfferId: number | bigint }
+) => ({
   lenderWallet,
   loanAsset: input.asset,
   loanAmount: String(input.amount),
@@ -53,6 +60,8 @@ const mapCreateOffer = (input: CreateOfferInput, lenderWallet: string) => ({
   gracePeriodDays: input.gracePeriod,
   minHealthFactorBps: toHealthFactorBps(input.minHealthFactor),
   description: input.description,
+  ...extra,
+  contractOfferId: String(extra.contractOfferId),
 });
 
 export const offersApi = {
@@ -62,8 +71,12 @@ export const offersApi = {
     return offers.map(mapBackendOffer);
   },
 
-  async create(input: CreateOfferInput, lenderWallet: string): Promise<LoanOffer> {
-    const offer = await apiClient.post<BackendLoanOffer>('/api/offers', mapCreateOffer(input, lenderWallet));
+  async create(
+    input: CreateOfferInput,
+    lenderWallet: string,
+    extra: ConfirmedChainReceiptPayload & { contractOfferId: number | bigint }
+  ): Promise<LoanOffer> {
+    const offer = await apiClient.post<BackendLoanOffer>('/api/offers', mapCreateOffer(input, lenderWallet, extra));
     return mapBackendOffer(offer);
   },
 
@@ -72,23 +85,26 @@ export const offersApi = {
     return mapBackendOffer(offer);
   },
 
-  async fund(id: string, wallet?: string | null): Promise<LoanOffer> {
+  async fund(id: string, wallet: string, extra: ConfirmedChainReceiptPayload): Promise<LoanOffer> {
     const offer = await apiClient.post<BackendLoanOffer>(`/api/offers/${id}/fund`, {
-      wallet: wallet ?? undefined,
+      wallet,
+      ...extra,
     });
     return mapBackendOffer(offer);
   },
 
-  async activate(id: string, wallet?: string | null): Promise<LoanOffer> {
+  async activate(id: string, wallet: string, extra: ConfirmedChainReceiptPayload): Promise<LoanOffer> {
     const offer = await apiClient.post<BackendLoanOffer>(`/api/offers/${id}/activate`, {
-      wallet: wallet ?? undefined,
+      wallet,
+      ...extra,
     });
     return mapBackendOffer(offer);
   },
 
-  async cancel(id: string, wallet?: string | null): Promise<LoanOffer> {
+  async cancel(id: string, wallet: string, extra: ConfirmedChainReceiptPayload): Promise<LoanOffer> {
     const offer = await apiClient.post<BackendLoanOffer>(`/api/offers/${id}/cancel`, {
-      wallet: wallet ?? undefined,
+      wallet,
+      ...extra,
     });
     return mapBackendOffer(offer);
   },

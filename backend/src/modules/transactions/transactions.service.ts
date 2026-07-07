@@ -20,9 +20,9 @@ export const transactionsService = {
     const data: Prisma.TransactionUncheckedCreateInput = {
       ...input,
       amount: input.amount ? new Prisma.Decimal(input.amount) : undefined,
+      blockTimestamp: input.blockTimestamp,
       metadata: input.metadata as Prisma.InputJsonValue | undefined
     };
     return prisma.transaction.create({ data });
   }
 };
-

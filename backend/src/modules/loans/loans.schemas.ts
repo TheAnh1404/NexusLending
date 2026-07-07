@@ -1,9 +1,10 @@
 import { z } from 'zod';
+import { confirmedChainReceiptSchema } from '../transactions/transactions.schemas';
 
 const decimalInput = z.union([z.string().min(1), z.number()]).transform(String);
 
 export const createLoanSchema = z.object({
-  contractLoanId: z.coerce.bigint().optional(),
+  contractLoanId: z.coerce.bigint(),
   offerId: z.string().optional(),
   contractOfferId: z.coerce.bigint().optional(),
   lenderWallet: z.string().min(1),
@@ -37,9 +38,7 @@ export const createLoanSchema = z.object({
       'Liquidated'
     ])
     .default('PendingCollateral'),
-  txHash: z.string().optional(),
-  explorerUrl: z.string().url().optional()
-});
+}).merge(confirmedChainReceiptSchema);
 
 export const updateLoanSchema = createLoanSchema.partial().extend({
   action: z
@@ -53,11 +52,12 @@ export const updateLoanSchema = createLoanSchema.partial().extend({
     .optional(),
   wallet: z.string().min(1).optional(),
   amount: decimalInput.optional()
-});
+}).merge(confirmedChainReceiptSchema.partial());
 
 export const activateLoanSchema = z.object({
-  wallet: z.string().min(1).optional()
-});
+  wallet: z.string().min(1),
+  contractLoanId: z.coerce.bigint().optional()
+}).merge(confirmedChainReceiptSchema);
 
 export type CreateLoanInput = z.infer<typeof createLoanSchema>;
 export type UpdateLoanInput = z.infer<typeof updateLoanSchema>;

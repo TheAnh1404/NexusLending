@@ -187,3 +187,90 @@ fn expired_offer_cannot_be_accepted() {
     assert!(result.is_err());
     assert_eq!(f.marketplace.get_offer(&offer_id).status, OfferStatus::Expired);
 }
+
+#[test]
+fn create_offer_with_frontend_params() {
+    let f = setup();
+    let offer_id = f.marketplace.create_offer(
+        &f.lender,
+        &f.loan_asset,
+        &100_000_000_000_i128,
+        &800_u32,
+        &60_u32,
+        &f.collateral_asset,
+        &6_000_u32,
+        &7_500_u32,
+        &1_000_u32,
+        &3_u32,
+        &14_000_u32,
+    );
+    let offer = f.marketplace.get_offer(&offer_id);
+    assert_eq!(offer.status, OfferStatus::Draft);
+    assert_eq!(offer.loan_amount, 100_000_000_000);
+    assert_eq!(offer.fixed_apr_bps, 800);
+    assert_eq!(offer.duration_days, 60);
+    assert_eq!(offer.max_ltv_bps, 6_000);
+    assert_eq!(offer.liquidation_threshold_bps, 7_500);
+    assert_eq!(offer.liquidation_bonus_bps, 1_000);
+    assert_eq!(offer.grace_period_days, 3);
+    assert_eq!(offer.min_health_factor_bps, 14_000);
+}
+
+#[test]
+fn create_offer_default_min_hf() {
+    let f = setup();
+    let offer_id = f.marketplace.create_offer(
+        &f.lender,
+        &f.loan_asset,
+        &1_000_i128,
+        &500_u32,
+        &30_u32,
+        &f.collateral_asset,
+        &5_000_u32,
+        &8_000_u32,
+        &0_u32,
+        &7_u32,
+        &0_u32,
+    );
+    let offer = f.marketplace.get_offer(&offer_id);
+    assert_eq!(offer.min_health_factor_bps, 14_000);
+    assert_eq!(offer.liquidation_bonus_bps, 500);
+}
+
+#[test]
+fn create_offer_invalid_ltv_exceeds_threshold() {
+    let f = setup();
+    let result = f.marketplace.try_create_offer(
+        &f.lender,
+        &f.loan_asset,
+        &1_000_i128,
+        &500_u32,
+        &30_u32,
+        &f.collateral_asset,
+        &9_000_u32,
+        &7_500_u32,
+        &500_u32,
+        &3_u32,
+        &14_000_u32,
+    );
+    assert!(result.is_err());
+}
+
+#[test]
+fn create_offer_zero_amount_fails() {
+    let f = setup();
+    let result = f.marketplace.try_create_offer(
+        &f.lender,
+        &f.loan_asset,
+        &0_i128,
+        &500_u32,
+        &30_u32,
+        &f.collateral_asset,
+        &6_000_u32,
+        &8_000_u32,
+        &500_u32,
+        &3_u32,
+        &14_000_u32,
+    );
+    assert!(result.is_err());
+}

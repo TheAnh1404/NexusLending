@@ -1,5 +1,4 @@
 import type { Transaction, TransactionType } from '../../types';
-import { buildMockTxHash } from '../../utils/format';
 
 interface CreateTransactionInput {
   type: TransactionType;
@@ -14,7 +13,7 @@ interface CreateTransactionInput {
 export const transactionsService = {
   create(input: CreateTransactionInput): Transaction {
     return {
-      id: `tx_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      id: crypto.randomUUID(),
       timestamp: new Date().toISOString(),
       type: input.type,
       user: input.user,
@@ -23,8 +22,6 @@ export const transactionsService = {
       details: input.details,
       loanId: input.loanId,
       offerId: input.offerId,
-      txHash: buildMockTxHash(input.type.toLowerCase()),
     };
   },
 };
-

@@ -71,7 +71,7 @@ export const PartialRepaymentModal: React.FC<PartialRepaymentModalProps> = ({
             <Text strong>${wallet.balanceUSDC.toLocaleString()}</Text>
           </div>
 
-          <Space direction="horizontal" style={{ marginBottom: '16px', display: 'flex', flexWrap: 'wrap' }}>
+          <Space orientation="horizontal" style={{ marginBottom: '16px', display: 'flex', flexWrap: 'wrap' }}>
             <Button
               type={isFullRepay ? 'primary' : 'default'}
               onClick={() => {
@@ -131,7 +131,7 @@ export const PartialRepaymentModal: React.FC<PartialRepaymentModalProps> = ({
 
           {isFullRepay ? (
             <Alert
-              message="Collateral Reclaimed"
+              title="Collateral Reclaimed"
               description={`Full repayment releases ${loan.collateralAmount.toLocaleString()} XLM back to the borrower wallet.`}
               type="info"
               showIcon

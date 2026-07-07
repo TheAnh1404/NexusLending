@@ -17,6 +17,7 @@ import {
   Form,
   Space,
   Typography,
+  Alert,
 } from 'antd';
 import {
   ShieldCheck,
@@ -36,9 +37,14 @@ export const BorrowerDashboardPage: React.FC = () => {
   const usdcPrice = oraclePrices.find((p) => p.asset === 'USDC')?.price || 1.0;
 
   // Filter loans belonging to this borrower
-  const borrowerLoans = loans.filter(
-    (l) => l.borrower === wallet.address && isOpenLoanStatus(l.status)
-  );
+  // Filter loans belonging to this borrower, sorting PendingCollateral first
+  const borrowerLoans = loans
+    .filter((l) => l.borrower === wallet.address && isOpenLoanStatus(l.status))
+    .sort((a, b) => {
+      if (a.status === 'PendingCollateral' && b.status !== 'PendingCollateral') return -1;
+      if (a.status !== 'PendingCollateral' && b.status === 'PendingCollateral') return 1;
+      return 0;
+    });
   const activeDebtLoans = borrowerLoans.filter((loan) => loan.status !== 'PendingCollateral');
 
   // Statistics
@@ -189,19 +195,19 @@ export const BorrowerDashboardPage: React.FC = () => {
 
                   <Row gutter={[16, 16]} style={{ marginBottom: '20px' }}>
                     <Col xs={12} sm={8} style={{ textAlign: 'center' }}>
-                      <div style={{ padding: '12px', background: 'var(--bg-color)', borderRadius: '8px' }}>
-                        <Text type="secondary" style={{ fontSize: '11px', display: 'block' }}>DEBT DUE</Text>
+                      <div style={{ padding: '12px', background: 'var(--border-light)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)' }}>
+                        <Text type="secondary" style={{ fontSize: '11px', display: 'block', fontWeight: 600 }}>DEBT DUE</Text>
                         <Text strong style={{ fontSize: '15px' }}>{formatCurrency(loan.outstandingDebt, 'USDC')}</Text>
                       </div>
                     </Col>
                     <Col xs={12} sm={8} style={{ textAlign: 'center' }}>
-                      <div style={{ padding: '12px', background: 'var(--bg-color)', borderRadius: '8px' }}>
-                        <Text type="secondary" style={{ fontSize: '11px', display: 'block' }}>COLLATERAL</Text>
+                      <div style={{ padding: '12px', background: 'var(--border-light)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)' }}>
+                        <Text type="secondary" style={{ fontSize: '11px', display: 'block', fontWeight: 600 }}>COLLATERAL</Text>
                         <Text strong style={{ fontSize: '15px' }}>{loan.collateralAmount.toLocaleString()} XLM</Text>
                       </div>
                     </Col>
                     <Col xs={24} sm={8} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <Space direction="vertical" align="center" size={0}>
+                      <Space orientation="vertical" align="center" size={0}>
                         <HealthFactorGauge value={loan.healthFactor} size={80} />
                       </Space>
                     </Col>
@@ -214,7 +220,7 @@ export const BorrowerDashboardPage: React.FC = () => {
                     fontSize: '12px',
                     color: 'var(--text-muted)',
                     marginBottom: '24px',
-                    borderTop: '1px solid var(--border-light)',
+                    borderTop: '1px solid var(--border-color)',
                     paddingTop: '12px'
                   }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -231,25 +237,74 @@ export const BorrowerDashboardPage: React.FC = () => {
                         {((loan.outstandingDebt / (loan.collateralAmount * xlmPrice)) * 100).toFixed(1)}% LTV / {loan.liquidationThreshold}%
                       </span>
                     </div>
+                    {loan.status !== 'PendingCollateral' && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>Est. Liquidation Price:</span>
+                        <span style={{ fontWeight: 700, color: 'var(--danger-color)' }}>
+                          ${(loan.outstandingDebt / (loan.collateralAmount * (loan.liquidationThreshold / 100))).toFixed(4)} USDC
+                        </span>
+                      </div>
+                    )}
                   </div>
 
-                  <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                    {loan.status === 'PendingCollateral' ? (
-                      <Button type="primary" onClick={() => void handleActivateLoan(loan.id)} style={{ flex: 1 }}>
+                  {loan.status === 'PendingCollateral' && (
+                    <Alert
+                      type="warning"
+                      showIcon
+                      message="Activation Required"
+                      description="This loan is accepted but not active yet. Collateral must be locked before funds are disbursed."
+                      style={{ marginBottom: '20px' }}
+                    />
+                  )}
+
+                  {loan.status === 'Warning' && (
+                    <Alert
+                      type="warning"
+                      showIcon
+                      message="Margin Warning"
+                      description="Your health factor is low. Please add collateral to avoid liquidation risk."
+                      style={{ marginBottom: '20px' }}
+                    />
+                  )}
+
+                  {loan.status === 'LiquidationPlanning' && (
+                    <Alert
+                      type="error"
+                      showIcon
+                      message="Liquidation Risk"
+                      description="Your position is under-collateralized and vulnerable to immediate liquidation."
+                      style={{ marginBottom: '20px' }}
+                    />
+                  )}
+
+                  {['Defaulted', 'Expired'].includes(loan.status) && (
+                    <Alert
+                      type="error"
+                      showIcon
+                      message="Expired / Defaulted"
+                      description="This loan has expired or defaulted. It may be liquidated regardless of Health Factor."
+                      style={{ marginBottom: '20px' }}
+                    />
+                  )}
+
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    {loan.status === 'PendingCollateral' && (
+                      <Button type="primary" onClick={() => void handleActivateLoan(loan.id)} style={{ flex: 2 }}>
                         Activate Loan
                       </Button>
-                    ) : (
+                    )}
+                    {['Active', 'Warning', 'LiquidationPlanning'].includes(loan.status) && (
                       <>
-                        <Button type="primary" onClick={() => openAddCollateralModal(loan.id)} style={{ flex: 1 }}>
+                        <Button type="primary" onClick={() => openAddCollateralModal(loan.id)} style={{ flex: 2 }}>
                           Add Collateral
                         </Button>
-                        <Button onClick={() => openRepayModal(loan.id)} style={{ flex: 1 }}>
+                        <Button onClick={() => openRepayModal(loan.id)} style={{ flex: 2 }}>
                           Repay Debt
                         </Button>
                       </>
                     )}
-                    <Button onClick={() => navigate(`/app/loans/${loan.id}`)}>
-                      Details
+                    <Button style={{ flex: 1 }} onClick={() => navigate(`/app/loans/${loan.id}`)}>
+                      Specs
                     </Button>
                   </div>
                 </Card>

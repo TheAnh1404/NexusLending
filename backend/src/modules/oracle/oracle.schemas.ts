@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { confirmedChainReceiptSchema } from '../transactions/transactions.schemas';
 
 const decimalInput = z.union([z.string().min(1), z.number()]).transform(String);
 
@@ -10,7 +11,7 @@ export const upsertOraclePriceSchema = z.object({
   decimals: z.coerce.number().int().nonnegative().max(18),
   source: z.string().min(1),
   updatedAt: z.coerce.date().optional(),
-  wallet: z.string().min(1).optional()
-});
+  wallet: z.string().min(1)
+}).merge(confirmedChainReceiptSchema);
 
 export type UpsertOraclePriceInput = z.infer<typeof upsertOraclePriceSchema>;

@@ -1,14 +1,13 @@
-import { LoanStatus, Prisma, RiskZone, TransactionType } from '@prisma/client';
+import { LoanStatus, Prisma, RiskZone } from '@prisma/client';
 
 import { prisma } from '../../prisma/client';
 import { ApiError } from '../../utils/apiError';
 import {
   calculateHealthFactor,
   calculateLTV,
-  calculateRepaymentAmount,
   getRiskZone
 } from '../../utils/finance';
-import { sorobanService } from '../soroban/soroban.service';
+import { createLedgerTransaction, requireConfirmedReceipt } from '../transactions/chainReceipt';
 import type { ActivateLoanInput, CreateLoanInput, UpdateLoanInput } from './loans.schemas';
 
 const activeStatuses: LoanStatus[] = [
@@ -27,9 +26,6 @@ const statusForRiskZone = (riskZone: RiskZone): LoanStatus => {
 
 const decimal = (value: Prisma.Decimal.Value): Prisma.Decimal => new Prisma.Decimal(value);
 
-const createMockTxHash = (type: string): string =>
-  `mock_${type.toLowerCase()}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-
 const durationDays = (start?: Date | null, due?: Date | null): number => {
   if (!start || !due) return 0;
   return Math.max(0, Math.round((due.getTime() - start.getTime()) / 86_400_000));
@@ -37,30 +33,6 @@ const durationDays = (start?: Date | null, due?: Date | null): number => {
 
 const contractLoanRef = (loan: { contractLoanId: bigint | number | null; id: string }) =>
   loan.contractLoanId?.toString() ?? loan.id;
-
-const ledgerTransaction = (
-  type: TransactionType,
-  wallet: string,
-  input: {
-    offerId?: string | null;
-    loanId?: string;
-    asset?: string;
-    amount?: Prisma.Decimal.Value;
-    details: string;
-    txHash?: string;
-    explorerUrl?: string;
-  }
-): Prisma.TransactionUncheckedCreateInput => ({
-  txHash: input.txHash ?? createMockTxHash(type),
-  explorerUrl: input.explorerUrl,
-  type,
-  wallet,
-  offerId: input.offerId ?? undefined,
-  loanId: input.loanId,
-  asset: input.asset,
-  amount: input.amount === undefined ? undefined : decimal(input.amount),
-  metadata: { details: input.details }
-});
 
 const findPrice = async (collateralAsset: string, loanAsset: string) =>
   prisma.oraclePrice.findFirst({
@@ -151,6 +123,7 @@ export const loansService = {
 
   async activate(id: string, input?: ActivateLoanInput) {
     const loan = await this.getById(id);
+    const receipt = requireConfirmedReceipt(input);
     if (loan.status !== 'PendingCollateral') {
       throw new ApiError(400, 'Only PendingCollateral loans can be activated');
     }
@@ -181,30 +154,35 @@ export const loansService = {
     const now = new Date();
     const termDays = loan.offer?.durationDays ?? durationDays(loan.startTime, loan.dueTime);
     const dueTime = new Date(now.getTime() + termDays * 86_400_000);
-    const sorobanTx = sorobanService.activateLoanTx(contractLoanRef(loan));
 
     return prisma.$transaction(async (tx) => {
       const updated = await tx.loan.update({
         where: { id },
         data: {
           ...riskPatch,
+          contractLoanId: input?.contractLoanId ?? undefined,
           startTime: now,
           dueTime,
-          txHash: sorobanTx.txHash,
-          explorerUrl: sorobanTx.explorerUrl
+          txHash: receipt.txHash,
+          explorerUrl: receipt.explorerUrl,
+          ledger: receipt.ledger,
+          blockTimestamp: receipt.blockTimestamp
         },
         include: { offer: true }
       });
 
       await tx.transaction.create({
-        data: ledgerTransaction('ACTIVATE_LOAN', loan.borrowerWallet, {
+        data: createLedgerTransaction('ACTIVATE_LOAN', loan.borrowerWallet, {
           offerId: loan.offerId,
           loanId: id,
           asset: loan.loanAsset,
           amount: loan.principal,
-          txHash: sorobanTx.txHash,
-          explorerUrl: sorobanTx.explorerUrl,
-          details: `Activated loan ${id}; collateral locked and loan asset transferred to borrower.`
+          receipt,
+          details: `Activated loan ${id}; collateral locked and loan asset transferred to borrower.`,
+          metadata: {
+            contractFunction: 'activate_loan',
+            contractLoanId: contractLoanRef(loan)
+          }
         })
       });
 
@@ -213,6 +191,7 @@ export const loansService = {
   },
 
   async create(input: CreateLoanInput) {
+    const receipt = requireConfirmedReceipt(input);
     const offer = input.offerId
       ? await prisma.loanOffer.findUnique({ where: { id: input.offerId } })
       : null;
@@ -252,8 +231,10 @@ export const loansService = {
       liquidationBonusBps: offer?.liquidationBonusBps ?? input.liquidationBonusBps,
       minHealthFactorBps: offer?.minHealthFactorBps ?? input.minHealthFactorBps,
       gracePeriodDays: offer?.gracePeriodDays ?? input.gracePeriodDays,
-      txHash: input.txHash,
-      explorerUrl: input.explorerUrl
+      txHash: receipt.txHash,
+      explorerUrl: receipt.explorerUrl,
+      ledger: receipt.ledger,
+      blockTimestamp: receipt.blockTimestamp
     };
 
     const riskPatch = await buildRiskPatch({
@@ -283,12 +264,17 @@ export const loansService = {
       }
 
       await tx.transaction.create({
-        data: ledgerTransaction('BORROW_LOAN', input.borrowerWallet, {
+        data: createLedgerTransaction('BORROW_LOAN', input.borrowerWallet, {
           offerId: offer?.id,
           loanId: loan.id,
           asset: loan.loanAsset,
           amount: loan.principal,
-          details: `Borrowed ${loan.principal.toString()} ${loan.loanAsset} with ${loan.collateralAmount.toString()} ${loan.collateralAsset} collateral.`
+          receipt,
+          details: `Borrowed ${loan.principal.toString()} ${loan.loanAsset} with ${loan.collateralAmount.toString()} ${loan.collateralAsset} collateral.`,
+          metadata: {
+            contractFunction: 'accept_offer',
+            contractLoanId: loan.contractLoanId?.toString()
+          }
         })
       });
 
@@ -301,53 +287,7 @@ export const loansService = {
       return this.applyAction(id, input);
     }
 
-    const existing = await this.getById(id);
-
-    const data: Prisma.LoanUncheckedUpdateInput = {
-      contractLoanId: input.contractLoanId,
-      offerId: input.offerId,
-      contractOfferId: input.contractOfferId,
-      lenderWallet: input.lenderWallet,
-      borrowerWallet: input.borrowerWallet,
-      loanAsset: input.loanAsset,
-      principal: input.principal ? new Prisma.Decimal(input.principal) : undefined,
-      outstandingDebt: input.outstandingDebt ? new Prisma.Decimal(input.outstandingDebt) : undefined,
-      fixedAprBps: input.fixedAprBps,
-      collateralAsset: input.collateralAsset,
-      collateralAmount: input.collateralAmount ? new Prisma.Decimal(input.collateralAmount) : undefined,
-      startTime: input.startTime,
-      dueTime: input.dueTime,
-      maxLtvBps: input.maxLtvBps,
-      liquidationThresholdBps: input.liquidationThresholdBps,
-      liquidationBonusBps: input.liquidationBonusBps,
-      minHealthFactorBps: input.minHealthFactorBps,
-      gracePeriodDays: input.gracePeriodDays,
-      healthFactor: undefined,
-      ltv: undefined,
-      riskZone: input.riskZone,
-      status: input.status,
-      txHash: input.txHash,
-      explorerUrl: input.explorerUrl
-    };
-
-    const merged = {
-      collateralAsset: input.collateralAsset ?? existing.collateralAsset,
-      loanAsset: input.loanAsset ?? existing.loanAsset,
-      collateralAmount: input.collateralAmount ?? existing.collateralAmount,
-      outstandingDebt: input.outstandingDebt ?? existing.outstandingDebt,
-      liquidationThresholdBps:
-        input.liquidationThresholdBps ?? existing.liquidationThresholdBps
-    };
-    const riskPatch = await buildRiskPatch(merged);
-
-    return prisma.loan.update({
-      where: { id },
-      data: {
-        ...data,
-        ...riskPatch
-      },
-      include: { offer: true }
-    });
+    throw new ApiError(400, 'Direct loan writes are disabled; submit a confirmed blockchain action');
   },
 
   async applyAction(id: string, input: UpdateLoanInput) {
@@ -356,6 +296,7 @@ export const loansService = {
     const amount = input.amount ? new Prisma.Decimal(input.amount) : undefined;
 
     if (!wallet) throw new ApiError(400, 'wallet is required for loan actions');
+    const receipt = requireConfirmedReceipt(input);
 
     if (input.action === 'ADD_COLLATERAL') {
       ensureOpenLoan(loan);
@@ -364,28 +305,31 @@ export const loansService = {
 
       const collateralAmount = loan.collateralAmount.add(amount);
       const riskPatch = await buildRiskPatch({ ...loan, collateralAmount });
-      const sorobanTx = sorobanService.addCollateralTx({
-        loanId: contractLoanRef(loan),
-        amount: amount.toString()
-      });
 
       return prisma.$transaction(async (tx) => {
         const updated = await tx.loan.update({
           where: { id },
           data: {
             collateralAmount,
+            txHash: receipt.txHash,
+            explorerUrl: receipt.explorerUrl,
+            ledger: receipt.ledger,
+            blockTimestamp: receipt.blockTimestamp,
             ...riskPatch
           },
           include: { offer: true }
         });
         await tx.transaction.create({
-          data: ledgerTransaction('ADD_COLLATERAL', wallet, {
+          data: createLedgerTransaction('ADD_COLLATERAL', wallet, {
             loanId: id,
             asset: loan.collateralAsset,
             amount,
-            txHash: sorobanTx.txHash,
-            explorerUrl: sorobanTx.explorerUrl,
-            details: `Added ${amount.toString()} ${loan.collateralAsset} collateral to ${id}.`
+            receipt,
+            details: `Added ${amount.toString()} ${loan.collateralAsset} collateral to ${id}.`,
+            metadata: {
+              contractFunction: 'add_collateral',
+              contractLoanId: contractLoanRef(loan)
+            }
           })
         });
         return updated;
@@ -414,13 +358,6 @@ export const loansService = {
             closedAt: new Date()
           }
         : await buildRiskPatch({ ...loan, outstandingDebt: nextDebt });
-      const sorobanTx =
-        input.action === 'FULL_REPAY'
-          ? sorobanService.fullRepayTx(contractLoanRef(loan))
-          : sorobanService.partialRepayTx({
-              loanId: contractLoanRef(loan),
-              amount: repayAmount.toString()
-            });
 
       return prisma.$transaction(async (tx) => {
         const updated = await tx.loan.update({
@@ -428,20 +365,27 @@ export const loansService = {
           data: {
             outstandingDebt: isClosed ? new Prisma.Decimal(0) : nextDebt,
             collateralAmount: isClosed ? new Prisma.Decimal(0) : loan.collateralAmount,
+            txHash: receipt.txHash,
+            explorerUrl: receipt.explorerUrl,
+            ledger: receipt.ledger,
+            blockTimestamp: receipt.blockTimestamp,
             ...riskPatch
           },
           include: { offer: true }
         });
         await tx.transaction.create({
-          data: ledgerTransaction(input.action === 'FULL_REPAY' ? 'FULL_REPAY' : 'PARTIAL_REPAY', wallet, {
+          data: createLedgerTransaction(input.action === 'FULL_REPAY' ? 'FULL_REPAY' : 'PARTIAL_REPAY', wallet, {
             loanId: id,
             asset: loan.loanAsset,
             amount: repayAmount,
-            txHash: sorobanTx.txHash,
-            explorerUrl: sorobanTx.explorerUrl,
+            receipt,
             details: isClosed
               ? `Fully repaid ${id}; collateral released.`
-              : `Partially repaid ${repayAmount.toString()} ${loan.loanAsset} on ${id}.`
+              : `Partially repaid ${repayAmount.toString()} ${loan.loanAsset} on ${id}.`,
+            metadata: {
+              contractFunction: input.action === 'FULL_REPAY' ? 'full_repay' : 'partial_repay',
+              contractLoanId: contractLoanRef(loan)
+            }
           })
         });
         return updated;
@@ -487,11 +431,6 @@ export const loansService = {
             outstandingDebt: nextDebt,
             collateralAmount: nextCollateral
           });
-      const sorobanTx = sorobanService.liquidateTx({
-        loanId: contractLoanRef(loan),
-        liquidator: wallet,
-        amount: amount.toString()
-      });
 
       return prisma.$transaction(async (tx) => {
         const updated = await tx.loan.update({
@@ -499,18 +438,25 @@ export const loansService = {
           data: {
             outstandingDebt: nextDebt.lt(0) ? new Prisma.Decimal(0) : nextDebt,
             collateralAmount: nextCollateral.lt(0) ? new Prisma.Decimal(0) : nextCollateral,
+            txHash: receipt.txHash,
+            explorerUrl: receipt.explorerUrl,
+            ledger: receipt.ledger,
+            blockTimestamp: receipt.blockTimestamp,
             ...riskPatch
           },
           include: { offer: true }
         });
         await tx.transaction.create({
-          data: ledgerTransaction('LIQUIDATE', wallet, {
+          data: createLedgerTransaction('LIQUIDATE', wallet, {
             loanId: id,
             asset: loan.loanAsset,
             amount,
-            txHash: sorobanTx.txHash,
-            explorerUrl: sorobanTx.explorerUrl,
-            details: `Liquidated ${amount.toString()} ${loan.loanAsset} on ${id}; received ${collateralReceived.toDecimalPlaces(2).toString()} ${loan.collateralAsset}.`
+            receipt,
+            details: `Liquidated ${amount.toString()} ${loan.loanAsset} on ${id}; received ${collateralReceived.toDecimalPlaces(2).toString()} ${loan.collateralAsset}.`,
+            metadata: {
+              contractFunction: 'liquidate',
+              contractLoanId: contractLoanRef(loan)
+            }
           })
         });
         return updated;
@@ -518,37 +464,7 @@ export const loansService = {
     }
 
     if (input.action === 'CLAIM_REPAYMENT') {
-      if (wallet !== loan.lenderWallet) throw new ApiError(403, 'Only lender can claim repayment');
-      if (loan.status !== 'Repaid') throw new ApiError(400, 'Only repaid loans can be claimed');
-      if (loan.claimedByLender) throw new ApiError(400, 'Repayment already claimed');
-
-      const days = durationDays(loan.startTime, loan.dueTime);
-      const claimAmount = calculateRepaymentAmount(
-        loan.principal,
-        loan.fixedAprBps / 100,
-        days
-      );
-
-      return prisma.$transaction(async (tx) => {
-        const updated = await tx.loan.update({
-          where: { id },
-          data: {
-            claimedByLender: true,
-            status: 'Closed',
-            closedAt: new Date()
-          },
-          include: { offer: true }
-        });
-        await tx.transaction.create({
-          data: ledgerTransaction('CLAIM_REPAYMENT', wallet, {
-            loanId: id,
-            asset: loan.loanAsset,
-            amount: claimAmount,
-            details: `Claimed settled repayment for ${id}.`
-          })
-        });
-        return updated;
-      });
+      throw new ApiError(400, 'CLAIM_REPAYMENT has no public Soroban contract method yet');
     }
 
     throw new ApiError(400, 'Unsupported loan action');

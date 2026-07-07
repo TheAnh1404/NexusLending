@@ -27,13 +27,15 @@ export const StatisticCard: React.FC<StatisticCardProps> = ({
         <Statistic
           title={title}
           value={value}
-          valueStyle={{
-            fontSize: 26,
-            lineHeight: 1.15,
-            fontWeight: 700,
-            color: 'var(--text-main)',
-            fontFamily: 'var(--font-heading)',
-            wordBreak: 'break-word',
+          styles={{
+            content: {
+              fontSize: 26,
+              lineHeight: 1.15,
+              fontWeight: 700,
+              color: 'var(--text-main)',
+              fontFamily: 'var(--font-heading)',
+              wordBreak: 'break-word',
+            }
           }}
         />
         {icon && (

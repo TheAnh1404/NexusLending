@@ -1,10 +1,12 @@
 import type { Loan, LoanOffer, LoanStatus, RiskZone } from '../../types';
 import { calculateRepaymentAmount } from '../../utils/finance';
 import { apiClient, toBps, toHealthFactorBps, toNumber } from './client';
+import type { ConfirmedChainReceiptPayload } from './client';
 import { mapBackendOffer } from './offers.api';
 
 interface BackendLoan {
   id: string;
+  contractLoanId?: string | null;
   offerId?: string | null;
   lenderWallet: string;
   borrowerWallet: string;
@@ -43,6 +45,7 @@ export const mapBackendLoan = (loan: BackendLoan): Loan => {
 
   return {
     id: loan.id,
+    contractLoanId: loan.contractLoanId ? BigInt(loan.contractLoanId) : undefined,
     offerId: loan.offerId ?? offer?.id ?? '',
     borrower: loan.borrowerWallet,
     lender: loan.lenderWallet,
@@ -119,18 +122,27 @@ export const loansApi = {
   async acceptOffer(
     offerId: string,
     borrowerWallet: string,
-    collateralAmount: number
+    collateralAmount: number,
+    extra: ConfirmedChainReceiptPayload & { contractLoanId: number | bigint }
   ): Promise<Loan> {
     const loan = await apiClient.post<BackendLoan>(`/api/offers/${offerId}/accept`, {
       borrowerWallet,
       collateralAmount: String(collateralAmount),
+      ...extra,
+      contractLoanId: String(extra.contractLoanId),
     });
     return mapBackendLoan(loan);
   },
 
-  async activate(loanId: string, wallet?: string | null): Promise<Loan> {
+  async activate(
+    loanId: string,
+    wallet: string,
+    extra: ConfirmedChainReceiptPayload & { contractLoanId?: number | bigint }
+  ): Promise<Loan> {
     const loan = await apiClient.post<BackendLoan>(`/api/loans/${loanId}/activate`, {
-      wallet: wallet ?? undefined,
+      wallet,
+      ...extra,
+      contractLoanId: extra.contractLoanId ? String(extra.contractLoanId) : undefined,
     });
     return mapBackendLoan(loan);
   },
@@ -139,12 +151,14 @@ export const loansApi = {
     loanId: string,
     action: 'ADD_COLLATERAL' | 'PARTIAL_REPAY' | 'FULL_REPAY' | 'LIQUIDATE' | 'CLAIM_REPAYMENT',
     wallet: string,
-    amount?: number
+    amount?: number,
+    extra?: ConfirmedChainReceiptPayload
   ): Promise<Loan> {
     const loan = await apiClient.patch<BackendLoan>(`/api/loans/${loanId}`, {
       action,
       wallet,
       amount: amount === undefined ? undefined : String(amount),
+      ...extra,
     });
     return mapBackendLoan(loan);
   },

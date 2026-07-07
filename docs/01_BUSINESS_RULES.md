@@ -344,14 +344,14 @@ Rescue operations are allowed when `require_mutable()` passes:
 
 | Rule ID | Rule |
 |---------|------|
-| LN-1 | Loans are created exclusively by the Loan Manager's `create_loan_from_offer()`, called by the Marketplace. |
+| LN-1 | Loans are created as `PendingCollateral` by the Loan Manager's `create_pending_loan_from_offer()`, called by the Marketplace. |
 | LN-2 | Outstanding debt is computed at creation (principal + interest). |
-| LN-3 | `due_time = start_time + (duration_days × 86,400)`. |
-| LN-4 | LTV is checked at creation: if LTV > `max_ltv_bps`, the loan is rejected. |
-| LN-5 | HF is checked at creation: if HF < `min_health_factor_bps`, the loan is rejected. |
-| LN-6 | After validation, collateral is locked in the Vault via `lock_collateral()`. |
-| LN-7 | After validation, the loan asset is transferred from the Vault to the borrower via `transfer_loan_asset_to_borrower()`. |
-| LN-8 | Initial status is determined by `status_for_hf()`. |
+| LN-3 | `due_time = start_time + (duration_days × 86,400)` computed during activation. |
+| LN-4 | LTV is checked at activation: if LTV > `max_ltv_bps`, activation fails. |
+| LN-5 | HF is checked at activation: if HF < `min_health_factor_bps`, activation fails. |
+| LN-6 | During activation, collateral is locked in the Vault via `lock_collateral()`. |
+| LN-7 | During activation, the loan asset is transferred from the Vault to the borrower via `transfer_loan_asset_to_borrower()`. |
+| LN-8 | Initial status after activation is determined by `status_for_hf()`. |
 | LN-9 | Loans are assigned sequential IDs (1, 2, 3, ...). |
 
 ---
