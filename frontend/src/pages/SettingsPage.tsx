@@ -2,10 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { useAppContext } from '../app/AppContext';
 import { useWallet } from '../hooks/useWallet';
 import { formatCurrency } from '../utils/finance';
-import { Card, Row, Col, Descriptions, Button, Switch, List, Typography, Tag, Space, Divider, message } from 'antd';
+import { App, Card, Row, Col, Descriptions, Button, Switch, List, Typography, Tag, Space, Divider } from 'antd';
 import { Wallet, ShieldCheck, Bell, Activity, Globe, LogOut, ExternalLink } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { CONTRACTS, ASSET_CONTRACTS, RPC_URL, NETWORK } from '../services/soroban/config';
+import { CONTRACTS, ASSET_CONTRACTS, RPC_URL, NETWORK, HORIZON_URL } from '../services/soroban/config';
+import { CHAIN_MODE } from '../services/api/client';
 
 const { Title, Paragraph, Text } = Typography;
 const NOTIFICATION_SETTINGS_KEY = 'nexus_notification_settings';
@@ -13,6 +14,7 @@ const NOTIFICATION_SETTINGS_KEY = 'nexus_notification_settings';
 export const SettingsPage: React.FC = () => {
   const { wallet, activities, disconnectWallet } = useAppContext();
   const { publicKey, isTestnet, disconnect } = useWallet();
+  const { message } = App.useApp();
   const navigate = useNavigate();
   const [emailAlerts, setEmailAlerts] = useState(true);
   const [telegramAlerts, setTelegramAlerts] = useState(false);
@@ -33,7 +35,7 @@ export const SettingsPage: React.FC = () => {
     } catch {
       message.warning('Unable to load notification settings.');
     }
-  }, []);
+  }, [message]);
 
   useEffect(() => {
     localStorage.setItem(NOTIFICATION_SETTINGS_KEY, JSON.stringify({
@@ -143,7 +145,7 @@ export const SettingsPage: React.FC = () => {
                   {
                     key: 'horizonRpc',
                     label: 'Horizon RPC Endpoint',
-                    children: <Text style={{ fontFamily: 'var(--font-mono)' }}>https://horizon-{NETWORK === 'mainnet' ? 'live' : NETWORK}.stellar.org</Text>,
+                    children: <Text style={{ fontFamily: 'var(--font-mono)' }}>{HORIZON_URL}</Text>,
                   },
                   {
                     key: 'sorobanRpc',
@@ -153,7 +155,14 @@ export const SettingsPage: React.FC = () => {
                   {
                     key: 'nodeStatus',
                     label: 'Node Status',
-                    children: <Tag color="success">ONLINE & ACTIVE</Tag>,
+                    children: <Tag color={CHAIN_MODE === 'mock' ? 'gold' : 'success'}>{CHAIN_MODE === 'mock' ? 'MOCK CHAIN MODE' : 'ONLINE & ACTIVE'}</Tag>,
+                  },
+                  {
+                    key: 'chainMode',
+                    label: 'Contract Execution',
+                    children: CHAIN_MODE === 'mock'
+                      ? <Text>Backend state is updated with mock chain receipts; Soroban RPC is not called.</Text>
+                      : <Text>Live Soroban calls require Freighter signatures and configured contracts.</Text>,
                   },
                   {
                     key: 'coreVersion',

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppContext } from '../app/AppContext';
 import { calculateRequiredCollateral } from '../utils/finance';
+import { API_URL, DATA_MODE, apiUnavailableMessage, switchToApiMode, switchToMockMode } from '../services/api/client';
 import type { LoanOffer } from '../types';
 
 import {
@@ -19,6 +20,7 @@ import {
   Tag,
   App,
   Modal,
+  Steps,
 } from 'antd';
 import {
   HelpCircle,
@@ -29,6 +31,8 @@ import {
   CheckCircle2,
   ExternalLink,
   Zap,
+  Layers,
+  ChevronRight
 } from 'lucide-react';
 
 const { Title, Paragraph, Text } = Typography;
@@ -48,6 +52,7 @@ interface CreateLoanFormValues {
   gracePeriod: number;
   minHealthFactor: number;
   description?: string;
+  expirationDays: number;
 }
 
 const getErrorMessage = (error: unknown, fallback: string): string => {
@@ -56,12 +61,24 @@ const getErrorMessage = (error: unknown, fallback: string): string => {
   return fallback;
 };
 
+const requiredNumber = (value: unknown, label: string): number => {
+  const numberValue = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(numberValue)) {
+    throw new Error(`${label} is missing. Go back to the previous steps and complete the field.`);
+  }
+  return numberValue;
+};
+
 export const CreateLoanPage: React.FC = () => {
   const { createOffer, fundOffer, activateOffer, oraclePrices, transactions } = useAppContext();
   const navigate = useNavigate();
   const [form] = Form.useForm();
   const { message } = App.useApp();
+  const isApiMode = DATA_MODE === 'api';
   
+  // Steps state
+  const [currentStep, setCurrentStep] = useState<number>(0);
+
   // Execution status states
   const [executing, setExecuting] = useState<boolean>(false);
   const [execStage, setExecStage] = useState<ExecutionStage>('idle');
@@ -82,8 +99,22 @@ export const CreateLoanPage: React.FC = () => {
   const [, setGracePeriod] = useState<number | undefined>(undefined);
   const [, setExpirationDays] = useState<number | undefined>(undefined);
   const [description, setDescription] = useState<string>('Custom isolated lending terms.');
-  const [asset, setAsset] = useState<string>('USDC');
-  const [collateralAsset, setCollateralAsset] = useState<string>('XLM');
+  const asset = 'USDC';
+  const collateralAsset = 'XLM';
+
+  const canSwitchFailedActionToMock = isApiMode
+    && (
+      errorDetails === apiUnavailableMessage()
+      || errorDetails.includes(`backend API at ${API_URL}`)
+    );
+
+  const handleSwitchToMockMode = () => {
+    switchToMockMode('/app/create-loan');
+  };
+
+  const handleSwitchToApiMode = () => {
+    switchToApiMode('/app/create-loan');
+  };
 
   // Live preview metrics
   const interestEarned = amount && apr && duration ? amount * (apr / 100) * (duration / 365) : 0;
@@ -96,7 +127,7 @@ export const CreateLoanPage: React.FC = () => {
 
   const reqCollateralVal = isUsdcLend
     ? reqCollateralAmount * xlmPrice
-    : reqCollateralAmount; // since collateral is USDC, its USD value is equal to its amount
+    : reqCollateralAmount;
 
   // Dynamic Risk classification logic
   const getRiskLevel = () => {
@@ -124,6 +155,24 @@ export const CreateLoanPage: React.FC = () => {
     message.info(`Applied ${preset.toUpperCase()} risk profile presets.`);
   };
 
+  const nextStep = async () => {
+    try {
+      if (currentStep === 0) {
+        await form.validateFields(['amount', 'apr', 'duration', 'expirationDays']);
+        setCurrentStep(1);
+      } else if (currentStep === 1) {
+        await form.validateFields(['maxLtv', 'liquidationThreshold', 'minHealthFactor', 'liquidationBonus', 'gracePeriod']);
+        setCurrentStep(2);
+      }
+    } catch {
+      message.error('Please fix the configuration errors before proceeding.');
+    }
+  };
+
+  const prevStep = () => {
+    setCurrentStep(prev => prev - 1);
+  };
+
   const reportCreationError = (title: string, fallback: string, error?: unknown) => {
     const details = getErrorMessage(error, fallback);
     setErrorTitle(title);
@@ -133,13 +182,40 @@ export const CreateLoanPage: React.FC = () => {
     message.error(details);
   };
 
-  // Unified single-button execution flow
+  // Unified deployment execution flow
   const handleDeployOffer = async () => {
+    form.setFieldsValue({ asset, collateralAsset });
+
     let values: CreateLoanFormValues;
     try {
-      values = await form.validateFields();
-    } catch {
-      reportCreationError('Form validation failed', 'Please fix the form configuration errors.');
+      await form.validateFields([
+        'amount',
+        'apr',
+        'duration',
+        'expirationDays',
+        'maxLtv',
+        'liquidationThreshold',
+        'minHealthFactor',
+        'liquidationBonus',
+        'gracePeriod',
+      ]);
+      const allValues = form.getFieldsValue(true) as Partial<CreateLoanFormValues>;
+      values = {
+        amount: requiredNumber(allValues.amount, 'Lending amount'),
+        asset,
+        apr: requiredNumber(allValues.apr, 'Fixed APR'),
+        duration: requiredNumber(allValues.duration, 'Lending period'),
+        collateralAsset,
+        maxLtv: requiredNumber(allValues.maxLtv, 'Max LTV'),
+        liquidationThreshold: requiredNumber(allValues.liquidationThreshold, 'Liquidation threshold'),
+        liquidationBonus: requiredNumber(allValues.liquidationBonus, 'Liquidation bonus'),
+        gracePeriod: requiredNumber(allValues.gracePeriod, 'Liquidation grace period'),
+        minHealthFactor: requiredNumber(allValues.minHealthFactor, 'Minimum health factor'),
+        description: allValues.description,
+        expirationDays: requiredNumber(allValues.expirationDays, 'Offer lifespan'),
+      };
+    } catch (error) {
+      reportCreationError('Form validation failed', 'Please fix the form configuration errors.', error);
       return;
     }
 
@@ -153,10 +229,10 @@ export const CreateLoanPage: React.FC = () => {
     try {
       offer = await createOffer({
         amount: values.amount,
-        asset: values.asset,
+        asset,
         apr: values.apr,
         duration: values.duration,
-        collateralAsset: values.collateralAsset,
+        collateralAsset,
         maxLTV: values.maxLtv,
         liquidationThreshold: values.liquidationThreshold,
         liquidationBonus: values.liquidationBonus,
@@ -164,7 +240,9 @@ export const CreateLoanPage: React.FC = () => {
         minHealthFactor: values.minHealthFactor,
         description: values.description ?? '',
       });
-      if (!offer) throw new Error('Failed to create draft offer on backend.');
+      if (!offer) {
+        throw new Error(isApiMode ? apiUnavailableMessage() : 'Failed to create draft offer.');
+      }
       setCreatedOffer(offer);
     } catch (err) {
       console.error(err);
@@ -199,7 +277,6 @@ export const CreateLoanPage: React.FC = () => {
     }
   };
 
-  // Find transaction records for final success modal
   const fundTx = transactions.find(
     (tx) => tx.type === 'FUND_OFFER' && tx.offerId === createdOffer?.id
   );
@@ -221,15 +298,63 @@ export const CreateLoanPage: React.FC = () => {
           Back to Marketplace
         </Button>
         <Title level={2} style={{ margin: '8px 0 0 0', fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: '26px', letterSpacing: '-0.03em' }}>
-          Initialize lending offer
+          Create New Lending Offer
         </Title>
         <Paragraph type="secondary" style={{ margin: '4px 0 0 0', color: 'var(--text-muted)', fontSize: '13px' }}>
-          Define all parameters on a single form. Your capital will be deployed on-chain and listed instantly.
+          Deploy capital to the marketplace using isolated smart escrows. Follow our wizard steps.
         </Paragraph>
       </div>
 
+      {isApiMode && (
+        <Alert
+          type="warning"
+          showIcon
+          message="Backend API mode is active"
+          description={
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+              <span>
+                This flow calls {API_URL}. Start the backend on port 5000, or switch to Mock Mode for local demo data.
+              </span>
+              <Button size="small" onClick={handleSwitchToMockMode}>
+                Switch to Mock Mode
+              </Button>
+            </div>
+          }
+        />
+      )}
+
+      {!isApiMode && (
+        <Alert
+          type="info"
+          showIcon
+          message="Mock Mode is active"
+          description={
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+              <span>
+                Mock Mode creates local demo offers only. Switch to API Mode to create a backend draft and trigger Freighter signatures.
+              </span>
+              <Button size="small" onClick={handleSwitchToApiMode}>
+                Switch to API Mode
+              </Button>
+            </div>
+          }
+        />
+      )}
+
+      {/* Modern Horizontal Steps Stepper */}
+      <Card style={{ border: '1px solid var(--border-color)', borderRadius: '12px', backgroundColor: '#FFFFFF' }} styles={{ body: { padding: '20px 24px' } }}>
+        <Steps
+          current={currentStep}
+          items={[
+            { title: 'Capital Details', description: 'APR, Amount & Term' },
+            { title: 'Risk Config', description: 'LTV & Safe HF thresholds' },
+            { title: 'Confirm & Deploy', description: 'Workflow overview' },
+          ]}
+        />
+      </Card>
+
       <Row gutter={[28, 28]}>
-        {/* Left Column: Form Configuration */}
+        {/* Left Column: Form Configuration Stepper */}
         <Col xs={24} lg={15}>
           <Form
             form={form}
@@ -238,6 +363,12 @@ export const CreateLoanPage: React.FC = () => {
               asset: 'USDC',
               collateralAsset: 'XLM',
               description,
+              maxLtv: 60,
+              liquidationThreshold: 75,
+              minHealthFactor: 1.4,
+              liquidationBonus: 10,
+              gracePeriod: 3,
+              expirationDays: 30
             }}
             onValuesChange={(_, all) => {
               setAmount(all.amount);
@@ -250,271 +381,344 @@ export const CreateLoanPage: React.FC = () => {
               setGracePeriod(all.gracePeriod);
               setExpirationDays(all.expirationDays);
               setDescription(all.description || '');
-
-              if (all.asset !== undefined && all.asset !== asset) {
-                setAsset(all.asset);
-                const nextCollateral = all.asset === 'USDC' ? 'XLM' : 'USDC';
-                setCollateralAsset(nextCollateral);
-                form.setFieldsValue({ collateralAsset: nextCollateral });
-              }
-              if (all.collateralAsset !== undefined && all.collateralAsset !== collateralAsset) {
-                setCollateralAsset(all.collateralAsset);
-                const nextAsset = all.collateralAsset === 'USDC' ? 'XLM' : 'USDC';
-                setAsset(nextAsset);
-                form.setFieldsValue({ asset: nextAsset });
-              }
             }}
           >
             <Card style={{ borderRadius: '12px', border: '1px solid var(--border-color)', boxShadow: 'var(--shadow-sm)' }}>
               
-              {/* Part 1: Capital Configuration */}
-              <div style={{ marginBottom: '24px' }}>
-                <Title level={5} style={{ margin: '0 0 16px 0', borderBottom: '1px solid var(--border-light)', paddingBottom: '8px' }}>
-                  1. Capital Allocation
-                </Title>
-                <Row gutter={16}>
-                  <Col xs={24} sm={8}>
-                    <Form.Item label="Lending Asset" name="asset" rules={[{ required: true }]}>
-                      <Select size="large" disabled>
-                        <Option value="USDC">USDC (Stablecoin)</Option>
-                      </Select>
-                    </Form.Item>
-                  </Col>
-                  <Col xs={24} sm={8}>
-                    <Form.Item
-                      label="Lending Amount"
-                      name="amount"
-                      rules={[
-                        { required: true, message: 'Required' },
-                        { type: 'number', min: 100, message: 'Min 100 tokens' },
-                      ]}
-                    >
-                      <InputNumber
-                        min={100}
-                        max={1000000}
-                        style={{ width: '100%' }}
-                        size="large"
-                        prefix={asset === 'USDC' ? <DollarSign size={16} /> : <Coins size={16} />}
-                        placeholder="Enter amount"
-                      />
-                    </Form.Item>
-                  </Col>
-                  <Col xs={24} sm={8}>
-                    <Form.Item
-                      label="Offer Lifespan (Days)"
-                      name="expirationDays"
-                      rules={[
-                        { required: true, message: 'Required' },
-                        { type: 'number', min: 1, max: 90, message: '1-90 days' }
-                      ]}
-                    >
-                      <InputNumber style={{ width: '100%' }} size="large" placeholder="Enter lifespan" />
-                    </Form.Item>
-                  </Col>
-                </Row>
-              </div>
+              {/* STEP 0: Capital details */}
+              {currentStep === 0 && (
+                <div>
+                  <Title level={5} style={{ margin: '0 0 20px 0', borderBottom: '1px solid var(--border-light)', paddingBottom: '8px', fontFamily: 'var(--font-heading)' }}>
+                    1. Configure Capital Parameters
+                  </Title>
+                  <Row gutter={16}>
+                    <Col xs={24} sm={12}>
+                      <Form.Item label="Lending Asset" name="asset" rules={[{ required: true }]}>
+                        <Select size="large" disabled>
+                          <Option value="USDC">USDC (USD Coin stablecoin)</Option>
+                        </Select>
+                      </Form.Item>
+                    </Col>
+                    <Col xs={24} sm={12}>
+                      <Form.Item
+                        label="Lending Amount (Principal)"
+                        name="amount"
+                        rules={[
+                          { required: true, message: 'Required' },
+                          { type: 'number', min: 100, message: 'Min 100 tokens' },
+                        ]}
+                      >
+                        <InputNumber
+                          min={100}
+                          max={1000000}
+                          style={{ width: '100%' }}
+                          size="large"
+                          prefix={<DollarSign size={16} />}
+                          placeholder="Enter amount"
+                        />
+                      </Form.Item>
+                    </Col>
+                  </Row>
 
-              {/* Part 2: Yield Terms */}
-              <div style={{ marginBottom: '24px' }}>
-                <Title level={5} style={{ margin: '0 0 16px 0', borderBottom: '1px solid var(--border-light)', paddingBottom: '8px' }}>
-                  2. Yield & Period
-                </Title>
-                <Row gutter={16}>
-                  <Col xs={24} sm={12}>
-                    <Form.Item
-                      label="Fixed Rate (APR %)"
-                      name="apr"
-                      rules={[
-                        { required: true, message: 'Required' },
-                        { type: 'number', min: 1, message: 'Min 1%' },
-                      ]}
-                    >
-                      <InputNumber
-                        min={1}
-                        max={50}
-                        step={0.5}
-                        style={{ width: '100%' }}
-                        size="large"
-                        prefix={<Percent size={14} />}
-                        placeholder="Enter APR"
-                      />
-                    </Form.Item>
-                  </Col>
-                  <Col xs={24} sm={12}>
-                    <Form.Item
-                      label="Lending Period Term (Days)"
-                      name="duration"
-                      rules={[
-                        { required: true, message: 'Required' },
-                        { type: 'number', min: 7, message: 'Min 7 days' },
-                      ]}
-                    >
-                      <InputNumber min={7} max={365} style={{ width: '100%' }} size="large" placeholder="Enter term" />
-                    </Form.Item>
-                  </Col>
-                </Row>
-              </div>
+                  <Row gutter={16}>
+                    <Col xs={24} sm={12}>
+                      <Form.Item
+                        label="Fixed Rate (APR %)"
+                        name="apr"
+                        rules={[
+                          { required: true, message: 'Required' },
+                          { type: 'number', min: 1, message: 'Min 1%' },
+                        ]}
+                      >
+                        <InputNumber
+                          min={1}
+                          max={50}
+                          step={0.5}
+                          style={{ width: '100%' }}
+                          size="large"
+                          prefix={<Percent size={14} />}
+                          placeholder="Enter APR"
+                        />
+                      </Form.Item>
+                      
+                      {/* APR templates presets */}
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '-12px', marginBottom: '20px', flexWrap: 'wrap' }}>
+                        <Button size="small" type="dashed" onClick={() => { form.setFieldsValue({ apr: 5.0 }); setApr(5.0); }} style={{ fontSize: '11px' }}>
+                          Conservative (5.0%)
+                        </Button>
+                        <Button size="small" type="dashed" onClick={() => { form.setFieldsValue({ apr: 8.5 }); setApr(8.5); }} style={{ fontSize: '11px' }}>
+                          Balanced (8.5%)
+                        </Button>
+                        <Button size="small" type="dashed" onClick={() => { form.setFieldsValue({ apr: 12.0 }); setApr(12.0); }} style={{ fontSize: '11px' }}>
+                          Aggressive (12.0%)
+                        </Button>
+                      </div>
+                    </Col>
 
-              {/* Part 3: Risk Configurations */}
-              <div style={{ marginBottom: '24px' }}>
-                <Title level={5} style={{ margin: '0 0 16px 0', borderBottom: '1px solid var(--border-light)', paddingBottom: '8px' }}>
-                  3. Collateral & Risk Parameters
-                </Title>
-                <div style={{
-                  background: 'var(--border-light)',
-                  padding: '14px 18px',
-                  borderRadius: '10px',
-                  marginBottom: '20px',
-                  border: '1px solid var(--border-color)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '8px'
-                }}>
-                  <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.04em' }}>
-                    RECOMMENDED RISK PROFILE PRESETS
-                  </span>
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                    <Button onClick={() => applyRiskPreset('safe')} size="small" style={{ borderColor: 'var(--success-color)', color: 'var(--success-color)', borderRadius: '6px' }}>
-                      Safe (LTV: 50%)
-                    </Button>
-                    <Button onClick={() => applyRiskPreset('balanced')} size="small" style={{ borderColor: 'var(--primary-color)', color: 'var(--primary-color)', borderRadius: '6px' }}>
-                      Balanced (LTV: 60%)
-                    </Button>
-                    <Button onClick={() => applyRiskPreset('aggressive')} size="small" style={{ borderColor: 'red', color: 'red', borderRadius: '6px' }}>
-                      Aggressive (LTV: 75%)
+                    <Col xs={24} sm={12}>
+                      <Form.Item
+                        label="Lending Period Term (Days)"
+                        name="duration"
+                        rules={[
+                          { required: true, message: 'Required' },
+                          { type: 'number', min: 7, message: 'Min 7 days' },
+                        ]}
+                      >
+                        <InputNumber min={7} max={365} style={{ width: '100%' }} size="large" placeholder="Enter term" />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+
+                  <Row gutter={16}>
+                    <Col xs={24} sm={12}>
+                      <Form.Item
+                        label="Offer Lifespan (Marketplace Expiration)"
+                        name="expirationDays"
+                        rules={[
+                          { required: true, message: 'Required' },
+                          { type: 'number', min: 1, max: 90, message: '1-90 days' }
+                        ]}
+                      >
+                        <InputNumber style={{ width: '100%' }} size="large" placeholder="Days offer remains open" />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={24} sm={12}>
+                      <Form.Item label="Lending Notes / Description" name="description">
+                        <Input placeholder="Describe custom isolated details..." size="large" />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '20px', borderTop: '1px solid var(--border-light)', paddingTop: '20px' }}>
+                    <Button type="primary" size="large" onClick={nextStep} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      Next: Configure Risk <ChevronRight size={16} />
                     </Button>
                   </div>
                 </div>
-                <Row gutter={16}>
-                  <Col xs={24} sm={12}>
-                    <Form.Item label="Collateral Asset Accepted" name="collateralAsset" rules={[{ required: true }]}>
-                      <Select size="large" disabled>
-                        <Option value="XLM">XLM (Stellar Lumens)</Option>
-                      </Select>
-                    </Form.Item>
-                  </Col>
-                  <Col xs={24} sm={12}>
-                    <Form.Item
-                      label="Maximum Loan-to-Value (Max LTV %)"
-                      name="maxLtv"
-                      rules={[
-                        { required: true, message: 'Required' },
-                        { type: 'number', min: 20, max: 80, message: 'Must be 20% to 80%' }
-                      ]}
-                    >
-                      <InputNumber
-                        style={{ width: '100%' }}
-                        size="large"
-                        prefix={<Percent size={14} />}
-                        placeholder="Enter Max LTV"
-                      />
-                    </Form.Item>
-                  </Col>
-                </Row>
-                <Row gutter={16}>
-                  <Col xs={24} sm={12}>
-                    <Form.Item
-                      label={
-                        <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          Liquidation Threshold (%)
-                          <Tooltip title="Threshold LTV at which the loan becomes vulnerable to liquidation. Must be >= Max LTV.">
-                            <HelpCircle size={14} style={{ color: 'var(--text-muted)' }} />
-                          </Tooltip>
-                        </span>
-                      }
-                      name="liquidationThreshold"
-                      rules={[
-                        { required: true, message: 'Required' },
-                        ({ getFieldValue }) => ({
-                          validator(_, value) {
-                            if (!value || value >= getFieldValue('maxLtv')) {
-                              return Promise.resolve();
-                            }
-                            return Promise.reject(new Error('Liquidation Threshold must be >= Max LTV'));
-                          },
-                        }),
-                      ]}
-                    >
-                      <InputNumber
-                        style={{ width: '100%' }}
-                        size="large"
-                        prefix={<Percent size={14} />}
-                        placeholder="Enter Liquidation Threshold"
-                      />
-                    </Form.Item>
-                  </Col>
-                  <Col xs={24} sm={12}>
-                    <Form.Item
-                      label="Minimum Health Factor"
-                      name="minHealthFactor"
-                      rules={[
-                        { required: true, message: 'Required' },
-                        { type: 'number', min: 1.4, message: 'Min 1.4' }
-                      ]}
-                    >
-                      <InputNumber min={1.4} step={0.05} style={{ width: '100%' }} size="large" placeholder="Enter Min Health Factor" />
-                    </Form.Item>
-                  </Col>
-                </Row>
-                <Row gutter={16}>
-                  <Col xs={24} sm={12}>
-                    <Form.Item
-                      label="Liquidation Penalty/Bonus (%)"
-                      name="liquidationBonus"
-                      rules={[
-                        { required: true, message: 'Required' },
-                        { type: 'number', min: 1, max: 20, message: '1% to 20%' }
-                      ]}
-                    >
-                      <InputNumber style={{ width: '100%' }} size="large" prefix={<Percent size={14} />} placeholder="Enter Bonus" />
-                    </Form.Item>
-                  </Col>
-                  <Col xs={24} sm={12}>
-                    <Form.Item
-                      label="Liquidation Grace Period (Days)"
-                      name="gracePeriod"
-                      rules={[
-                        { required: true, message: 'Required' },
-                        { type: 'number', min: 0, max: 30, message: '0-30 days' }
-                      ]}
-                    >
-                      <InputNumber style={{ width: '100%' }} size="large" placeholder="Enter Grace Period" />
-                    </Form.Item>
-                  </Col>
-                </Row>
-              </div>
+              )}
 
-              {/* Notes */}
-              <div style={{ marginBottom: '16px' }}>
-                <Form.Item label="Lending Notes / Description" name="description">
-                  <Input.TextArea placeholder="Describe any isolated matching rules..." rows={2} style={{ borderRadius: '6px' }} />
-                </Form.Item>
-              </div>
+              {/* STEP 1: Risk Configuration */}
+              {currentStep === 1 && (
+                <div>
+                  <Title level={5} style={{ margin: '0 0 20px 0', borderBottom: '1px solid var(--border-light)', paddingBottom: '8px', fontFamily: 'var(--font-heading)' }}>
+                    2. Risk and Protection Configuration
+                  </Title>
 
-              {/* Main Submit Action */}
-              <div style={{ borderTop: '1px solid var(--border-light)', paddingTop: '20px', marginTop: '8px' }}>
-                <Button
-                  type="primary"
-                  size="large"
-                  onClick={handleDeployOffer}
-                  icon={<Zap size={16} />}
-                  loading={executing && !['failed', 'success'].includes(execStage)}
-                  disabled={executing && !['failed', 'success'].includes(execStage)}
-                  style={{
-                    height: '48px',
-                    fontWeight: 600,
-                    width: '100%',
+                  <div style={{
+                    background: 'var(--border-light)',
+                    padding: '14px 18px',
+                    borderRadius: '10px',
+                    marginBottom: '24px',
+                    border: '1px solid var(--border-color)',
                     display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '8px',
-                    borderRadius: '6px',
-                    boxShadow: '0 8px 16px rgba(79, 70, 229, 0.25)'
-                  }}
-                >
-                  Initialize Lending Contract
-                </Button>
-              </div>
+                    flexDirection: 'column',
+                    gap: '8px'
+                  }}>
+                    <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.04em' }}>
+                      QUICK RISK TEMPLATES (APPLY PRESET CONFIGURATION)
+                    </span>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                      <Button onClick={() => applyRiskPreset('safe')} size="small" style={{ borderColor: 'var(--success-color)', color: 'var(--success-color)', borderRadius: '6px', fontWeight: 600 }}>
+                        Conservative (LTV: 50%)
+                      </Button>
+                      <Button onClick={() => applyRiskPreset('balanced')} size="small" style={{ borderColor: 'var(--primary-color)', color: 'var(--primary-color)', borderRadius: '6px', fontWeight: 600 }}>
+                        Balanced (LTV: 60%)
+                      </Button>
+                      <Button onClick={() => applyRiskPreset('aggressive')} size="small" style={{ borderColor: 'var(--danger-color)', color: 'var(--danger-color)', borderRadius: '6px', fontWeight: 600 }}>
+                        Aggressive Yield (LTV: 75%)
+                      </Button>
+                    </div>
+                  </div>
+
+                  <Row gutter={16}>
+                    <Col xs={24} sm={12}>
+                      <Form.Item label="Collateral Asset Accepted" name="collateralAsset" rules={[{ required: true }]}>
+                        <Select size="large" disabled>
+                          <Option value="XLM">XLM (Stellar Lumens)</Option>
+                        </Select>
+                      </Form.Item>
+                    </Col>
+                    <Col xs={24} sm={12}>
+                      <Form.Item
+                        label="Maximum Loan-to-Value (Max LTV %)"
+                        name="maxLtv"
+                        rules={[
+                          { required: true, message: 'Required' },
+                          { type: 'number', min: 20, max: 80, message: 'Must be 20% to 80%' }
+                        ]}
+                      >
+                        <InputNumber
+                          style={{ width: '100%' }}
+                          size="large"
+                          prefix={<Percent size={14} />}
+                          placeholder="Enter Max LTV"
+                        />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+
+                  <Row gutter={16}>
+                    <Col xs={24} sm={12}>
+                      <Form.Item
+                        label={
+                          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            Liquidation Threshold (%)
+                            <Tooltip title="Threshold LTV at which the loan becomes vulnerable to liquidation. Must be >= Max LTV.">
+                              <HelpCircle size={14} style={{ color: 'var(--text-muted)' }} />
+                            </Tooltip>
+                          </span>
+                        }
+                        name="liquidationThreshold"
+                        rules={[
+                          { required: true, message: 'Required' },
+                          ({ getFieldValue }) => ({
+                            validator(_, value) {
+                              if (!value || value >= getFieldValue('maxLtv')) {
+                                return Promise.resolve();
+                              }
+                              return Promise.reject(new Error('Liquidation Threshold must be >= Max LTV'));
+                            },
+                          }),
+                        ]}
+                      >
+                        <InputNumber
+                          style={{ width: '100%' }}
+                          size="large"
+                          prefix={<Percent size={14} />}
+                          placeholder="Enter Liquidation Threshold"
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={24} sm={12}>
+                      <Form.Item
+                        label="Minimum Initial Health Factor"
+                        name="minHealthFactor"
+                        rules={[
+                          { required: true, message: 'Required' },
+                          { type: 'number', min: 1.4, message: 'Min 1.40 target' }
+                        ]}
+                      >
+                        <InputNumber min={1.4} step={0.05} style={{ width: '100%' }} size="large" placeholder="Enter Min Health Factor" />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+
+                  <Row gutter={16}>
+                    <Col xs={24} sm={12}>
+                      <Form.Item
+                        label="Liquidation Penalty/Bonus (%)"
+                        name="liquidationBonus"
+                        rules={[
+                          { required: true, message: 'Required' },
+                          { type: 'number', min: 1, max: 20, message: '1% to 20%' }
+                        ]}
+                      >
+                        <InputNumber style={{ width: '100%' }} size="large" prefix={<Percent size={14} />} placeholder="Enter Bonus" />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={24} sm={12}>
+                      <Form.Item
+                        label="Liquidation Grace Period (Days)"
+                        name="gracePeriod"
+                        rules={[
+                          { required: true, message: 'Required' },
+                          { type: 'number', min: 0, max: 30, message: '0-30 days' }
+                        ]}
+                      >
+                        <InputNumber style={{ width: '100%' }} size="large" placeholder="Enter Grace Period" />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '20px', borderTop: '1px solid var(--border-light)', paddingTop: '20px' }}>
+                    <Button onClick={prevStep} size="large">
+                      Back
+                    </Button>
+                    <Button type="primary" size="large" onClick={nextStep} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      Next: Confirm & Deploy <ChevronRight size={16} />
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* STEP 2: Confirm & Deploy */}
+              {currentStep === 2 && (
+                <div>
+                  <Title level={5} style={{ margin: '0 0 16px 0', borderBottom: '1px solid var(--border-light)', paddingBottom: '8px', fontFamily: 'var(--font-heading)' }}>
+                    3. Review Deployment Workflow
+                  </Title>
+
+                  <Alert
+                    type="info"
+                    showIcon
+                    icon={<Layers size={20} style={{ color: 'var(--primary-color)' }} />}
+                    message={<Text strong style={{ fontSize: '15px' }}>Soroban Multi-Transaction Workflow</Text>}
+                    description={
+                      <div style={{ fontSize: '12px', lineHeight: '1.5', marginTop: 4 }}>
+                        Nexus utilizes strict isolated lending escrows on Stellar. Deploying this offer will prompt your Freighter wallet for <b>three separate approvals</b>:
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8, paddingLeft: 12 }}>
+                          <div><b>1. Deploy Terms</b> (Registers parameters in Marketplace contract)</div>
+                          <div><b>2. Lock Capital Escrow</b> (Transfers your USDC into Vault escrow)</div>
+                          <div><b>3. Publish Listing</b> (Activates offer for borrowers to match)</div>
+                        </div>
+                      </div>
+                    }
+                    style={{ marginBottom: '24px' }}
+                  />
+
+                  {/* Summary Details */}
+                  <div style={{
+                    padding: '20px',
+                    backgroundColor: 'var(--border-light)',
+                    borderRadius: 'var(--radius-lg)',
+                    border: '1px solid var(--border-color)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '12px',
+                    marginBottom: '24px'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <Text type="secondary">Offer Principal:</Text>
+                      <Text strong style={{ fontSize: '15px' }}>{amount?.toLocaleString()} USDC</Text>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <Text type="secondary">Yield Terms:</Text>
+                      <Text strong>{apr}% APR for {duration} Days</Text>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <Text type="secondary">Risk Level Classification:</Text>
+                      <Tag color={risk.color} style={{ margin: 0, fontWeight: 700, border: 'none' }}>{risk.label.toUpperCase()}</Tag>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <Text type="secondary">LTV / Liquidation Threshold:</Text>
+                      <Text strong>{maxLtv}% LTV Limit / {liquidationThreshold}% Threshold</Text>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '20px', borderTop: '1px solid var(--border-light)', paddingTop: '20px' }}>
+                    <Button onClick={prevStep} size="large">
+                      Back
+                    </Button>
+                    <Button
+                      type="primary"
+                      size="large"
+                      onClick={handleDeployOffer}
+                      icon={<Zap size={16} />}
+                      loading={executing}
+                      style={{ 
+                        height: '48px', 
+                        padding: '0 32px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        fontWeight: 600
+                      }}
+                    >
+                      Authorize & Deploy Offer
+                    </Button>
+                  </div>
+                </div>
+              )}
             </Card>
           </Form>
         </Col>
@@ -522,7 +726,7 @@ export const CreateLoanPage: React.FC = () => {
         {/* Right Column: Live Yield & Collateral Preview */}
         <Col xs={24} lg={9}>
           <Card
-            title={<span style={{ fontSize: '13px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Lending Specifications</span>}
+            title={<span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Lending Specifications</span>}
             style={{
               border: '1px solid var(--border-color)',
               background: 'linear-gradient(to bottom, var(--border-light) 0%, rgba(241, 245, 249, 0.4) 100%)',
@@ -604,7 +808,7 @@ export const CreateLoanPage: React.FC = () => {
         </Col>
       </Row>
 
-      {/* 4. Modern Execution Overlay Modal */}
+      {/* Modern Execution Overlay Modal */}
       <Modal
         open={executing || execStage === 'success' || execStage === 'failed'}
         footer={null}
@@ -633,6 +837,16 @@ export const CreateLoanPage: React.FC = () => {
                 description={errorDetails}
                 style={{ width: '100%' }}
               />
+              {canSwitchFailedActionToMock && (
+                <Button
+                  type="primary"
+                  size="large"
+                  onClick={handleSwitchToMockMode}
+                  style={{ width: '100%', height: '44px' }}
+                >
+                  Switch to Mock Mode
+                </Button>
+              )}
               <Button
                 size="large"
                 onClick={() => {

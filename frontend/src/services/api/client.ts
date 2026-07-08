@@ -1,6 +1,11 @@
 export const API_URL = (import.meta.env.VITE_API_URL ?? 'http://localhost:5000').replace(/\/$/, '');
+export const DATA_MODE_STORAGE_KEY = 'nexus_data_mode';
+export const MOCK_CONNECTED_STORAGE_KEY = 'nexus_mock_connected';
+export const MOCK_ADDRESS_STORAGE_KEY = 'nexus_mock_address';
+export const DEFAULT_MOCK_WALLET_ADDRESS = 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5';
+
 const storedDataMode = typeof window !== 'undefined'
-  ? window.localStorage.getItem('nexus_data_mode')
+  ? window.localStorage.getItem(DATA_MODE_STORAGE_KEY)
   : null;
 const envDataMode = import.meta.env.VITE_DATA_MODE;
 const normalizedStoredMode = storedDataMode === 'api' || storedDataMode === 'mock'
@@ -10,8 +15,31 @@ export const DATA_MODE = envDataMode === 'mock'
   ? 'mock'
   : normalizedStoredMode || envDataMode || 'mock';
 
-const apiUnavailableMessage = (): string =>
+export const CHAIN_MODE = import.meta.env.VITE_CHAIN_MODE === 'mock' ? 'mock' : 'live';
+
+export const apiUnavailableMessage = (): string =>
   `Cannot connect to backend API at ${API_URL}. Start the backend server on port 5000 or switch to Mock Mode.`;
+
+export const switchToMockMode = (
+  redirectPath = '/app',
+  walletAddress = DEFAULT_MOCK_WALLET_ADDRESS
+): void => {
+  if (typeof window === 'undefined') return;
+
+  window.localStorage.setItem(DATA_MODE_STORAGE_KEY, 'mock');
+  window.localStorage.setItem(MOCK_CONNECTED_STORAGE_KEY, 'true');
+  window.localStorage.setItem(MOCK_ADDRESS_STORAGE_KEY, walletAddress);
+  window.location.assign(redirectPath);
+};
+
+export const switchToApiMode = (redirectPath = '/app'): void => {
+  if (typeof window === 'undefined') return;
+
+  window.localStorage.setItem(DATA_MODE_STORAGE_KEY, 'api');
+  window.localStorage.removeItem(MOCK_CONNECTED_STORAGE_KEY);
+  window.localStorage.removeItem(MOCK_ADDRESS_STORAGE_KEY);
+  window.location.assign(redirectPath);
+};
 
 export interface ConfirmedChainReceiptPayload {
   txHash: string;
@@ -31,6 +59,10 @@ interface ApiEnvelope<T> {
 interface ApiErrorEnvelope {
   error?: {
     message?: string;
+    issues?: Array<{
+      path?: Array<string | number>;
+      message?: string;
+    }>;
   };
 }
 
@@ -52,7 +84,15 @@ export const apiClient = {
     const payload = await response.json().catch(() => ({})) as Partial<ApiEnvelope<T>> & ApiErrorEnvelope;
 
     if (!response.ok) {
-      throw new Error(payload.error?.message ?? `API request failed: ${response.status}`);
+      const issueDetails = payload.error?.issues
+        ?.map((issue) => {
+          const path = issue.path?.join('.');
+          return path ? `${path}: ${issue.message}` : issue.message;
+        })
+        .filter(Boolean)
+        .join('; ');
+      const detail = [payload.error?.message, issueDetails].filter(Boolean).join(' - ');
+      throw new Error(detail || `API request failed: ${response.status}`);
     }
 
     return payload.data as T;

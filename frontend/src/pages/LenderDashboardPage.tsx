@@ -27,14 +27,20 @@ import {
 const { Title, Paragraph, Text } = Typography;
 
 export const LenderDashboardPage: React.FC = () => {
-  const { wallet, loans, loanOffers, fundOffer, activateOffer, cancelOffer } = useAppContext();
+  const { wallet, loans, loanOffers, activities, fundOffer, activateOffer, cancelOffer } = useAppContext();
   const navigate = useNavigate();
 
   // Filter loans where this user is the lender
   const lenderLoans = loans.filter((l) => l.lender === wallet.address);
+  const lenderLoanIds = new Set(lenderLoans.map((loan) => loan.id));
   const lenderOffers = loanOffers.filter((offer) => offer.lender === wallet.address);
   const activeOffers = lenderOffers.filter((offer) => offer.status === 'Active');
   const fundingOffers = lenderOffers.filter((offer) => offer.status === 'Funding');
+  const repaymentTransactions = activities.filter((tx) =>
+    ['PARTIAL_REPAY', 'FULL_REPAY', 'REPAY'].includes(tx.type)
+    && tx.loanId
+    && lenderLoanIds.has(tx.loanId)
+  );
 
   // Active Lender Loans
   const activeLoans = lenderLoans.filter((l) => isOpenLoanStatus(l.status));
@@ -54,9 +60,7 @@ export const LenderDashboardPage: React.FC = () => {
     return sum + calculateInterestAmount(l.amount, l.apr, l.duration);
   }, 0);
 
-  const totalInterestEarned = completedLoans.reduce((sum, l) => {
-    return sum + calculateInterestAmount(l.amount, l.apr, l.duration);
-  }, 0);
+  const totalRepaymentsReceived = repaymentTransactions.reduce((sum, tx) => sum + tx.amount, 0);
 
   // Table Data Columns
   const columns = [
@@ -190,6 +194,49 @@ export const LenderDashboardPage: React.FC = () => {
     },
   ];
 
+  const repaymentColumns = [
+    {
+      title: 'Loan ID',
+      dataIndex: 'loanId',
+      key: 'loanId',
+      render: (loanId: string) => <Text strong style={{ fontFamily: 'var(--font-mono)' }}>{loanId}</Text>,
+    },
+    {
+      title: 'Borrower',
+      key: 'borrower',
+      render: (_: any, record: any) => {
+        const loan = loans.find((item) => item.id === record.loanId);
+        return <Text style={{ fontFamily: 'var(--font-mono)' }}>{formatAddress(loan?.borrower ?? record.user)}</Text>;
+      },
+    },
+    {
+      title: 'Type',
+      dataIndex: 'type',
+      key: 'type',
+      render: (type: string) => <Text>{type === 'FULL_REPAY' ? 'Full repayment' : 'Partial repayment'}</Text>,
+    },
+    {
+      title: 'Amount Received',
+      key: 'amount',
+      render: (_: any, record: any) => <Text strong>{formatCurrency(record.amount, record.asset)}</Text>,
+    },
+    {
+      title: 'Confirmed At',
+      dataIndex: 'timestamp',
+      key: 'timestamp',
+      render: (timestamp: string) => <span>{new Date(timestamp).toLocaleString()}</span>,
+    },
+    {
+      title: 'Receipt',
+      key: 'receipt',
+      render: (_: any, record: any) => record.explorerUrl ? (
+        <a href={record.explorerUrl} target="_blank" rel="noreferrer">View tx</a>
+      ) : (
+        <Text type="secondary">Recorded</Text>
+      ),
+    },
+  ];
+
 
 
   return (
@@ -223,8 +270,8 @@ export const LenderDashboardPage: React.FC = () => {
         </Col>
         <Col xs={24} sm={12} lg={4}>
           <StatisticCard
-            title="Accrued Yield Claimed"
-            value={formatCurrency(totalInterestEarned, 'USDC')}
+            title="Repayments Received"
+            value={formatCurrency(totalRepaymentsReceived, 'USDC')}
             icon={<CheckCircle size={18} />}
           />
         </Col>
@@ -260,6 +307,15 @@ export const LenderDashboardPage: React.FC = () => {
           {lenderLoans.length > 0 && (
             <Card title="Lending Contracts Ledger" styles={{ body: { padding: 0 } }}>
               <Table columns={columns} dataSource={lenderLoans.map((item) => ({ ...item, key: item.id }))} pagination={false} />
+            </Card>
+          )}
+          {repaymentTransactions.length > 0 && (
+            <Card title="Repayments Received" styles={{ body: { padding: 0 } }}>
+              <Table
+                columns={repaymentColumns}
+                dataSource={repaymentTransactions.map((item) => ({ ...item, key: item.id }))}
+                pagination={false}
+              />
             </Card>
           )}
         </>

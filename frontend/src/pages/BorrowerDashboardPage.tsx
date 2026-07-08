@@ -9,6 +9,7 @@ import { HealthFactorGauge } from '../components/common/HealthFactorGauge';
 import { EmptyState } from '../components/common/CommonStates';
 import { AddCollateralModal } from '../components/common/AddCollateralModal';
 import { PartialRepaymentModal } from '../components/common/PartialRepaymentModal';
+import { ConfirmActionModal } from '../components/common/ConfirmActionModal';
 import {
   Card,
   Row,
@@ -18,6 +19,7 @@ import {
   Space,
   Typography,
   Alert,
+  Tag,
 } from 'antd';
 import {
   ShieldCheck,
@@ -71,12 +73,21 @@ export const BorrowerDashboardPage: React.FC = () => {
   const [selectedLoanId, setSelectedLoanId] = useState<string | null>(null);
   const [collateralModalOpen, setCollateralModalOpen] = useState(false);
   const [repayModalOpen, setRepayModalOpen] = useState(false);
+  const [activationModalOpen, setActivationModalOpen] = useState(false);
+  const [loanToActivate, setLoanToActivate] = useState<any | null>(null);
 
   const selectedLoan = loans.find((l) => l.id === selectedLoanId);
 
   // Form states
   const [collateralForm] = Form.useForm();
   const [repayForm] = Form.useForm();
+
+  // Helper to calculate remaining days
+  const getRemainingDays = (dueDateStr: string): number => {
+    const diffMs = new Date(dueDateStr).getTime() - Date.now();
+    const days = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+    return days;
+  };
 
   // Submissions
   const handleAddCollateralSubmit = async (amount: number) => {
@@ -108,7 +119,11 @@ export const BorrowerDashboardPage: React.FC = () => {
   };
 
   const handleActivateLoan = async (loanId: string) => {
-    await activateLoan(loanId);
+    try {
+      await activateLoan(loanId);
+    } catch (error) {
+      console.error(error);
+    }
   };
 
   return (
@@ -229,7 +244,21 @@ export const BorrowerDashboardPage: React.FC = () => {
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span>Maturity Date:</span>
-                      <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>{new Date(loan.dueDate).toLocaleDateString()}</span>
+                      <Space size={6}>
+                        <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>{new Date(loan.dueDate).toLocaleDateString()}</span>
+                        {loan.status !== 'PendingCollateral' && (
+                          (() => {
+                            const days = getRemainingDays(loan.dueDate);
+                            if (days <= 0) {
+                              return <Tag color="error" style={{ margin: 0 }}>Matured</Tag>;
+                            } else if (days <= 3) {
+                              return <Tag color="warning" style={{ margin: 0 }}>{days}d left</Tag>;
+                            } else {
+                              return <Tag color="processing" style={{ margin: 0 }}>{days}d left</Tag>;
+                            }
+                          })()
+                        )}
+                      </Space>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span>LTV / Liquidation Threshold:</span>
@@ -278,21 +307,32 @@ export const BorrowerDashboardPage: React.FC = () => {
                   )}
 
                   {['Defaulted', 'Expired'].includes(loan.status) && (
-                    <Alert
-                      type="error"
-                      showIcon
-                      message="Expired / Defaulted"
-                      description="This loan has expired or defaulted. It may be liquidated regardless of Health Factor."
-                      style={{ marginBottom: '20px' }}
-                    />
-                  )}
+                     <Alert
+                       type="error"
+                       showIcon
+                       message={<span style={{ fontWeight: 800 }}>CRITICAL STATUS: LIQUIDATION ELIGIBLE</span>}
+                       description={
+                         <span style={{ fontSize: '12px', lineHeight: '1.4' }}>
+                           This loan has breached its maturity date. <b>Under protocol rules, it is eligible for immediate liquidation regardless of its Health Factor.</b> Repay your outstanding debt immediately to prevent your locked XLM collateral from being liquidated.
+                         </span>
+                       }
+                       style={{ marginBottom: '20px', border: '1px solid var(--danger-color)', backgroundColor: 'rgba(239, 68, 68, 0.03)' }}
+                     />
+                   )}
 
                   <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                     {loan.status === 'PendingCollateral' && (
-                      <Button type="primary" onClick={() => void handleActivateLoan(loan.id)} style={{ flex: 2 }}>
-                        Activate Loan
-                      </Button>
-                    )}
+                       <Button 
+                         type="primary" 
+                         onClick={() => {
+                           setLoanToActivate(loan);
+                           setActivationModalOpen(true);
+                         }} 
+                         style={{ flex: 2 }}
+                       >
+                         Activate Loan
+                       </Button>
+                     )}
                     {['Active', 'Warning', 'LiquidationPlanning'].includes(loan.status) && (
                       <>
                         <Button type="primary" onClick={() => openAddCollateralModal(loan.id)} style={{ flex: 2 }}>
@@ -335,7 +375,51 @@ export const BorrowerDashboardPage: React.FC = () => {
         onCancel={() => setRepayModalOpen(false)}
         onConfirm={handleRepaySubmit}
       />
+
+      <ConfirmActionModal
+        visible={activationModalOpen}
+        onCancel={() => {
+          setActivationModalOpen(false);
+          setLoanToActivate(null);
+        }}
+        onConfirm={async () => {
+          if (loanToActivate) {
+            await handleActivateLoan(loanToActivate.id);
+            setActivationModalOpen(false);
+            setLoanToActivate(null);
+          }
+        }}
+        title="Confirm Loan Activation"
+        actionText="Activate & Lock Collateral"
+      >
+        {loanToActivate && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <Paragraph>
+              You are activating loan <Text code style={{ fontFamily: 'var(--font-mono)' }}>{loanToActivate.id}</Text>. This action will call the Soroban smart contracts to:
+            </Paragraph>
+            <div style={{ padding: '16px', background: 'var(--border-light)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
+                <Text type="secondary">XLM Collateral Locked:</Text>
+                <Text strong style={{ color: '#E28743' }}>{loanToActivate.collateralAmount.toLocaleString()} XLM</Text>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
+                <Text type="secondary">USDC Principal Disbursed:</Text>
+                <Text strong style={{ color: 'var(--success-color)' }}>${loanToActivate.amount.toLocaleString()} USDC</Text>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
+                <Text type="secondary">Target Health Factor:</Text>
+                <Text strong>{loanToActivate.healthFactor.toFixed(2)}</Text>
+              </div>
+            </div>
+            <Alert
+              type="info"
+              showIcon
+              message="Freighter Signature Required"
+              description="Your Freighter wallet will prompt you to approve the transaction. Make sure you have enough XLM in your wallet to cover the collateral deposit."
+            />
+          </div>
+        )}
+      </ConfirmActionModal>
     </div>
   );
 };
-

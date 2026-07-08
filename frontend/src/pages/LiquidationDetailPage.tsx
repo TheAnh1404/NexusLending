@@ -15,8 +15,10 @@ import {
   Typography,
   Alert,
   InputNumber,
+  Modal,
+  Divider,
 } from 'antd';
-import { Flame, ArrowLeft, Sparkles } from 'lucide-react';
+import { Flame, ArrowLeft, Sparkles, ExternalLink } from 'lucide-react';
 
 const { Title, Paragraph, Text } = Typography;
 
@@ -31,6 +33,7 @@ export const LiquidationDetailPage: React.FC = () => {
   const usdcPrice = oraclePrices.find((p) => p.asset === 'USDC')?.price || 1.0;
 
   const [confirmModalVisible, setConfirmModalVisible] = useState(false);
+  const [successModalVisible, setSuccessModalVisible] = useState(false);
   const [repayAmount, setRepayAmount] = useState(0);
   const maxRepayAmount = loan ? Math.round(loan.outstandingDebt * 0.5 * 100) / 100 : 0;
 
@@ -98,6 +101,7 @@ export const LiquidationDetailPage: React.FC = () => {
       
       await liquidateLoan(loan.id, repayAmount);
       setTxStatus('confirmed');
+      setSuccessModalVisible(true);
     } catch (e: any) {
       setErrorDetails(e.message || 'Soroban transaction failed.');
       setTxStatus('failed');
@@ -357,6 +361,86 @@ export const LiquidationDetailPage: React.FC = () => {
           </p>
         </div>
       </ConfirmActionModal>
+
+      {/* Success Receipt Modal */}
+      <Modal
+        open={successModalVisible}
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--success-color)' }}>
+            <Sparkles size={20} />
+            <span>Liquidation Success Receipt</span>
+          </div>
+        }
+        footer={[
+          <Button key="close" type="primary" onClick={() => { setSuccessModalVisible(false); navigate('/app/liquidation'); }}>
+            Dismiss Receipt
+          </Button>
+        ]}
+        onCancel={() => setSuccessModalVisible(false)}
+        width={480}
+        destroyOnClose
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '12px' }}>
+          <Alert
+            type="success"
+            showIcon
+            message={<span style={{ fontWeight: 700 }}>On-Chain Liquidation Settled</span>}
+            description="The Soroban contract executed the partial liquidation. Stressed debt is cleared and reward collateral is credited."
+          />
+
+          <div style={{
+            padding: '16px',
+            backgroundColor: 'var(--border-light)',
+            border: '1px solid var(--border-color)',
+            borderRadius: 'var(--radius-md)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '10px',
+            fontSize: '13px'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <Text type="secondary">Contract Loan ID:</Text>
+              <Text strong style={{ fontFamily: 'var(--font-mono)' }}>{loan.id}</Text>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <Text type="secondary">USDC Repaid by Liquidator:</Text>
+              <Text strong style={{ color: 'var(--danger-color)' }}>${repayAmount.toFixed(2)} USDC</Text>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <Text type="secondary">XLM Seized (with {loan.liquidationBonus}% Bonus):</Text>
+              <Text strong style={{ color: 'var(--success-color)' }}>+{collateralToReceive.toFixed(2)} XLM</Text>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <Text type="secondary">Collateral USD Value:</Text>
+              <Text strong>${collateralValueToReceive.toFixed(2)} USD</Text>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <Text type="secondary">Estimated Net Arbitrage:</Text>
+              <Text strong style={{ color: 'var(--success-color)' }}>+${(collateralValueToReceive - repayAmount).toFixed(2)} USDC</Text>
+            </div>
+            
+            {matchedTx && (
+              <>
+                <Divider style={{ margin: '8px 0' }} />
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <Text type="secondary">Transaction Hash:</Text>
+                  <div style={{ textAlign: 'right' }}>
+                    <a href={matchedTx.explorerUrl} target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontFamily: 'var(--font-mono)' }}>
+                      {matchedTx.txHash?.slice(0, 8)}...{matchedTx.txHash?.slice(-8)} <ExternalLink size={12} />
+                    </a>
+                  </div>
+                </div>
+                {matchedTx.ledger && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Text type="secondary">Ledger Height:</Text>
+                    <Text style={{ fontFamily: 'var(--font-mono)' }}>#{matchedTx.ledger}</Text>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };

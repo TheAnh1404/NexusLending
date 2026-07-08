@@ -22,7 +22,7 @@ import {
   Tag,
   Table,
   Form,
-  message,
+  App,
 } from 'antd';
 import {
   ArrowLeft,
@@ -40,6 +40,7 @@ const { Title, Text } = Typography;
 export const LoanDetailPage: React.FC = () => {
   const id = useParams<{ id: string }>().id || '';
   const navigate = useNavigate();
+  const { message } = App.useApp();
   const {
     loanOffers,
     loans,
@@ -211,6 +212,10 @@ export const LoanDetailPage: React.FC = () => {
     (tx) => tx.loanId === id || tx.offerId === id || (activeLoan && tx.loanId === activeLoan.id)
   );
 
+  const creationTx = matchesTxs.find(
+    (tx) => tx.type === 'CREATE_OFFER' || tx.type === 'ACCEPT_OFFER' || tx.type === 'ACTIVATE_LOAN'
+  ) || matchesTxs[matchesTxs.length - 1];
+
   const activityColumns = [
     {
       title: 'Action',
@@ -281,9 +286,17 @@ export const LoanDetailPage: React.FC = () => {
         </Button>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px', flexWrap: 'wrap', gap: '16px' }}>
           <div>
-            <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
-              CONTRACT ID: {id}
-            </span>
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span>CONTRACT ID: {id}</span>
+              {creationTx?.txHash && (
+                <>
+                  <span>•</span>
+                  <a href={creationTx.explorerUrl} target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: 'var(--primary-color)' }}>
+                    View on Stellar Expert <ExternalLink size={12} />
+                  </a>
+                </>
+              )}
+            </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
               <Title level={3} style={{ margin: 0, fontWeight: 800, fontFamily: 'var(--font-heading)' }}>
                 {isOffer ? 'Lending Offer Details' : `USDC / XLM Loan Contract`}
@@ -539,6 +552,18 @@ export const LoanDetailPage: React.FC = () => {
             <Col xs={24} md={12}>
               <Card title="4. Blockchain Configuration" style={{ height: '100%' }}>
                 <Descriptions column={1} size="small" bordered styles={{ label: { fontWeight: 600, fontSize: '11px' }, content: { fontSize: '11px', fontFamily: 'var(--font-mono)' } }}>
+                  {creationTx?.txHash && (
+                    <Descriptions.Item label="Creation Tx">
+                      <a href={creationTx.explorerUrl} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: '4px', color: 'var(--primary-color)' }}>
+                        {creationTx.txHash.slice(0, 8)}...{creationTx.txHash.slice(-8)} <ExternalLink size={11} />
+                      </a>
+                    </Descriptions.Item>
+                  )}
+                  {creationTx?.ledger && (
+                    <Descriptions.Item label="Ledger Height">
+                      <span>#{creationTx.ledger}</span>
+                    </Descriptions.Item>
+                  )}
                   <Descriptions.Item label="Marketplace Contract">
                     <Text copyable={{ text: CONTRACTS.marketplace }}>{CONTRACTS.marketplace.slice(0, 6)}...{CONTRACTS.marketplace.slice(-6)}</Text>
                   </Descriptions.Item>

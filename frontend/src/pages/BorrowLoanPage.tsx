@@ -18,7 +18,7 @@ import {
   Tag,
   Divider,
   Steps,
-  message,
+  App,
 } from 'antd';
 import { Wallet, ChevronLeft, ArrowRight, ShieldAlert, CheckCircle2, ExternalLink, Lock } from 'lucide-react';
 
@@ -36,6 +36,7 @@ export const BorrowLoanPage: React.FC = () => {
   const navigate = useNavigate();
   const { loanOffers, oraclePrices, wallet, acceptOffer, activateLoan, transactions } = useAppContext();
   const [form] = Form.useForm();
+  const { message } = App.useApp();
 
   const offer = loanOffers.find((o) => o.id === id && o.status === 'Active');
 
@@ -53,6 +54,13 @@ export const BorrowLoanPage: React.FC = () => {
   const [createdLoan, setCreatedLoan] = useState<any | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [errorDetails, setErrorDetails] = useState<string>('');
+
+  const getCollateralForTargetHF = (targetHF: number): number => {
+    if (!offer) return 0;
+    const repayment = calculateRepaymentAmount(offer.amount, offer.apr, offer.duration);
+    const amount = (targetHF * repayment * usdcPrice) / (xlmPrice * (offer.liquidationThreshold / 100));
+    return Math.ceil(amount);
+  };
 
   useEffect(() => {
     if (minRequiredXLM) {
@@ -112,19 +120,39 @@ export const BorrowLoanPage: React.FC = () => {
   };
 
   const handleConfirmBorrow = async () => {
+    if (!offer) return;
     try {
       setLoading(true);
       setErrorDetails('');
-      const loan = await acceptOffer(offer!.id, collateralAmount);
+      
+      // Step 1: Accept terms on-chain
+      const progressMessage = message.loading({ content: 'Step 1/2: Submitting terms to Soroban contracts...', duration: 0 });
+      const loan = await acceptOffer(offer.id, collateralAmount);
+      
       if (loan) {
         setCreatedLoan(loan);
         setModalVisible(false);
-        message.success('Terms accepted on-chain. Please lock collateral to disburse funds.');
+        progressMessage(); // clear message
+        
+        // Step 2: Auto-trigger activation/locking collateral
+        message.loading({ content: 'Step 2/2: Please sign in Freighter to lock collateral and disburse USDC...', duration: 0 });
+        const active = await activateLoan(loan.id);
+        
+        if (active) {
+          setCreatedLoan(active);
+          message.destroy();
+          message.success('Success! Collateral locked and USDC transferred to your wallet.');
+        } else {
+          message.destroy();
+          message.warning('Offer accepted! However, the collateral lock transaction was not completed. You can activate it manually below.');
+        }
       } else {
+        progressMessage();
         throw new Error('Borrow transaction failed');
       }
     } catch (e) {
       console.error(e);
+      message.destroy();
       const details = getErrorMessage(e, 'Borrow transaction failed.');
       setErrorDetails(details);
       message.error(details);
@@ -496,6 +524,41 @@ export const BorrowLoanPage: React.FC = () => {
                     size="large"
                     onChange={(val) => setCollateralAmount(val || 0)}
                   />
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
+                    <Button 
+                      size="small" 
+                      onClick={() => {
+                        const amount = Math.ceil(minRequiredXLM);
+                        setCollateralAmount(amount);
+                        form.setFieldsValue({ collateral: amount });
+                      }}
+                      style={{ fontSize: '11px' }}
+                    >
+                      Min HF ({offer ? offer.minHealthFactor.toFixed(2) : '1.40'})
+                    </Button>
+                    <Button 
+                      size="small" 
+                      onClick={() => {
+                        const amount = getCollateralForTargetHF(1.8);
+                        setCollateralAmount(amount);
+                        form.setFieldsValue({ collateral: amount });
+                      }}
+                      style={{ fontSize: '11px' }}
+                    >
+                      Safe HF (1.80)
+                    </Button>
+                    <Button 
+                      size="small" 
+                      onClick={() => {
+                        const amount = getCollateralForTargetHF(2.5);
+                        setCollateralAmount(amount);
+                        form.setFieldsValue({ collateral: amount });
+                      }}
+                      style={{ fontSize: '11px' }}
+                    >
+                      Aggressive (2.50)
+                    </Button>
+                  </div>
                 </Form.Item>
 
                 <Form.Item label="Borrow Asset Type" required>

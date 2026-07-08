@@ -179,6 +179,66 @@ const normalizeHorizonSubmissionError = (error: unknown): Error => {
   return new Error(responseData?.details ?? responseData?.detail ?? 'Unable to submit swap transaction to Stellar.');
 };
 
+const CONTRACT_ERROR_MESSAGES: Record<number, string> = {
+  1: 'Contract already initialized',
+  2: 'Contract not initialized',
+  3: 'Unauthorized',
+  10: 'Invalid loan amount',
+  11: 'Invalid APR',
+  12: 'Invalid duration',
+  13: 'Invalid max LTV',
+  14: 'Invalid liquidation threshold',
+  15: 'Invalid liquidation bonus',
+  16: 'Invalid min health factor (must be >= 1.4)',
+  17: 'Invalid collateral amount',
+  18: 'Invalid amount',
+  19: 'Max LTV exceeds liquidation threshold',
+  20: 'Offer not found',
+  21: 'Offer is not in Draft status',
+  22: 'Offer is not funded',
+  23: 'Offer is not active',
+  24: 'Offer already cancelled',
+  25: 'Offer already expired',
+  26: 'Offer already matched',
+  27: 'Insufficient locked funds',
+  30: 'Vault contract not configured',
+  31: 'Loan Manager contract not configured',
+  32: 'Marketplace contract not configured',
+  40: 'Arithmetic overflow',
+};
+
+const SOROBAN_PANIC_MESSAGES: Record<string, string> = {
+  'loan is not pending collateral': 'Loan is not PendingCollateral on-chain. It may already be active or the local backend state is stale.',
+  'collateral below max ltv': 'Collateral is below the max LTV requirement. Increase the collateral amount and try again.',
+  'health factor below minimum': 'Initial Health Factor is below the contract minimum. Increase the collateral amount and try again.',
+  'loan not found': 'Loan not found on the Loan Manager contract. The backend loan may have a missing or incorrect contractLoanId.',
+  'vault not configured': 'Vault contract is not configured for the Loan Manager contract.',
+  'oracle not configured': 'Oracle contract is not configured for the Loan Manager contract.',
+  'oracle price must be positive': 'Oracle price is missing or invalid on-chain.',
+  'insufficient locked lender funds': 'Vault does not have enough locked lender funds for this offer. The offer may not be funded on-chain.',
+  'insufficient locked collateral': 'Vault does not have enough locked collateral for this loan.',
+  'amount must be positive': 'Amount must be greater than zero.',
+};
+
+const normalizeSorobanSimulationError = (rawError: string): string => {
+  const lowerRawError = rawError.toLowerCase();
+  const panicMessage = Object.entries(SOROBAN_PANIC_MESSAGES)
+    .find(([needle]) => lowerRawError.includes(needle));
+
+  if (panicMessage) return panicMessage[1];
+
+  const contractErrMatch = rawError.match(/Error\(Contract,\s*#?(\d+)\)/);
+  if (contractErrMatch) {
+    const code = parseInt(contractErrMatch[1], 10);
+    return CONTRACT_ERROR_MESSAGES[code] ?? `Contract error #${code}`;
+  }
+
+  const diagnosticMatch = rawError.match(/data:\["([^"]+)"/);
+  if (diagnosticMatch) return diagnosticMatch[1];
+
+  return rawError;
+};
+
 const submitClassicTransaction = async (
   tx: Transaction,
   functionName: string,
@@ -237,6 +297,19 @@ const parseReturnValue = (returnValue: unknown): unknown => {
   }
 };
 
+const toIsoTimestamp = (value: unknown): string | undefined => {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? undefined : value.toISOString();
+  }
+
+  if (typeof value === 'string' || typeof value === 'number') {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+  }
+
+  return undefined;
+};
+
 const getLedgerClosedAt = async (ledger: number): Promise<string> => {
   try {
     const ledgers = await (sorobanRpc as any).getLedgers({
@@ -246,7 +319,11 @@ const getLedgerClosedAt = async (ledger: number): Promise<string> => {
     const ledgerInfo = ledgers?.ledgers?.find((item: any) =>
       item.sequence === ledger || item.ledger === ledger || item.ledgerSequence === ledger
     ) ?? ledgers?.ledgers?.[0];
-    return ledgerInfo?.ledgerCloseTime ?? ledgerInfo?.ledgerClosedAt ?? new Date().toISOString();
+    return toIsoTimestamp(ledgerInfo?.ledgerCloseTime)
+      ?? toIsoTimestamp(ledgerInfo?.ledgerClosedAt)
+      ?? toIsoTimestamp(ledgerInfo?.closedAt)
+      ?? toIsoTimestamp(ledgerInfo?.closeTime)
+      ?? new Date().toISOString();
   } catch {
     return new Date().toISOString();
   }
@@ -278,43 +355,7 @@ export async function buildAndSubmitTx(
   const simulated = await sorobanRpc.simulateTransaction(tx);
   if (rpc.Api.isSimulationError(simulated)) {
     const rawError = simulated.error ?? 'Unknown simulation error';
-    // Try to extract a human-readable error from diagnostic events
-    const diagnosticMatch = rawError.match(/data:\["([^"]+)"/);
-    const contractErrMatch = rawError.match(/Error\(Contract,\s*#?(\d+)\)/);
-    let friendlyMessage = rawError;
-    if (contractErrMatch) {
-      const code = parseInt(contractErrMatch[1], 10);
-      const errorNames: Record<number, string> = {
-        1: 'Contract already initialized',
-        2: 'Contract not initialized',
-        3: 'Unauthorized',
-        10: 'Invalid loan amount',
-        11: 'Invalid APR',
-        12: 'Invalid duration',
-        13: 'Invalid max LTV',
-        14: 'Invalid liquidation threshold',
-        15: 'Invalid liquidation bonus',
-        16: 'Invalid min health factor (must be >= 1.4)',
-        17: 'Invalid collateral amount',
-        18: 'Invalid amount',
-        19: 'Max LTV exceeds liquidation threshold',
-        20: 'Offer not found',
-        21: 'Offer is not in Draft status',
-        22: 'Offer is not funded',
-        23: 'Offer is not active',
-        24: 'Offer already cancelled',
-        25: 'Offer already expired',
-        26: 'Offer already matched',
-        27: 'Insufficient locked funds',
-        30: 'Vault contract not configured',
-        31: 'Loan Manager contract not configured',
-        32: 'Marketplace contract not configured',
-        40: 'Arithmetic overflow',
-      };
-      friendlyMessage = errorNames[code] ?? `Contract error #${code}`;
-    } else if (diagnosticMatch) {
-      friendlyMessage = diagnosticMatch[1];
-    }
+    const friendlyMessage = normalizeSorobanSimulationError(rawError);
     console.error(`[Soroban] Simulation failed for ${functionName}:`, rawError);
     throw new Error(`Simulation failed: ${friendlyMessage}`);
   }

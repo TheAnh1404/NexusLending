@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { confirmedChainReceiptSchema } from '../transactions/transactions.schemas';
+import { confirmedChainReceiptSchema, optionalDateSchema } from '../transactions/transactions.schemas';
 
 const decimalInput = z.union([z.string().min(1), z.number()]).transform(String);
 
@@ -25,7 +25,7 @@ export const createOfferSchema = z.object({
   ledger: z.coerce.number().int().positive().optional(),
   txStatus: z.literal('SUCCESS').optional(),
   contractId: z.string().min(1).optional(),
-  blockTimestamp: z.coerce.date().optional(),
+  blockTimestamp: optionalDateSchema,
   contractReturnValue: z.unknown().optional()
 });
 

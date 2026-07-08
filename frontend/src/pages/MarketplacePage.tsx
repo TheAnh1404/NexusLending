@@ -60,74 +60,108 @@ export const MarketplacePage: React.FC = () => {
 
   const columns = [
     {
-      title: 'Offer ID',
-      dataIndex: 'id',
-      key: 'id',
-      render: (text: string) => <Text strong style={{ fontFamily: 'var(--font-mono)' }}>{text}</Text>,
-    },
-    {
-      title: 'Principal',
-      dataIndex: 'amount',
-      key: 'amount',
-      render: (amount: number, record: any) => <Text strong>{formatCurrency(amount, record.asset)}</Text>,
-    },
-    {
-      title: 'Fixed APR',
-      dataIndex: 'apr',
-      key: 'apr',
-      render: (apr: number) => <Text style={{ color: 'var(--primary-color)', fontWeight: 600 }}>{apr}%</Text>,
-    },
-    {
-      title: 'Duration',
-      dataIndex: 'duration',
-      key: 'duration',
-      render: (days: number) => <span>{days} Days</span>,
-    },
-    {
-      title: 'Collateral Asset',
-      dataIndex: 'collateralAsset',
-      key: 'collateralAsset',
-      render: (asset: string) => <Tag color="orange">{asset}</Tag>,
-    },
-    {
-      title: 'Req. Collateral',
-      key: 'reqCollateral',
-      render: (_: any, record: any) => {
-        const req = calculateRequiredCollateral(record.amount, 1.0, xlmPrice, record.maxLTV);
-        return <span>{req.toLocaleString()} XLM</span>;
-      },
-    },
-    {
-      title: 'Max LTV',
-      dataIndex: 'maxLTV',
-      key: 'maxLTV',
-      render: (ltv: number) => <span>{ltv}%</span>,
-    },
-    {
-      title: 'Minimum HF',
-      dataIndex: 'minHealthFactor',
-      key: 'minHealthFactor',
-      render: (hf: number) => <Text strong>{hf.toFixed(2)}</Text>,
-    },
-    {
-      title: 'Escrow & Listing',
-      key: 'escrowOffer',
-      render: () => (
-        <Space size={4}>
-          <Tag color="cyan">Escrow Funded</Tag>
-          <Tag color="green">Active Offer</Tag>
-        </Space>
+      title: 'Offer Principal',
+      key: 'principal',
+      render: (_: any, record: any) => (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+          <Text strong style={{ fontSize: '15px', color: 'var(--text-main)' }}>
+            {formatCurrency(record.amount, record.asset)}
+          </Text>
+          <Text type="secondary" style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', letterSpacing: '0.02em' }}>
+            ID: {record.id.slice(0, 8).toUpperCase()}...
+          </Text>
+        </div>
       ),
     },
     {
-      title: 'Action',
+      title: 'Lending Terms',
+      key: 'terms',
+      render: (_: any, record: any) => (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+          <Text strong style={{ color: 'var(--primary-color)', fontSize: '14px' }}>
+            {record.apr}% APR
+          </Text>
+          <Text type="secondary" style={{ fontSize: '12px' }}>
+            {record.duration} Days Term
+          </Text>
+        </div>
+      ),
+    },
+    {
+      title: 'Required Collateral',
+      key: 'reqCollateral',
+      render: (_: any, record: any) => {
+        const req = calculateRequiredCollateral(record.amount, 1.0, xlmPrice, record.maxLTV);
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+            <Text strong style={{ color: '#E28743', fontSize: '14px' }}>
+              {req.toLocaleString()} XLM
+            </Text>
+            <Text type="secondary" style={{ fontSize: '12px' }}>
+              Max LTV: {record.maxLTV}%
+            </Text>
+          </div>
+        );
+      },
+    },
+    {
+      title: 'Risk Profile & Safety',
+      key: 'riskProfile',
+      render: (_: any, record: any) => {
+        const isHighRisk = record.maxLTV > 75 || record.liquidationThreshold > 85;
+        const isModRisk = record.maxLTV > 60 || record.liquidationThreshold > 75;
+        const riskLevel = isHighRisk 
+          ? { label: 'High Risk', color: 'volcano' } 
+          : isModRisk 
+            ? { label: 'Moderate Risk', color: 'warning' } 
+            : { label: 'Low Risk', color: 'success' };
+        
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontWeight: 700, fontSize: '13px', color: 'var(--text-main)' }}>
+                Min HF: {record.minHealthFactor.toFixed(2)}
+              </span>
+              <Tag color={riskLevel.color} style={{ margin: 0, fontSize: '10px', border: 'none', lineHeight: '1.4', padding: '0 6px' }}>
+                {riskLevel.label.toUpperCase()}
+              </Tag>
+            </div>
+            <Text type="secondary" style={{ fontSize: '12px' }}>
+              Liq. Threshold: {record.liquidationThreshold}% LTV
+            </Text>
+          </div>
+        );
+      },
+    },
+    {
+      title: 'Lender Signature',
+      dataIndex: 'lender',
+      key: 'lender',
+      render: (lender: string) => (
+        <Text style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }} copyable={{ text: lender }}>
+          {formatAddress(lender)}
+        </Text>
+      ),
+    },
+    {
+      title: 'Security Escrow',
+      key: 'escrowStatus',
+      render: () => (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <div><Tag color="cyan" style={{ margin: 0, fontSize: '10px', border: 'none' }}>Escrow Funded</Tag></div>
+          <div><Tag color="green" style={{ margin: 0, fontSize: '10px', border: 'none' }}>Active Listing</Tag></div>
+        </div>
+      ),
+    },
+    {
+      title: 'Execution',
       key: 'action',
       render: (_: any, record: any) => (
         <Space size="middle">
-          <Button size="small" onClick={() => navigate(`/app/loans/${record.id}`)}>
-            View Details
+          <Button size="middle" onClick={() => navigate(`/app/loans/${record.id}`)} style={{ borderRadius: '6px' }}>
+            Specs
           </Button>
-          <Button size="small" type="primary" onClick={() => navigate(`/app/borrow/${record.id}`)}>
+          <Button size="middle" type="primary" onClick={() => navigate(`/app/borrow/${record.id}`)} style={{ borderRadius: '6px', fontWeight: 600 }}>
             Borrow
           </Button>
         </Space>
