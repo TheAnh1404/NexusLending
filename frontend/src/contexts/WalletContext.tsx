@@ -18,6 +18,7 @@ interface WalletContextState {
 
 interface WalletContextValue extends WalletContextState {
   connect: () => Promise<FreighterConnection>;
+  connectMockWallet: (address?: string) => void;
   disconnect: () => void;
   refreshWallet: () => Promise<void>;
 }
@@ -59,6 +60,20 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const refreshWallet = useCallback(async () => {
     setWallet((prev) => ({ ...prev, isLoading: true, error: null }));
 
+    if (localStorage.getItem('nexus_mock_connected') === 'true') {
+      const mockAddr = localStorage.getItem('nexus_mock_address') || 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5';
+      setWallet({
+        isConnected: true,
+        publicKey: mockAddr,
+        shortAddress: getShortAddress(mockAddr),
+        network: 'Stellar Testnet',
+        isTestnet: true,
+        isLoading: false,
+        error: null,
+      });
+      return;
+    }
+
     try {
       const available = await freighterService.isFreighterAvailable();
       if (!available) {
@@ -93,6 +108,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, []);
 
   useEffect(() => {
+    if (localStorage.getItem('nexus_mock_connected') === 'true') {
+      void refreshWallet();
+      return;
+    }
+
     if (freighterService.hasSavedConnection()) {
       void refreshWallet();
       return;
@@ -124,7 +144,26 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   }, []);
 
+  const connectMockWallet = useCallback((address?: string) => {
+    const mockAddr = address || 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5';
+    const mockWalletState: WalletContextState = {
+      isConnected: true,
+      publicKey: mockAddr,
+      shortAddress: getShortAddress(mockAddr),
+      network: 'Stellar Testnet',
+      isTestnet: true,
+      isLoading: false,
+      error: null,
+    };
+    localStorage.setItem('nexus_mock_connected', 'true');
+    localStorage.setItem('nexus_mock_address', mockAddr);
+    setWallet(mockWalletState);
+  }, []);
+
   const disconnect = useCallback(() => {
+    localStorage.removeItem('nexus_mock_connected');
+    localStorage.removeItem('nexus_mock_address');
+    localStorage.removeItem('nexus_data_mode');
     freighterService.disconnectWallet();
     setWallet({
       ...initialState,
@@ -136,10 +175,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     () => ({
       ...wallet,
       connect,
+      connectMockWallet,
       disconnect,
       refreshWallet,
     }),
-    [connect, disconnect, refreshWallet, wallet]
+    [connect, connectMockWallet, disconnect, refreshWallet, wallet]
   );
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;

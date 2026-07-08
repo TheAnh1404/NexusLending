@@ -1,5 +1,17 @@
 export const API_URL = (import.meta.env.VITE_API_URL ?? 'http://localhost:5000').replace(/\/$/, '');
-export const DATA_MODE = 'api';
+const storedDataMode = typeof window !== 'undefined'
+  ? window.localStorage.getItem('nexus_data_mode')
+  : null;
+const envDataMode = import.meta.env.VITE_DATA_MODE;
+const normalizedStoredMode = storedDataMode === 'api' || storedDataMode === 'mock'
+  ? storedDataMode
+  : null;
+export const DATA_MODE = envDataMode === 'mock'
+  ? 'mock'
+  : normalizedStoredMode || envDataMode || 'mock';
+
+const apiUnavailableMessage = (): string =>
+  `Cannot connect to backend API at ${API_URL}. Start the backend server on port 5000 or switch to Mock Mode.`;
 
 export interface ConfirmedChainReceiptPayload {
   txHash: string;
@@ -24,13 +36,18 @@ interface ApiErrorEnvelope {
 
 export const apiClient = {
   async request<T>(path: string, options: RequestInit = {}): Promise<T> {
-    const response = await fetch(`${API_URL}${path}`, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...options.headers,
-      },
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${API_URL}${path}`, {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          ...options.headers,
+        },
+      });
+    } catch {
+      throw new Error(apiUnavailableMessage());
+    }
 
     const payload = await response.json().catch(() => ({})) as Partial<ApiEnvelope<T>> & ApiErrorEnvelope;
 

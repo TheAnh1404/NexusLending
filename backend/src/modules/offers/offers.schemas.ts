@@ -4,7 +4,7 @@ import { confirmedChainReceiptSchema } from '../transactions/transactions.schema
 const decimalInput = z.union([z.string().min(1), z.number()]).transform(String);
 
 export const createOfferSchema = z.object({
-  contractOfferId: z.coerce.bigint(),
+  contractOfferId: z.coerce.bigint().optional(),
   lenderWallet: z.string().min(1),
   loanAsset: z.string().min(1),
   loanAmount: decimalInput,
@@ -20,7 +20,14 @@ export const createOfferSchema = z.object({
     .enum(['Draft', 'Funding', 'Active', 'Matched', 'Cancelled', 'Expired'])
     .default('Draft'),
   description: z.string().optional(),
-}).merge(confirmedChainReceiptSchema);
+  txHash: z.string().regex(/^[a-fA-F0-9]{64}$/).optional(),
+  explorerUrl: z.string().url().refine((val) => val.startsWith('https://stellar.expert/explorer/')).optional(),
+  ledger: z.coerce.number().int().positive().optional(),
+  txStatus: z.literal('SUCCESS').optional(),
+  contractId: z.string().min(1).optional(),
+  blockTimestamp: z.coerce.date().optional(),
+  contractReturnValue: z.unknown().optional()
+});
 
 export const updateOfferStatusSchema = z.object({
   status: z.enum(['Draft', 'Funding', 'Active', 'Matched', 'Cancelled', 'Expired']),
@@ -28,7 +35,8 @@ export const updateOfferStatusSchema = z.object({
 }).merge(confirmedChainReceiptSchema);
 
 export const offerActionWalletSchema = z.object({
-  wallet: z.string().min(1)
+  wallet: z.string().min(1),
+  contractOfferId: z.coerce.bigint().optional()
 }).merge(confirmedChainReceiptSchema);
 
 export const acceptOfferSchema = z.object({

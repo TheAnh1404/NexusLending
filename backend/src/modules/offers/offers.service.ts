@@ -69,7 +69,7 @@ export const offersService = {
 
   async create(input: CreateOfferInput) {
     validateCreateOffer(input);
-    const receipt = requireConfirmedReceipt(input);
+    const receipt = input.txHash ? requireConfirmedReceipt(input as any) : undefined;
 
     const data: Prisma.LoanOfferUncheckedCreateInput = {
       contractOfferId: input.contractOfferId,
@@ -86,10 +86,10 @@ export const offersService = {
       minHealthFactorBps: input.minHealthFactorBps,
       status: input.status ?? 'Draft',
       description: input.description,
-      txHash: receipt.txHash,
-      explorerUrl: receipt.explorerUrl,
-      ledger: receipt.ledger,
-      blockTimestamp: receipt.blockTimestamp
+      txHash: receipt?.txHash,
+      explorerUrl: receipt?.explorerUrl,
+      ledger: receipt?.ledger,
+      blockTimestamp: receipt?.blockTimestamp
     };
 
     return prisma.$transaction(async (tx) => {
@@ -97,19 +97,21 @@ export const offersService = {
         data,
         include: { loans: true }
       });
-      await tx.transaction.create({
-        data: createLedgerTransaction('CREATE_OFFER', offer.lenderWallet, {
-          offerId: offer.id,
-          asset: offer.loanAsset,
-          amount: offer.loanAmount,
-          receipt,
-          details: `Created Draft offer ${offer.id} for ${offer.loanAmount.toString()} ${offer.loanAsset}.`,
-          metadata: {
-            contractFunction: 'create_offer',
-            contractOfferId: offer.contractOfferId?.toString()
-          }
-        })
-      });
+      if (receipt) {
+        await tx.transaction.create({
+          data: createLedgerTransaction('CREATE_OFFER', offer.lenderWallet, {
+            offerId: offer.id,
+            asset: offer.loanAsset,
+            amount: offer.loanAmount,
+            receipt,
+            details: `Created Draft offer ${offer.id} for ${offer.loanAmount.toString()} ${offer.loanAsset}.`,
+            metadata: {
+              contractFunction: 'create_offer',
+              contractOfferId: offer.contractOfferId?.toString()
+            }
+          })
+        });
+      }
       return offer;
     });
   },
@@ -127,6 +129,7 @@ export const offersService = {
         where: { id },
         data: {
           status: 'Funding',
+          contractOfferId: input?.contractOfferId ? BigInt(input.contractOfferId) : undefined,
           txHash: receipt.txHash,
           explorerUrl: receipt.explorerUrl,
           ledger: receipt.ledger,
@@ -143,7 +146,7 @@ export const offersService = {
           details: `Funded offer ${id}; lender funds are locked in Vault/Escrow.`,
           metadata: {
             contractFunction: 'fund_offer',
-            contractOfferId: contractOfferRef(offer)
+            contractOfferId: contractOfferRef(updated)
           }
         })
       });

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAppContext } from '../app/AppContext';
 import { useWallet } from '../hooks/useWallet';
+import { SwapModal } from '../components/common/SwapModal';
 import {
   Layout as AntLayout,
   Menu,
@@ -52,6 +53,7 @@ export const AppLayout: React.FC = () => {
   const screens = useBreakpoint();
   const isDesktop = !!screens.lg;
   const [collapsed, setCollapsed] = useState(false);
+  const [swapModalOpen, setSwapModalOpen] = useState(false);
 
   // Sync WalletContext (Freighter connection) with LendingContext (lending state)
   React.useEffect(() => {
@@ -311,9 +313,19 @@ export const AppLayout: React.FC = () => {
                   <span style={{ color: 'var(--text-muted)' }}>USDC Balance:</span>
                   <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>${wallet.balanceUSDC.toLocaleString()}</span>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                   <span style={{ color: 'var(--text-muted)' }}>XLM Balance:</span>
                   <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>{wallet.balanceXLM.toLocaleString()} XLM</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '2px', marginBottom: '6px' }}>
+                  <Button
+                    type="link"
+                    size="small"
+                    style={{ padding: 0, height: 'auto', fontSize: '11px', color: 'var(--primary-color)' }}
+                    onClick={() => setSwapModalOpen(true)}
+                  >
+                    Swap XLM to USDC
+                  </Button>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed var(--border-color)', paddingTop: '4px', marginTop: '4px', fontSize: '10px' }}>
                   <span style={{ color: 'var(--text-muted)' }}>Lending: {lenderLoansCount} | Borrowing: {borrowerLoansCount}</span>
@@ -414,11 +426,12 @@ export const AppLayout: React.FC = () => {
               style={{ marginBottom: 24 }}
             />
           )}
-          <div className="animate-fade-in">
+           <div className="animate-fade-in">
             <Outlet />
           </div>
         </Content>
       </AntLayout>
+      <SwapModal open={swapModalOpen} onCancel={() => setSwapModalOpen(false)} />
     </AntLayout>
   );
 };

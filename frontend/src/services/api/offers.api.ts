@@ -80,12 +80,37 @@ export const offersApi = {
     return mapBackendOffer(offer);
   },
 
+  async createDraft(
+    input: CreateOfferInput,
+    lenderWallet: string,
+  ): Promise<LoanOffer> {
+    const offer = await apiClient.post<BackendLoanOffer>('/api/offers', {
+      lenderWallet,
+      loanAsset: input.asset,
+      loanAmount: String(input.amount),
+      fixedAprBps: toBps(input.apr),
+      durationDays: input.duration,
+      collateralAsset: input.collateralAsset,
+      maxLtvBps: toBps(input.maxLTV),
+      liquidationThresholdBps: toBps(input.liquidationThreshold),
+      liquidationBonusBps: toBps(input.liquidationBonus),
+      gracePeriodDays: input.gracePeriod,
+      minHealthFactorBps: toHealthFactorBps(input.minHealthFactor),
+      description: input.description,
+    });
+    return mapBackendOffer(offer);
+  },
+
   async updateStatus(id: string, status: OfferStatus): Promise<LoanOffer> {
     const offer = await apiClient.patch<BackendLoanOffer>(`/api/offers/${id}/status`, { status });
     return mapBackendOffer(offer);
   },
 
-  async fund(id: string, wallet: string, extra: ConfirmedChainReceiptPayload): Promise<LoanOffer> {
+  async fund(
+    id: string,
+    wallet: string,
+    extra: ConfirmedChainReceiptPayload & { contractOfferId?: string }
+  ): Promise<LoanOffer> {
     const offer = await apiClient.post<BackendLoanOffer>(`/api/offers/${id}/fund`, {
       wallet,
       ...extra,

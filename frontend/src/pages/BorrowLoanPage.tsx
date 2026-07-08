@@ -25,6 +25,12 @@ import { Wallet, ChevronLeft, ArrowRight, ShieldAlert, CheckCircle2, ExternalLin
 const { Title, Paragraph, Text } = Typography;
 const { Option } = Select;
 
+const getErrorMessage = (error: unknown, fallback: string): string => {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === 'string' && error) return error;
+  return fallback;
+};
+
 export const BorrowLoanPage: React.FC = () => {
   const id = useParams<{ id: string }>().id || '';
   const navigate = useNavigate();
@@ -46,6 +52,7 @@ export const BorrowLoanPage: React.FC = () => {
   const [modalVisible, setModalVisible] = useState(false);
   const [createdLoan, setCreatedLoan] = useState<any | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
+  const [errorDetails, setErrorDetails] = useState<string>('');
 
   useEffect(() => {
     if (minRequiredXLM) {
@@ -92,14 +99,22 @@ export const BorrowLoanPage: React.FC = () => {
   const canBorrow = healthFactor >= (offer ? offer.minHealthFactor : createdLoan.minHealthFactor) && wallet.balanceXLM >= collateralAmount;
 
   const handleBorrowSubmit = () => {
-    form.validateFields().then(() => {
-      setModalVisible(true);
-    });
+    form.validateFields()
+      .then(() => {
+        setErrorDetails('');
+        setModalVisible(true);
+      })
+      .catch(() => {
+        const details = 'Please fix the collateral amount before borrowing.';
+        setErrorDetails(details);
+        message.error(details);
+      });
   };
 
   const handleConfirmBorrow = async () => {
     try {
       setLoading(true);
+      setErrorDetails('');
       const loan = await acceptOffer(offer!.id, collateralAmount);
       if (loan) {
         setCreatedLoan(loan);
@@ -110,6 +125,9 @@ export const BorrowLoanPage: React.FC = () => {
       }
     } catch (e) {
       console.error(e);
+      const details = getErrorMessage(e, 'Borrow transaction failed.');
+      setErrorDetails(details);
+      message.error(details);
     } finally {
       setLoading(false);
     }
@@ -119,6 +137,7 @@ export const BorrowLoanPage: React.FC = () => {
     if (!createdLoan) return;
     try {
       setLoading(true);
+      setErrorDetails('');
       const active = await activateLoan(createdLoan.id);
       if (active) {
         setCreatedLoan(active);
@@ -128,6 +147,9 @@ export const BorrowLoanPage: React.FC = () => {
       }
     } catch (e) {
       console.error(e);
+      const details = getErrorMessage(e, 'Activation transaction failed.');
+      setErrorDetails(details);
+      message.error(details);
     } finally {
       setLoading(false);
     }
@@ -187,6 +209,15 @@ export const BorrowLoanPage: React.FC = () => {
           ]}
         />
       </Card>
+
+      {errorDetails && (
+        <Alert
+          type="error"
+          showIcon
+          message="Loan transaction error"
+          description={errorDetails}
+        />
+      )}
 
       {createdLoan ? (
         /* Stepper Flow layout after offer acceptance */

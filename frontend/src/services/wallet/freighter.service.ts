@@ -142,10 +142,17 @@ export const freighterService = {
     return isNetworkTestnet(network);
   },
 
-  async signTransaction(transactionXdr: string, networkPassphrase?: string): Promise<SignedTransaction> {
+  async signTransaction(
+    transactionXdr: string,
+    networkPassphrase?: string,
+    signerAddress?: string
+  ): Promise<SignedTransaction> {
     const passphrase = networkPassphrase ?? (await this.getNetwork()).networkPassphrase;
+    const signingOptions = signerAddress
+      ? { networkPassphrase: passphrase, address: signerAddress }
+      : { networkPassphrase: passphrase };
     const response = assertNoFreighterError(
-      await freighterSignTransaction(transactionXdr, { networkPassphrase: passphrase }),
+      await freighterSignTransaction(transactionXdr, signingOptions),
       'Unable to sign transaction with Freighter.'
     );
 
@@ -167,4 +174,3 @@ export const freighterService = {
     return localStorage.getItem(CONNECTED_STORAGE_KEY) === 'true';
   },
 };
-

@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { message as staticMessage, notification as staticNotification, App } from 'antd';
 
 let message: any = staticMessage;
@@ -21,7 +21,8 @@ import { transactionsApi } from '../services/api/transactions.api';
 import { marketplaceContract } from '../services/soroban/marketplace.contract';
 import { loanManagerContract } from '../services/soroban/loanManager.contract';
 import { oracleContract } from '../services/soroban/oracle.contract';
-import type { TxResult, TxStage } from '../services/soroban/transaction';
+import { swapStellarAssets } from '../services/soroban/transaction';
+import type { SwapDirection, TxResult, TxStage } from '../services/soroban/transaction';
 
 const STORAGE_KEY = 'nexus_lending_state_v3';
 
@@ -83,6 +84,7 @@ interface LendingContextValue {
   recalculateAllHealthFactors: () => Promise<OracleImpact[]>;
   liquidateLoan: (loanId: string, repayAmount: number) => Promise<void>;
   addTransaction: (transaction: Transaction) => void;
+  swapTokens: (direction: SwapDirection, receiveAmount: number, maxSendAmount: number) => Promise<boolean>;
 }
 
 const disconnectedWallet: WalletState = {
@@ -230,7 +232,12 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   notification = app.notification;
 
   const [snapshot, setSnapshot] = useState<LendingSnapshot>(() => getInitialSnapshot());
+  const walletRef = useRef(snapshot.wallet);
   const isApiMode = DATA_MODE === 'api';
+
+  useEffect(() => {
+    walletRef.current = snapshot.wallet;
+  }, [snapshot.wallet]);
 
   useEffect(() => {
     if (!isApiMode) {
@@ -239,7 +246,8 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   }, [isApiMode, snapshot]);
 
   const refreshFromApi = useCallback(async (): Promise<LendingSnapshot> => {
-    const address = snapshot.wallet.address;
+    const currentWallet = walletRef.current;
+    const address = currentWallet.address;
     const [offers, loans, oraclePrices, transactions, balances] = await Promise.all([
       offersApi.list(),
       loansApi.list(),
@@ -248,19 +256,27 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       address ? fetchWalletBalances(address) : Promise.resolve(null),
     ]);
 
-    let updatedWallet = snapshot.wallet;
+    let updatedWallet = currentWallet;
     if (address && balances) {
       updatedWallet = {
-        ...snapshot.wallet,
+        ...currentWallet,
         balanceXLM: balances.balanceXLM,
         balanceUSDC: balances.balanceUSDC,
       };
     }
 
     setSnapshot((prev) => {
+      const nextWallet = address && balances && prev.wallet.address === address
+        ? {
+            ...prev.wallet,
+            balanceXLM: balances.balanceXLM,
+            balanceUSDC: balances.balanceUSDC,
+          }
+        : prev.wallet;
+      walletRef.current = nextWallet;
       return {
         ...prev,
-        wallet: updatedWallet,
+        wallet: nextWallet,
         offers,
         loans,
         oraclePrices,
@@ -275,7 +291,7 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       oraclePrices,
       transactions,
     };
-  }, [snapshot.wallet]);
+  }, []);
 
   useEffect(() => {
     if (!isApiMode) return;
@@ -344,28 +360,32 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       return null;
     }
     const walletAddress = wallet.address;
+    if (offer.asset !== 'USDC' || offer.collateralAsset !== 'XLM') {
+      message.error('Loan creation currently supports USDC lending backed by XLM collateral only.');
+      return null;
+    }
     if (offer.maxLTV > offer.liquidationThreshold) {
       message.error('Max LTV must be less than or equal to liquidation threshold.');
       return null;
     }
+    if (offer.minHealthFactor < 1.4) {
+      message.error('Minimum Health Factor must be at least 1.40.');
+      return null;
+    }
 
     if (isApiMode) {
-      const txRes = await runSorobanTransaction((onStage) =>
-        marketplaceContract.createOfferTx(offer, walletAddress, onStage)
-      );
-      if (!txRes) return null;
-      const extra = {
-        ...txReceiptFromResult(txRes),
-        contractOfferId: contractReturnId(txRes, 'contractOfferId'),
-      };
-
-      const created = await offersApi.create(offer, walletAddress, extra);
-      await refreshFromApi();
-      notification.success({
-        message: 'Draft offer created',
-        description: `${offer.amount.toLocaleString()} ${offer.asset} terms are saved. Fund the offer before activation.`,
-      });
-      return created;
+      try {
+        const created = await offersApi.createDraft(offer, walletAddress);
+        await refreshFromApi();
+        notification.success({
+          message: 'Draft offer created',
+          description: `${offer.amount.toLocaleString()} ${offer.asset} terms are saved. Fund the offer to deploy on-chain.`,
+        });
+        return created;
+      } catch (error) {
+        message.error(error instanceof Error ? error.message : 'Failed to create draft offer.');
+        return null;
+      }
     }
 
     const newOffer = offersService.create(offer, wallet.address);
@@ -392,9 +412,25 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return newOffer;
   }, [isApiMode, refreshFromApi, snapshot]);
 
+  const getLatestOfferForAction = useCallback(async (offerId: string): Promise<LoanOffer | null> => {
+    if (!isApiMode) {
+      return snapshot.offers.find((item) => item.id === offerId) ?? null;
+    }
+
+    try {
+      const offers = await offersApi.list();
+      return offers.find((item) => item.id === offerId)
+        ?? snapshot.offers.find((item) => item.id === offerId)
+        ?? null;
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'Unable to load the latest offer state.');
+      return snapshot.offers.find((item) => item.id === offerId) ?? null;
+    }
+  }, [isApiMode, snapshot.offers]);
+
   const fundOffer = useCallback(async (offerId: string) => {
     const walletAddress = snapshot.wallet.address;
-    const offer = snapshot.offers.find((item) => item.id === offerId);
+    const offer = await getLatestOfferForAction(offerId);
     if (!offer) {
       message.error('Offer not found.');
       return null;
@@ -407,21 +443,47 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       message.error('Only the offer lender can fund this offer.');
       return null;
     }
-    if (snapshot.wallet.balanceUSDC < offer.amount) {
-      message.error('Insufficient USDC balance to fund this offer.');
+    const fundingBalance = offer.asset === 'XLM' ? snapshot.wallet.balanceXLM : snapshot.wallet.balanceUSDC;
+    if (fundingBalance < offer.amount) {
+      message.error(`Insufficient ${offer.asset} balance to fund this offer.`);
       return null;
     }
 
     if (isApiMode) {
-      const contractOfferId = offer.contractOfferId ?? offer.id;
-      const txRes = await runSorobanTransaction((onStage) =>
+      // Step 1: Deploy offer on-chain via create_offer (wallet signature required)
+      const createInput: CreateOfferInput = {
+        amount: offer.amount,
+        asset: offer.asset,
+        apr: offer.apr,
+        duration: offer.duration,
+        collateralAsset: offer.collateralAsset,
+        maxLTV: offer.maxLTV,
+        liquidationThreshold: offer.liquidationThreshold,
+        liquidationBonus: offer.liquidationBonus,
+        gracePeriod: offer.gracePeriod,
+        minHealthFactor: offer.minHealthFactor,
+        description: offer.description,
+      };
+      const createTxRes = await runSorobanTransaction((onStage) =>
+        marketplaceContract.createOfferTx(createInput, walletAddress, onStage)
+      );
+      if (!createTxRes) return null;
+
+      const contractOfferId = contractReturnId(createTxRes, 'contractOfferId');
+
+      // Step 2: Fund the offer escrow on-chain (wallet signature required)
+      const fundTxRes = await runSorobanTransaction((onStage) =>
         marketplaceContract.fundOfferTx(contractOfferId, walletAddress, onStage)
       );
-      if (!txRes) return null;
+      if (!fundTxRes) return null;
 
-      const funded = await offersApi.fund(offerId, walletAddress, txReceiptFromResult(txRes));
+      // Persist both create + fund results to the backend in a single call
+      const funded = await offersApi.fund(offerId, walletAddress, {
+        ...txReceiptFromResult(fundTxRes),
+        contractOfferId: String(contractOfferId),
+      });
       await refreshFromApi();
-      notification.success({ message: 'Offer funded', description: 'Lender funds are locked in Vault/Escrow.' });
+      notification.success({ message: 'Offer funded', description: 'Offer deployed on-chain and lender funds locked in Vault/Escrow.' });
       return funded;
     }
 
@@ -439,7 +501,8 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       ...prev,
       wallet: {
         ...prev.wallet,
-        balanceUSDC: prev.wallet.balanceUSDC - offer.amount,
+        balanceXLM: offer.asset === 'XLM' ? prev.wallet.balanceXLM - offer.amount : prev.wallet.balanceXLM,
+        balanceUSDC: offer.asset === 'USDC' ? prev.wallet.balanceUSDC - offer.amount : prev.wallet.balanceUSDC,
       },
       offers: prev.offers.map((item) => (item.id === offerId ? updatedOffer : item)),
       transactions: [transaction, ...prev.transactions],
@@ -447,11 +510,11 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     notification.success({ message: 'Offer funded', description: 'Activate it to list it in the marketplace.' });
     return updatedOffer;
-  }, [isApiMode, refreshFromApi, snapshot]);
+  }, [getLatestOfferForAction, isApiMode, refreshFromApi, snapshot]);
 
   const activateOffer = useCallback(async (offerId: string) => {
     const walletAddress = snapshot.wallet.address;
-    const offer = snapshot.offers.find((item) => item.id === offerId);
+    const offer = await getLatestOfferForAction(offerId);
     if (!offer) {
       message.error('Offer not found.');
       return null;
@@ -496,7 +559,7 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     notification.success({ message: 'Offer activated', description: 'The offer is now listed in the marketplace.' });
     return updatedOffer;
-  }, [isApiMode, refreshFromApi, snapshot]);
+  }, [getLatestOfferForAction, isApiMode, refreshFromApi, snapshot]);
 
   const cancelOffer = useCallback(async (offerId: string) => {
     const walletAddress = snapshot.wallet.address;
@@ -1009,6 +1072,69 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     });
   }, [isApiMode, refreshFromApi, snapshot]);
 
+  const swapTokens = useCallback(async (
+    direction: SwapDirection,
+    receiveAmount: number,
+    maxSendAmount: number
+  ) => {
+    const { wallet } = snapshot;
+    if (!wallet.connected || !wallet.address) {
+      message.error('Connect your wallet first.');
+      return false;
+    }
+    if (receiveAmount <= 0 || maxSendAmount <= 0) {
+      message.error('Enter a valid swap amount.');
+      return false;
+    }
+
+    const walletAddress = wallet.address;
+    const sendAsset = direction === 'XLM_TO_USDC' ? 'XLM' : 'USDC';
+    const receiveAsset = direction === 'XLM_TO_USDC' ? 'USDC' : 'XLM';
+    const sendBalance = direction === 'XLM_TO_USDC' ? wallet.balanceXLM : wallet.balanceUSDC;
+
+    if (sendBalance < maxSendAmount) {
+      message.error(`Insufficient ${sendAsset} balance for this swap.`);
+      return false;
+    }
+
+    if (isApiMode) {
+      const txRes = await runSorobanTransaction((onStage) =>
+        swapStellarAssets(walletAddress, direction, receiveAmount, maxSendAmount, onStage)
+      );
+      if (!txRes) return false;
+      await refreshFromApi();
+      notification.success({
+        message: 'Swap completed',
+        description: `Successfully received ${receiveAmount.toLocaleString()} ${receiveAsset}.`,
+      });
+      return true;
+    }
+
+    const { xlmPrice } = getPrices(snapshot.oraclePrices);
+    const estimatedSendAmount = direction === 'XLM_TO_USDC'
+      ? receiveAmount / xlmPrice
+      : receiveAmount * xlmPrice;
+    const debitedAmount = Math.min(maxSendAmount, estimatedSendAmount);
+
+    setSnapshot((prev) => ({
+      ...prev,
+      wallet: {
+        ...prev.wallet,
+        balanceXLM: direction === 'XLM_TO_USDC'
+          ? prev.wallet.balanceXLM - debitedAmount
+          : prev.wallet.balanceXLM + receiveAmount,
+        balanceUSDC: direction === 'XLM_TO_USDC'
+          ? prev.wallet.balanceUSDC + receiveAmount
+          : prev.wallet.balanceUSDC - debitedAmount,
+      }
+    }));
+    notification.success({
+      message: 'Swap completed (Mock)',
+      description: `Successfully received ${receiveAmount.toLocaleString()} mock ${receiveAsset}.`,
+    });
+    return true;
+  }, [isApiMode, refreshFromApi, snapshot]);
+
 
 
   const value = useMemo<LendingContextValue>(
@@ -1047,6 +1173,7 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       recalculateAllHealthFactors,
       liquidateLoan,
       addTransaction: pushTransaction,
+      swapTokens,
     }),
     [
       acceptOffer,
@@ -1064,6 +1191,7 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       repayLoan,
       snapshot,
       updateOraclePrice,
+      swapTokens,
     ]
   );
 

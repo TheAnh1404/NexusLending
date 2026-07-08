@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppContext } from '../app/AppContext';
 import { useWallet } from '../hooks/useWallet';
+import { DATA_MODE } from '../services/api/client';
 import { freighterService } from '../services/wallet/freighter.service';
 import { Alert, Button, Card, Space, Tag, Typography, message } from 'antd';
 import { ArrowLeft, ExternalLink, Layers, ShieldCheck, Wallet } from 'lucide-react';
@@ -12,6 +13,7 @@ export const ConnectPage: React.FC = () => {
   const { connectWallet: connectDemoWallet } = useAppContext();
   const {
     connect,
+    connectMockWallet,
     isConnected,
     publicKey,
     shortAddress,
@@ -68,6 +70,19 @@ export const ConnectPage: React.FC = () => {
     if (publicKey) {
       connectDemoWallet(publicKey);
     }
+    navigate('/app');
+  };
+
+  const handleConnectMock = () => {
+    const mockAddress = 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5';
+    localStorage.setItem('nexus_data_mode', 'mock');
+    if (DATA_MODE !== 'mock') {
+      window.location.assign('/app');
+      return;
+    }
+    connectMockWallet(mockAddress);
+    connectDemoWallet(mockAddress);
+    message.success('Sandbox mock wallet connected successfully in Mock Mode.');
     navigate('/app');
   };
 
@@ -215,6 +230,25 @@ export const ConnectPage: React.FC = () => {
             >
               {isConnected ? 'Launch Dashboard' : 'Connect Wallet'}
             </Button>
+            {(!isConnected || isAvailable === false) && (
+              <Button
+                type="default"
+                size="large"
+                onClick={handleConnectMock}
+                style={{
+                  width: '100%',
+                  height: '48px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderColor: 'var(--primary-color)',
+                  color: 'var(--primary-color)',
+                  marginTop: '8px'
+                }}
+              >
+                Use Sandbox Wallet (Mock Mode)
+              </Button>
+            )}
             {isConnected && (
               <Button
                 size="large"

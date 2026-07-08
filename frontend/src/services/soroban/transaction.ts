@@ -1,7 +1,17 @@
-import { TransactionBuilder, Account, rpc, Contract, scValToNative } from '@stellar/stellar-sdk';
-import { signTransaction } from '@stellar/freighter-api';
-import { sorobanRpc } from './client';
-import { PASSPHRASE, NETWORK } from './config';
+import {
+  TransactionBuilder,
+  Account,
+  rpc,
+  Contract,
+  scValToNative,
+  Asset,
+  Operation,
+  type FeeBumpTransaction,
+  type Transaction,
+} from '@stellar/stellar-sdk';
+import { freighterService } from '../wallet/freighter.service';
+import { horizonServer, sorobanRpc } from './client';
+import { NETWORK, PASSPHRASE, STELLAR_DECIMALS, USDC_ASSET, USDC_ASSET_CODE } from './config';
 
 export type TxStage = 'preparing' | 'wallet' | 'submitting' | 'confirming' | 'confirmed';
 
@@ -17,12 +27,195 @@ export interface TxResult {
   contractReturnValue?: unknown;
 }
 
+export type SwapDirection = 'XLM_TO_USDC' | 'USDC_TO_XLM';
+
+export interface SwapQuote {
+  direction: SwapDirection;
+  sendAsset: string;
+  receiveAsset: string;
+  receiveAmount: string;
+  requiredSendAmount: string;
+  path: string[];
+}
+
+interface HorizonPathAsset {
+  asset_code: string;
+  asset_issuer: string;
+  asset_type: string;
+}
+
+interface HorizonPaymentPath {
+  path: HorizonPathAsset[];
+  source_amount: string;
+}
+
 const explorerUrlFor = (txHash: string): string =>
   NETWORK === 'testnet'
     ? `https://stellar.expert/explorer/testnet/tx/${txHash}`
     : `https://stellar.expert/explorer/public/tx/${txHash}`;
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+const toStellarAmount = (amount: number, rounding: 'round' | 'ceil' = 'round'): string => {
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error('Swap amount must be greater than zero.');
+  }
+
+  const factor = 10 ** STELLAR_DECIMALS;
+  const scaled = rounding === 'ceil'
+    ? Math.ceil((amount * factor) - 1e-9)
+    : Math.round(amount * factor);
+
+  if (scaled <= 0) {
+    throw new Error(`Amount is below the Stellar minimum precision of 1e-${STELLAR_DECIMALS}.`);
+  }
+
+  return (scaled / factor).toFixed(STELLAR_DECIMALS).replace(/\.?0+$/, '');
+};
+
+const assetLabel = (asset: Asset): string => asset.isNative() ? 'XLM' : asset.getCode();
+
+const getSwapAssets = (direction: SwapDirection): { sendAsset: Asset; destAsset: Asset; functionName: string } => ({
+  sendAsset: direction === 'XLM_TO_USDC' ? Asset.native() : USDC_ASSET,
+  destAsset: direction === 'XLM_TO_USDC' ? USDC_ASSET : Asset.native(),
+  functionName: direction === 'XLM_TO_USDC' ? 'swap_xlm_to_usdc' : 'swap_usdc_to_xlm',
+});
+
+const pathAssetToAsset = (asset: HorizonPathAsset): Asset => {
+  if (asset.asset_type === 'native') return Asset.native();
+  return new Asset(asset.asset_code, asset.asset_issuer);
+};
+
+const accountHasTrustline = (account: unknown, asset: Asset): boolean => {
+  if (asset.isNative()) return true;
+
+  const balances = (account as { balances?: unknown[] }).balances;
+  if (!Array.isArray(balances)) return false;
+
+  return balances.some((balance) => {
+    const item = balance as { asset_code?: string; asset_issuer?: string; asset_type?: string };
+    return item.asset_type !== 'native'
+      && item.asset_code === asset.getCode()
+      && item.asset_issuer === asset.getIssuer();
+  });
+};
+
+const findBestStrictReceivePath = async (
+  sendAsset: Asset,
+  destAsset: Asset,
+  destAmount: string
+): Promise<HorizonPaymentPath> => {
+  const response = await horizonServer.strictReceivePaths([sendAsset], destAsset, destAmount).call();
+  const records = (response.records ?? []) as HorizonPaymentPath[];
+
+  if (records.length === 0) {
+    throw new Error(`No Stellar DEX payment path found for ${assetLabel(sendAsset)} to ${assetLabel(destAsset)}.`);
+  }
+
+  return [...records].sort((left, right) => Number(left.source_amount) - Number(right.source_amount))[0];
+};
+
+const pathDisplay = (path: HorizonPathAsset[]): string[] =>
+  path.map((asset) => asset.asset_type === 'native' ? 'XLM' : `${asset.asset_code}:${asset.asset_issuer}`);
+
+export async function quoteStellarSwap(direction: SwapDirection, receiveAmount: number): Promise<SwapQuote> {
+  const { sendAsset, destAsset } = getSwapAssets(direction);
+  const destAmount = toStellarAmount(receiveAmount);
+  const bestPath = await findBestStrictReceivePath(sendAsset, destAsset, destAmount);
+
+  return {
+    direction,
+    sendAsset: assetLabel(sendAsset),
+    receiveAsset: assetLabel(destAsset),
+    receiveAmount: destAmount,
+    requiredSendAmount: bestPath.source_amount,
+    path: pathDisplay(bestPath.path),
+  };
+}
+
+const HORIZON_RESULT_MESSAGES: Record<string, string> = {
+  op_underfunded: 'Insufficient wallet balance for the swap and required XLM reserve.',
+  op_too_few_offers: 'No Stellar DEX liquidity is available for this swap amount.',
+  op_over_sendmax: 'Slippage limit exceeded. Increase the max send amount or try a smaller swap.',
+  op_under_destmin: 'Slippage limit exceeded. Increase the max send amount or try a smaller swap.',
+  op_no_trust: 'The receiving account does not have the required asset trustline.',
+  op_src_no_trust: `Your wallet does not have a ${USDC_ASSET_CODE} trustline.`,
+  op_low_reserve: `Your wallet needs more unlocked XLM reserve to add the ${USDC_ASSET_CODE} trustline.`,
+  op_line_full: `Your ${USDC_ASSET_CODE} trustline limit is full.`,
+  op_no_issuer: `${USDC_ASSET_CODE} issuer does not exist on this Stellar network.`,
+  op_not_authorized: `The ${USDC_ASSET_CODE} trustline is not authorized.`,
+  op_src_not_authorized: `The ${USDC_ASSET_CODE} trustline is not authorized.`,
+  op_cross_self: 'This swap would cross one of your own open offers.',
+  tx_bad_auth: 'Freighter did not provide a valid signature for this transaction.',
+  tx_bad_seq: 'Wallet sequence number changed. Please retry the swap.',
+  tx_insufficient_balance: 'Wallet does not have enough XLM to pay fees and reserve.',
+  tx_insufficient_fee: 'Network fee was too low. Please retry.',
+};
+
+const normalizeHorizonSubmissionError = (error: unknown): Error => {
+  const responseData = (error as { response?: { data?: unknown } })?.response?.data as {
+    extras?: {
+      result_codes?: {
+        transaction?: string;
+        operations?: string[];
+      };
+      result_xdr?: string;
+    };
+    detail?: string;
+    details?: string;
+  } | undefined;
+
+  const txCode = responseData?.extras?.result_codes?.transaction;
+  const operationCodes = responseData?.extras?.result_codes?.operations ?? [];
+  const failedCode = operationCodes.find((code) => code && code !== 'op_success') ?? txCode;
+
+  if (failedCode) {
+    const message = HORIZON_RESULT_MESSAGES[failedCode] ?? `Stellar transaction failed with code ${failedCode}.`;
+    const codes = [txCode, ...operationCodes].filter(Boolean).join(', ');
+    return new Error(`${message} (${codes})`);
+  }
+
+  if (error instanceof Error && error.message) return error;
+  return new Error(responseData?.details ?? responseData?.detail ?? 'Unable to submit swap transaction to Stellar.');
+};
+
+const submitClassicTransaction = async (
+  tx: Transaction,
+  functionName: string,
+  userWallet: string,
+  onStage?: (stage: TxStage) => void,
+  contractReturnValue?: unknown
+): Promise<TxResult> => {
+  onStage?.('wallet');
+  const signed = await freighterService.signTransaction(tx.toXDR(), PASSPHRASE, userWallet);
+  const signedTx = TransactionBuilder.fromXDR(signed.signedTxXdr, PASSPHRASE) as Transaction | FeeBumpTransaction;
+
+  onStage?.('submitting');
+  let submitResponse;
+  try {
+    submitResponse = await horizonServer.submitTransaction(signedTx, { skipMemoRequiredCheck: true });
+  } catch (error) {
+    throw normalizeHorizonSubmissionError(error);
+  }
+
+  if (!submitResponse.hash) {
+    throw new Error('Horizon did not return a transaction hash.');
+  }
+
+  onStage?.('confirming');
+  onStage?.('confirmed');
+
+  return {
+    txHash: submitResponse.hash,
+    explorerUrl: explorerUrlFor(submitResponse.hash),
+    ledger: submitResponse.ledger,
+    status: 'SUCCESS',
+    contractId: 'stellar-classic-dex',
+    functionName,
+    blockTimestamp: new Date().toISOString(),
+    contractReturnValue,
+  };
+};
 
 const toJsonSafe = (value: unknown): unknown => {
   if (typeof value === 'bigint') return value.toString();
@@ -126,23 +319,12 @@ export async function buildAndSubmitTx(
     throw new Error(`Simulation failed: ${friendlyMessage}`);
   }
 
-  const preparedTx = rpc.assembleTransaction(tx, simulated) as any;
+  const preparedTx = rpc.assembleTransaction(tx, simulated).build();
   const unsignedXdr = preparedTx.toXDR();
 
   onStage?.('wallet');
-  const signResult = await signTransaction(unsignedXdr, {
-    networkPassphrase: PASSPHRASE,
-  });
-
-  if (signResult.error) {
-    throw new Error(`Freighter signing failed: ${signResult.error}`);
-  }
-
-  const signedXdr = signResult.signedTxXdr;
-  if (!signedXdr) {
-    throw new Error('Freighter did not return a signed transaction XDR.');
-  }
-  const signedTx = TransactionBuilder.fromXDR(signedXdr, PASSPHRASE) as any;
+  const signResult = await freighterService.signTransaction(unsignedXdr, PASSPHRASE, userWallet);
+  const signedTx = TransactionBuilder.fromXDR(signResult.signedTxXdr, PASSPHRASE) as any;
 
   onStage?.('submitting');
   const sendRes = await sorobanRpc.sendTransaction(signedTx);
@@ -183,9 +365,100 @@ export async function buildAndSubmitTx(
     }
 
     if (status === 'FAILED') {
-      throw new Error(`Transaction confirmed as FAILED. Result XDR: ${(txStatus as any).resultXdr}`);
+      const rawResultXdr = (txStatus as any).resultXdr;
+      let resultXdrString = '';
+      if (typeof rawResultXdr === 'string') {
+        resultXdrString = rawResultXdr;
+      } else if (rawResultXdr && typeof rawResultXdr.toXDR === 'function') {
+        resultXdrString = rawResultXdr.toXDR('base64');
+      } else {
+        resultXdrString = JSON.stringify(rawResultXdr);
+      }
+      throw new Error(`Transaction confirmed as FAILED. Result XDR: ${resultXdrString}`);
     }
   }
 
   throw new Error('Transaction confirmation timeout after 30 attempts');
+}
+
+export async function swapXlmToUsdc(
+  userWallet: string,
+  usdcAmount: number,
+  maxXlmToSend: number,
+  onStage?: (stage: TxStage) => void
+): Promise<TxResult> {
+  return swapStellarAssets(userWallet, 'XLM_TO_USDC', usdcAmount, maxXlmToSend, onStage);
+}
+
+export async function swapUsdcToXlm(
+  userWallet: string,
+  xlmAmount: number,
+  maxUsdcToSend: number,
+  onStage?: (stage: TxStage) => void
+): Promise<TxResult> {
+  return swapStellarAssets(userWallet, 'USDC_TO_XLM', xlmAmount, maxUsdcToSend, onStage);
+}
+
+export async function swapStellarAssets(
+  userWallet: string,
+  direction: SwapDirection,
+  receiveAmount: number,
+  maxSendAmount: number,
+  onStage?: (stage: TxStage) => void
+): Promise<TxResult> {
+  onStage?.('preparing');
+
+  const { sendAsset, destAsset, functionName } = getSwapAssets(direction);
+  const destAmount = toStellarAmount(receiveAmount);
+  const sendMax = toStellarAmount(maxSendAmount, 'ceil');
+
+  const [account, bestPath] = await Promise.all([
+    horizonServer.loadAccount(userWallet),
+    findBestStrictReceivePath(sendAsset, destAsset, destAmount),
+  ]);
+
+  const requiredSendAmount = Number(bestPath.source_amount);
+  if (!Number.isFinite(requiredSendAmount) || requiredSendAmount <= 0) {
+    throw new Error('Horizon returned an invalid payment path amount.');
+  }
+
+  if (requiredSendAmount - maxSendAmount > 1 / (10 ** STELLAR_DECIMALS)) {
+    throw new Error(
+      `Slippage limit exceeded. Current path needs ${bestPath.source_amount} ${assetLabel(sendAsset)}, `
+      + `but your max send is ${sendMax} ${assetLabel(sendAsset)}.`
+    );
+  }
+
+  const path = bestPath.path.map(pathAssetToAsset);
+  const shouldCreateUsdcTrustline = direction === 'XLM_TO_USDC' && !accountHasTrustline(account, USDC_ASSET);
+  const builder = new TransactionBuilder(account, {
+    fee: '100000',
+    networkPassphrase: PASSPHRASE,
+  });
+
+  if (shouldCreateUsdcTrustline) {
+    builder.addOperation(Operation.changeTrust({ asset: USDC_ASSET }));
+  }
+
+  builder.addOperation(Operation.pathPaymentStrictReceive({
+    sendAsset,
+    sendMax,
+    destination: userWallet,
+    destAsset,
+    destAmount,
+    path,
+  }));
+
+  const tx = builder.setTimeout(180).build();
+
+  return submitClassicTransaction(tx, functionName, userWallet, onStage, {
+    direction,
+    sendAsset: assetLabel(sendAsset),
+    receiveAsset: assetLabel(destAsset),
+    requiredSendAmount: bestPath.source_amount,
+    maxSendAmount: sendMax,
+    receiveAmount: destAmount,
+    trustlineCreated: shouldCreateUsdcTrustline,
+    path: pathDisplay(bestPath.path),
+  });
 }
