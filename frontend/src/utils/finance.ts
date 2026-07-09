@@ -1,5 +1,8 @@
 import type { RiskZone } from '../types';
 
+export const DEFAULT_GRACE_PERIOD_DAYS = 7;
+export const LIQUIDATION_CLOSE_FACTOR = 0.5;
+
 export const calculateHealthFactor = (
   collateralAmount: number,
   collateralPrice: number,
@@ -59,6 +62,44 @@ export const isLiquidatable = (healthFactor: number, status?: string): boolean =
   status === 'LiquidationPlanning' ||
   status === 'Defaulted' ||
   (status !== 'PendingCollateral' && healthFactor < 1.2);
+
+export const getDefaultDate = (
+  dueDate: string,
+  gracePeriodDays = DEFAULT_GRACE_PERIOD_DAYS
+): Date => new Date(new Date(dueDate).getTime() + gracePeriodDays * 24 * 60 * 60 * 1000);
+
+export const getGracePeriodDaysRemaining = (
+  dueDate: string,
+  gracePeriodDays = DEFAULT_GRACE_PERIOD_DAYS
+): number => {
+  const defaultTime = getDefaultDate(dueDate, gracePeriodDays).getTime();
+  return Math.max(0, Math.ceil((defaultTime - Date.now()) / (24 * 60 * 60 * 1000)));
+};
+
+export const getTimeBasedLoanStatus = (
+  dueDate: string,
+  gracePeriodDays = DEFAULT_GRACE_PERIOD_DAYS,
+  now = Date.now()
+): 'Expired' | 'Defaulted' | null => {
+  const dueTime = new Date(dueDate).getTime();
+  if (!Number.isFinite(dueTime)) return null;
+  const defaultTime = dueTime + gracePeriodDays * 24 * 60 * 60 * 1000;
+  if (now > defaultTime) return 'Defaulted';
+  if (now > dueTime) return 'Expired';
+  return null;
+};
+
+export const calculateMaxLiquidationRepay = (
+  outstandingDebt: number,
+  collateralAmount: number,
+  collateralPrice: number,
+  liquidationBonusPercent: number
+): number => {
+  const closeFactorLimit = outstandingDebt * LIQUIDATION_CLOSE_FACTOR;
+  const maxByCollateral = collateralAmount * collateralPrice / (1 + liquidationBonusPercent / 100);
+  const maxRepay = Math.min(closeFactorLimit, maxByCollateral, outstandingDebt);
+  return Math.max(0, Math.floor(maxRepay * 100) / 100);
+};
 
 export const calculateCollateralValue = (
   collateralAmount: number,

@@ -255,6 +255,8 @@ const simulatedHF = (collateralValue * liquidationThreshold) / outstandingDebt;
 | Health Factor gauge | Visual HF indicator with color zones |
 | Collateral info | Amount, value, asset |
 | Actions | Add Collateral, Partial Repay, Full Repay (borrower only) |
+| Overdue repayment notice | If status is `Expired`, show a repay CTA and remaining days in the 7-day grace period |
+| Default warning | If status is `Defaulted`, show that the loan is liquidatable regardless of HF until it is repaid or liquidated |
 | Timeline | Loan events (creation, repayments, status changes) |
 
 **API Calls:**
@@ -275,6 +277,7 @@ const simulatedHF = (collateralValue * liquidationThreshold) / outstandingDebt;
 |---------|-------------|
 | Active loans | List with HF, status, due date |
 | Upcoming due dates | Calendar/list of loans approaching due |
+| Overdue repayment alerts | Expired loans show a repayment notification and 7-day grace countdown |
 | HF alerts | Loans needing attention |
 | Total borrowed | Sum of outstanding debt |
 
@@ -301,6 +304,7 @@ const simulatedHF = (collateralValue * liquidationThreshold) / outstandingDebt;
 | Liquidatable loans | Loans with HF < 1.2 or status Defaulted |
 | Profit calculator | Estimated profit per liquidation (bonus) |
 | Sort | By HF (ascending), by profit (descending) |
+| Time-based default eligibility | Expired healthy loans are hidden until the 7-day grace period ends and status becomes `Defaulted` |
 
 **API Calls:**
 - `GET /api/loans/liquidatable`
@@ -443,6 +447,7 @@ Liquidation Center → Select loan → Navigate to /app/liquidation/:id
 | Oracle prices | Backend API | Poll every 30 seconds |
 | Loan HF | Backend API (computed) | Poll every 30 seconds, or on-demand after mutations |
 | Loan status | Backend API (indexed from events) | Poll every 15 seconds |
+| Overdue/default status | Backend API plus `mark_expired` / `mark_defaulted` transaction result | Refresh at least every 15 seconds on loan dashboards and immediately after due-date/default actions |
 | Wallet balances | Soroban RPC / Horizon | Poll every 30 seconds |
 | Offer list | Backend API | Poll every 15 seconds on marketplace page |
 

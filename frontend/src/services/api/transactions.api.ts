@@ -45,8 +45,12 @@ export const mapBackendTransaction = (transaction: BackendTransaction): Transact
 });
 
 export const transactionsApi = {
-  async list(): Promise<Transaction[]> {
-    const transactions = await apiClient.get<BackendTransaction[]>('/api/transactions');
+  async list(query: { wallet?: string; relatedWallet?: string } = {}): Promise<Transaction[]> {
+    const params = new URLSearchParams();
+    if (query.wallet) params.set('wallet', query.wallet);
+    if (query.relatedWallet) params.set('relatedWallet', query.relatedWallet);
+    const path = params.size > 0 ? `/api/transactions?${params.toString()}` : '/api/transactions';
+    const transactions = await apiClient.get<BackendTransaction[]>(path);
     return transactions.map(mapBackendTransaction);
   },
 

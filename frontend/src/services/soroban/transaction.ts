@@ -220,12 +220,16 @@ const SOROBAN_PANIC_MESSAGES: Record<string, string> = {
   'amount must be positive': 'Amount must be greater than zero.',
 };
 
-const normalizeSorobanSimulationError = (rawError: string): string => {
+const normalizeSorobanSimulationError = (rawError: string, functionName?: string): string => {
   const lowerRawError = rawError.toLowerCase();
   const panicMessage = Object.entries(SOROBAN_PANIC_MESSAGES)
     .find(([needle]) => lowerRawError.includes(needle));
 
   if (panicMessage) return panicMessage[1];
+
+  if (lowerRawError.includes('asset price not found') || lowerRawError.includes('price not found')) {
+    return 'Oracle price is not initialized for the configured XLM/USDC asset contract pair. Run set_price_for_assets for the XLM and USDC contract IDs used by the frontend.';
+  }
 
   const contractErrMatch = rawError.match(/Error\(Contract,\s*#?(\d+)\)/);
   if (contractErrMatch) {
@@ -235,6 +239,10 @@ const normalizeSorobanSimulationError = (rawError: string): string => {
 
   const diagnosticMatch = rawError.match(/data:\["([^"]+)"/);
   if (diagnosticMatch) return diagnosticMatch[1];
+
+  if (lowerRawError.includes('contract call failed') && functionName === 'activate_loan') {
+    return 'Loan activation failed during simulation. Check that the oracle has XLM/USDC set with set_price_for_assets, the offer is funded on-chain, the borrower has enough unlocked XLM, and the borrower has a USDC trustline.';
+  }
 
   return rawError;
 };
@@ -276,6 +284,36 @@ const submitClassicTransaction = async (
     contractReturnValue,
   };
 };
+
+export async function hasUsdcTrustline(userWallet: string): Promise<boolean> {
+  const account = await horizonServer.loadAccount(userWallet);
+  return accountHasTrustline(account, USDC_ASSET);
+}
+
+export async function createUsdcTrustline(
+  userWallet: string,
+  onStage?: (stage: TxStage) => void
+): Promise<TxResult> {
+  onStage?.('preparing');
+  const account = await horizonServer.loadAccount(userWallet);
+
+  if (accountHasTrustline(account, USDC_ASSET)) {
+    throw new Error(`${USDC_ASSET_CODE} trustline already exists.`);
+  }
+
+  const tx = new TransactionBuilder(account, {
+    fee: '100000',
+    networkPassphrase: PASSPHRASE,
+  })
+    .addOperation(Operation.changeTrust({ asset: USDC_ASSET }))
+    .setTimeout(180)
+    .build();
+
+  return submitClassicTransaction(tx, `create_${USDC_ASSET_CODE.toLowerCase()}_trustline`, userWallet, onStage, {
+    asset: USDC_ASSET_CODE,
+    issuer: USDC_ASSET.getIssuer(),
+  });
+}
 
 const toJsonSafe = (value: unknown): unknown => {
   if (typeof value === 'bigint') return value.toString();
@@ -355,7 +393,7 @@ export async function buildAndSubmitTx(
   const simulated = await sorobanRpc.simulateTransaction(tx);
   if (rpc.Api.isSimulationError(simulated)) {
     const rawError = simulated.error ?? 'Unknown simulation error';
-    const friendlyMessage = normalizeSorobanSimulationError(rawError);
+    const friendlyMessage = normalizeSorobanSimulationError(rawError, functionName);
     console.error(`[Soroban] Simulation failed for ${functionName}:`, rawError);
     throw new Error(`Simulation failed: ${friendlyMessage}`);
   }

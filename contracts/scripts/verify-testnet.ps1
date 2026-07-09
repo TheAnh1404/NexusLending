@@ -14,9 +14,11 @@ if (-not (Test-Path $jsonFile)) {
 
 $deployments = Get-Content -Raw $jsonFile | ConvertFrom-Json
 $oracleId = $deployments.contracts.oracle
+$xlmAssetContract = if ($env:XLM_CONTRACT_ID) { $env:XLM_CONTRACT_ID } else { "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC" }
+$usdcAssetContract = if ($env:USDC_CONTRACT_ID) { $env:USDC_CONTRACT_ID } else { "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA" }
 
-Write-Host ">>> Querying oracle contract ($oracleId) for XLM/USDC price..." -ForegroundColor Cyan
-$output = stellar contract invoke --id $oracleId --network testnet --source deployer -- get_price --asset_pair "XLM/USDC" 2>&1
+Write-Host ">>> Querying oracle contract ($oracleId) for XLM/USDC asset-pair price..." -ForegroundColor Cyan
+$output = stellar contract invoke --id $oracleId --network testnet --source deployer -- get_price_for_assets --base_asset $xlmAssetContract --quote_asset $usdcAssetContract 2>&1
 
 Write-Host ">>> Oracle response:" -ForegroundColor Green
 Write-Host $output

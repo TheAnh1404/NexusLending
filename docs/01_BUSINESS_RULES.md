@@ -380,6 +380,16 @@ Rescue operations are allowed when `require_mutable()` passes:
 
 ## 12. Expiration and Default Rules
 
+### 12.0 Repayment Reminder and 7-Day Grace Policy
+
+| Rule ID | Rule |
+|---------|------|
+| DUE-1 | When `current_timestamp > due_time`, the loan enters the overdue repayment window and the borrower UI must show a repayment notification with a direct repay action. |
+| DUE-2 | Nexus production loans use a 7-day grace period after `due_time`. Offer creation and loan creation flows must set `grace_period_days = 7` unless a future governance rule changes this value. |
+| DUE-3 | During the 7-day grace period, an `Expired` loan remains repayable by the borrower and must show the remaining grace-period countdown. |
+| DUE-4 | An `Expired` loan is not liquidatable solely because it is overdue; liquidation is still allowed if HF is below 12,000 BPS. |
+| DUE-5 | If the borrower does not fully repay within 7 days after `due_time`, anyone can mark the loan `Defaulted`, and the loan becomes liquidatable regardless of HF. |
+
 ### 12.1 Expiration
 
 | Rule ID | Rule |
@@ -387,12 +397,14 @@ Rescue operations are allowed when `require_mutable()` passes:
 | EXP-1 | A loan is expired when `current_timestamp > due_time`. |
 | EXP-2 | `mark_expired()` can be called by anyone after the due time. |
 | EXP-3 | An expired loan is still mutable — the borrower can repay. |
+| EXP-4 | Expiration must trigger borrower-facing repayment notification and lender-facing overdue visibility. |
 
 ### 12.2 Default
 
 | Rule ID | Rule |
 |---------|------|
 | DEF-1 | `default_time = due_time + (grace_period_days × 86,400)`. |
+| DEF-1A | Nexus production sets `grace_period_days = 7`, so default time is exactly 7 days after `due_time`. |
 | DEF-2 | A loan is defaulted when `current_timestamp > default_time`. |
 | DEF-3 | `mark_defaulted()` can be called by anyone after the default time. |
 | DEF-4 | A defaulted loan is eligible for liquidation regardless of HF. |

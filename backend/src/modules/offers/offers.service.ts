@@ -3,7 +3,7 @@ import { OfferStatus, Prisma, TransactionType } from '@prisma/client';
 import { prisma } from '../../prisma/client';
 import { ApiError } from '../../utils/apiError';
 import { calculateRepaymentAmount } from '../../utils/finance';
-import { buildRiskPatch } from '../loans/loans.service';
+import { DEFAULT_GRACE_PERIOD_DAYS, buildRiskPatch } from '../loans/loans.service';
 import { createLedgerTransaction, requireConfirmedReceipt } from '../transactions/chainReceipt';
 import type {
   AcceptOfferInput,
@@ -40,6 +40,9 @@ const validateCreateOffer = (input: CreateOfferInput) => {
   }
   if (input.minHealthFactorBps < SAFE_HEALTH_FACTOR_BPS) {
     throw new ApiError(400, 'minHealthFactorBps must be at least 14000');
+  }
+  if (input.gracePeriodDays !== DEFAULT_GRACE_PERIOD_DAYS) {
+    throw new ApiError(400, `gracePeriodDays must be ${DEFAULT_GRACE_PERIOD_DAYS}`);
   }
 };
 
@@ -82,7 +85,7 @@ export const offersService = {
       maxLtvBps: input.maxLtvBps,
       liquidationThresholdBps: input.liquidationThresholdBps,
       liquidationBonusBps: input.liquidationBonusBps,
-      gracePeriodDays: input.gracePeriodDays,
+      gracePeriodDays: DEFAULT_GRACE_PERIOD_DAYS,
       minHealthFactorBps: input.minHealthFactorBps,
       status: input.status ?? 'Draft',
       description: input.description,

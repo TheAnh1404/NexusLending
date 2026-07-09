@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAppContext } from '../app/AppContext';
-import { calculateHealthFactor, formatCurrency, isLiquidatable } from '../utils/finance';
+import { calculateHealthFactor, calculateMaxLiquidationRepay, formatCurrency, isLiquidatable } from '../utils/finance';
 import { HealthFactorGauge } from '../components/common/HealthFactorGauge';
 import { EmptyState } from '../components/common/CommonStates';
 import { ConfirmActionModal } from '../components/common/ConfirmActionModal';
 import { TransactionReceiptCard } from '../components/common/TransactionReceiptCard';
+import { motion } from 'framer-motion';
 import {
   Card,
   Row,
@@ -17,8 +18,21 @@ import {
   InputNumber,
   Modal,
   Divider,
+  Space,
+  message,
 } from 'antd';
-import { Flame, ArrowLeft, Sparkles, ExternalLink } from 'lucide-react';
+import { 
+  Flame, 
+  ArrowLeft, 
+  Sparkles, 
+  ExternalLink, 
+  Wallet, 
+  Coins, 
+  Copy, 
+  Check, 
+  Info,
+  TrendingDown
+} from 'lucide-react';
 
 const { Title, Paragraph, Text } = Typography;
 
@@ -35,7 +49,11 @@ export const LiquidationDetailPage: React.FC = () => {
   const [confirmModalVisible, setConfirmModalVisible] = useState(false);
   const [successModalVisible, setSuccessModalVisible] = useState(false);
   const [repayAmount, setRepayAmount] = useState(0);
-  const maxRepayAmount = loan ? Math.round(loan.outstandingDebt * 0.5 * 100) / 100 : 0;
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const maxRepayAmount = loan
+    ? calculateMaxLiquidationRepay(loan.outstandingDebt, loan.collateralAmount, xlmPrice, loan.liquidationBonus)
+    : 0;
 
   // Stepper transaction status
   const [txStatus, setTxStatus] = useState<'preparing' | 'signing' | 'submitting' | 'confirming' | 'confirmed' | 'failed' | null>(null);
@@ -43,9 +61,9 @@ export const LiquidationDetailPage: React.FC = () => {
 
   useEffect(() => {
     if (loan) {
-      setRepayAmount(Math.round(loan.outstandingDebt * 0.5 * 100) / 100);
+      setRepayAmount(maxRepayAmount);
     }
-  }, [loan]);
+  }, [loan, maxRepayAmount]);
 
   if (!loan) {
     return (
@@ -60,6 +78,14 @@ export const LiquidationDetailPage: React.FC = () => {
       />
     );
   }
+
+  // Copy handler
+  const handleCopyText = (text: string, idStr: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(idStr);
+    setTimeout(() => setCopiedId(null), 1500);
+    message.success('Copied to clipboard');
+  };
 
   // Liquidation math
   // Repay up to 50% of the loan outstanding debt (standard DeFi close factor limit).
@@ -118,109 +144,173 @@ export const LiquidationDetailPage: React.FC = () => {
   );
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
-      {/* Header */}
+    <motion.div 
+      initial={{ opacity: 0, y: 15 }} 
+      animate={{ opacity: 1, y: 0 }} 
+      transition={{ duration: 0.5, ease: 'easeOut' }}
+      style={{ display: 'flex', flexDirection: 'column', gap: '28px', paddingBottom: '40px' }}
+    >
+      
+      {/* 1. Navigation & Header */}
       <div>
         <Button
           type="text"
-          icon={<ArrowLeft size={16} />}
+          icon={<ArrowLeft size={14} />}
           onClick={() => navigate('/app/liquidation')}
-          style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: 0, color: 'var(--text-muted)' }}
+          style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: 0, color: 'var(--text-muted)', marginBottom: '8px' }}
         >
           Back to Liquidation Center
         </Button>
-        <Title level={2} style={{ margin: '8px 0 0 0', fontFamily: 'var(--font-heading)', fontWeight: 700 }}>
+        <Title level={2} style={{ margin: 0, fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: '26px' }}>
           Plan Partial Liquidation
         </Title>
-        <Paragraph type="secondary" style={{ margin: 0 }}>
-          Review liquidation terms, repay debt in USDC, and receive collateralized XLM with a bonus incentive.
+        <Paragraph type="secondary" style={{ margin: 0, color: 'var(--text-muted)' }}>
+          Review liquidation parameters, adjust debt repayment in USDC, and seize collateralized XLM with an arbitrage bonus.
         </Paragraph>
       </div>
 
+      {/* 2. Grid Console */}
       <Row gutter={[24, 24]}>
-        {/* Left Side: Summary of Loan */}
+        
+        {/* Left Side: Summary and Math */}
         <Col xs={24} lg={15}>
-          <Card title="Liquidation Review" styles={{ body: { padding: '28px' } }}>
-            <Descriptions
-              bordered
-              column={1}
-              styles={{ label: { width: '220px', fontWeight: 600 } }}
-              items={[
-                {
-                  key: 'contractId',
-                  label: 'Contract ID',
-                  children: <Text style={{ fontFamily: 'var(--font-mono)' }}>{loan.id}</Text>,
-                },
-                {
-                  key: 'borrower',
-                  label: 'Borrower Address',
-                  children: <Text style={{ fontFamily: 'var(--font-mono)' }}>{loan.borrower}</Text>,
-                },
-                {
-                  key: 'lender',
-                  label: 'Lender Address',
-                  children: <Text style={{ fontFamily: 'var(--font-mono)' }}>{loan.lender}</Text>,
-                },
-                {
-                  key: 'healthFactor',
-                  label: 'Current Health Factor',
-                  children: <Text strong style={{ color: 'var(--danger-color)' }}>{loan.healthFactor.toFixed(2)}</Text>,
-                },
-                {
-                  key: 'outstandingDebt',
-                  label: 'Total Outstanding Debt',
-                  children: <Text strong>{formatCurrency(loan.outstandingDebt, 'USDC')}</Text>,
-                },
-                {
-                  key: 'collateral',
-                  label: 'Escrow Locked Collateral',
-                  children: <Text strong>{loan.collateralAmount.toLocaleString()} XLM</Text>,
-                },
-              ]}
-            />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+            
+            {/* Contract details card */}
+            <Card 
+              title={
+                <Space size={8}>
+                  <Info size={16} style={{ color: 'var(--primary-color)' }} />
+                  <span style={{ fontSize: '15px', fontFamily: 'var(--font-heading)', fontWeight: 700 }}>Contract Profile</span>
+                </Space>
+              }
+              style={{ borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border-color)' }}
+            >
+              <Descriptions
+                bordered
+                column={1}
+                size="small"
+                styles={{ label: { width: '200px', fontWeight: 600, background: 'var(--bg-color)' } }}
+                items={[
+                  {
+                    key: 'contractId',
+                    label: 'Contract ID',
+                    children: (
+                      <Space size={4}>
+                        <Text strong style={{ fontFamily: 'var(--font-mono)' }}>{loan.id}</Text>
+                        <Button
+                          type="text"
+                          size="small"
+                          icon={copiedId === loan.id ? <Check size={12} style={{ color: 'var(--success-color)' }} /> : <Copy size={12} />}
+                          onClick={() => handleCopyText(loan.id, loan.id)}
+                          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        />
+                      </Space>
+                    ),
+                  },
+                  {
+                    key: 'borrower',
+                    label: 'Borrower Wallet',
+                    children: (
+                      <Space size={4}>
+                        <Text style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{loan.borrower}</Text>
+                        <Button
+                          type="text"
+                          size="small"
+                          icon={copiedId === loan.borrower ? <Check size={12} style={{ color: 'var(--success-color)' }} /> : <Copy size={12} />}
+                          onClick={() => handleCopyText(loan.borrower, loan.borrower)}
+                          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        />
+                      </Space>
+                    ),
+                  },
+                  {
+                    key: 'lender',
+                    label: 'Lender Wallet',
+                    children: (
+                      <Space size={4}>
+                        <Text style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{loan.lender}</Text>
+                        <Button
+                          type="text"
+                          size="small"
+                          icon={copiedId === loan.lender ? <Check size={12} style={{ color: 'var(--success-color)' }} /> : <Copy size={12} />}
+                          onClick={() => handleCopyText(loan.lender, loan.lender)}
+                          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        />
+                      </Space>
+                    ),
+                  },
+                  {
+                    key: 'outstandingDebt',
+                    label: 'Total Outstanding Debt',
+                    children: <Text strong style={{ color: 'var(--danger-color)' }}>{formatCurrency(loan.outstandingDebt, 'USDC')}</Text>,
+                  },
+                  {
+                    key: 'collateral',
+                    label: 'Locked Escrow Collateral',
+                    children: <Text strong>{loan.collateralAmount.toLocaleString()} XLM (${(loan.collateralAmount * xlmPrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})</Text>,
+                  },
+                ]}
+              />
+            </Card>
 
-            <Alert
-              message="Partial Liquidation Protocol Rule"
-              description="To prevent total default of borrower assets, the liquidator executes a partial liquidation. The liquidator can repay up to 50% of the active debt and claim an equivalent amount of collateral plus the liquidation bonus."
-              type="info"
-              showIcon
-              style={{ marginTop: '24px' }}
-            />
-          </Card>
+            {/* Liquidation math card */}
+            <Card 
+              title={
+                <Space size={8}>
+                  <Coins size={16} style={{ color: 'var(--success-color)' }} />
+                  <span style={{ fontSize: '15px', fontFamily: 'var(--font-heading)', fontWeight: 700 }}>Execution Parameters & Net Arbitrage</span>
+                </Space>
+              }
+              style={{ borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border-color)' }}
+            >
+              <Row gutter={[16, 16]}>
+                <Col xs={24} sm={8}>
+                  <div style={{ padding: '16px', background: 'rgba(239, 68, 68, 0.03)', border: '1px solid rgba(239, 68, 68, 0.12)', borderRadius: '8px', textAlign: 'center' }}>
+                    <Text type="secondary" style={{ fontSize: '11px', display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>USDC Debt Repayment</Text>
+                    <Text strong style={{ fontSize: '20px', color: 'var(--danger-color)', fontFamily: 'var(--font-mono)' }}>-${repayAmount.toFixed(2)}</Text>
+                  </div>
+                </Col>
+                <Col xs={24} sm={8}>
+                  <div style={{ padding: '16px', background: 'rgba(16, 185, 129, 0.03)', border: '1px solid rgba(16, 185, 129, 0.12)', borderRadius: '8px', textAlign: 'center' }}>
+                    <Text type="secondary" style={{ fontSize: '11px', display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>Collateral Seized</Text>
+                    <Text strong style={{ fontSize: '20px', color: 'var(--success-color)', fontFamily: 'var(--font-mono)' }}>+{collateralToReceive.toFixed(2)} XLM</Text>
+                  </div>
+                </Col>
+                <Col xs={24} sm={8}>
+                  <div style={{ padding: '16px', background: 'rgba(6, 182, 212, 0.05)', border: '1px solid rgba(6, 182, 212, 0.2)', borderRadius: '8px', textAlign: 'center' }}>
+                    <Text type="secondary" style={{ fontSize: '11px', display: 'block', textTransform: 'uppercase', fontWeight: 600, color: 'var(--secondary-color)' }}>Est. Arbitrage Profit</Text>
+                    <Text strong style={{ fontSize: '20px', color: 'var(--secondary-color)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', fontFamily: 'var(--font-mono)' }}>
+                      <Sparkles size={16} /> +${(collateralValueToReceive - repayAmount).toFixed(2)}
+                    </Text>
+                  </div>
+                </Col>
+              </Row>
 
-          <Card title="Liquidation Execution Math" style={{ marginTop: '24px' }} styles={{ body: { padding: '24px' } }}>
-            <Row gutter={[24, 24]}>
-              <Col xs={24} sm={8}>
-                <div style={{ padding: '16px', background: 'var(--bg-color)', borderRadius: '8px', textAlign: 'center' }}>
-                  <Text type="secondary" style={{ fontSize: '11px', display: 'block' }}>REPAYMENT IN USDC</Text>
-                  <Text strong style={{ fontSize: '20px', color: 'var(--danger-color)' }}>-${repayAmount.toFixed(2)}</Text>
+              <div style={{ marginTop: '20px', padding: '16px', background: 'var(--bg-color)', border: '1px solid var(--border-color)', borderRadius: '6px', fontSize: '13px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <Text type="secondary">USDC Repayment Amount:</Text>
+                  <Text strong>${repayAmount.toFixed(2)} USDC</Text>
                 </div>
-              </Col>
-              <Col xs={24} sm={8}>
-                <div style={{ padding: '16px', background: 'var(--bg-color)', borderRadius: '8px', textAlign: 'center' }}>
-                  <Text type="secondary" style={{ fontSize: '11px', display: 'block' }}>COLLATERAL RECEIVED</Text>
-                  <Text strong style={{ fontSize: '20px', color: 'var(--success-color)' }}>+{collateralToReceive.toFixed(2)} XLM</Text>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <Text type="secondary">Collateral Value Received (with {loan.liquidationBonus}% Bonus):</Text>
+                  <Text strong style={{ color: 'var(--success-color)' }}>${collateralValueToReceive.toFixed(2)} USD</Text>
                 </div>
-              </Col>
-              <Col xs={24} sm={8}>
-                <div style={{ padding: '16px', background: 'rgba(39, 174, 96, 0.05)', borderRadius: '8px', textAlign: 'center', border: '1px solid rgba(39, 174, 96, 0.15)' }}>
-                  <Text type="secondary" style={{ fontSize: '11px', display: 'block', color: 'var(--success-color)' }}>LIQUIDATOR BONUS</Text>
-                  <Text strong style={{ fontSize: '20px', color: 'var(--success-color)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
-                    <Sparkles size={16} /> +{loan.liquidationBonus}%
-                  </Text>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <Text type="secondary">Remaining Contract Outstanding Debt:</Text>
+                  <Text strong style={{ fontFamily: 'var(--font-mono)' }}>${remainingDebt.toFixed(2)} USDC</Text>
                 </div>
-              </Col>
-            </Row>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <Text type="secondary">Remaining Locked Escrow Collateral:</Text>
+                  <Text strong style={{ fontFamily: 'var(--font-mono)' }}>{remainingCollateral.toFixed(2)} XLM</Text>
+                </div>
+              </div>
+            </Card>
 
-            <div style={{ marginTop: '20px', padding: '12px 16px', border: '1px solid var(--border-color)', borderRadius: '6px', fontSize: '13px' }}>
-              <div>- <b>USDC Repayment Value:</b> ${repayAmount.toFixed(2)}</div>
-              <div>- <b>Collateral Value Received:</b> ${collateralValueToReceive.toFixed(2)} (Earns ${ (collateralValueToReceive - repayAmount).toFixed(2) } arbitrage profit)</div>
-              <div>- <b>Remaining Debt:</b> ${remainingDebt.toFixed(2)} USDC</div>
-            </div>
-          </Card>
+          </div>
         </Col>
 
-        {/* Right Side Status Panel */}
+        {/* Right Side: Status and Confirmation Input */}
         <Col xs={24} lg={9}>
           {txStatus ? (
             <TransactionReceiptCard
@@ -235,9 +325,17 @@ export const LiquidationDetailPage: React.FC = () => {
               onClose={() => setTxStatus(null)}
             />
           ) : (
-            <Card title="Confirm Execution" styles={{ body: { padding: '24px' } }}>
+            <Card 
+              title={
+                <Space size={8}>
+                  <TrendingDown size={16} style={{ color: 'var(--primary-color)' }} />
+                  <span style={{ fontSize: '15px', fontFamily: 'var(--font-heading)', fontWeight: 700 }}>Execution Console</span>
+                </Space>
+              }
+              style={{ borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-sm)', border: '1px solid var(--border-color)' }}
+            >
               <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '24px' }}>
-                <HealthFactorGauge value={estHFAfter} size={130} showMeaning />
+                <HealthFactorGauge value={estHFAfter} size={140} showMeaning />
               </div>
 
               <div style={{
@@ -251,26 +349,26 @@ export const LiquidationDetailPage: React.FC = () => {
                 marginBottom: '20px'
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
-                  <span style={{ color: 'var(--text-muted)' }}>Wallet Balance:</span>
-                  <span style={{ fontWeight: 600 }}>${wallet.balanceUSDC.toLocaleString()} USDC</span>
+                  <span style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}><Wallet size={14} /> Wallet USDC Balance:</span>
+                  <span style={{ fontWeight: 600 }}>{formatCurrency(wallet.balanceUSDC, 'USDC')}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
-                  <span style={{ color: 'var(--text-muted)' }}>Required Repay:</span>
-                  <span style={{ fontWeight: 600, color: 'var(--danger-color)' }}>${repayAmount.toFixed(2)} USDC</span>
+                  <span style={{ color: 'var(--text-muted)' }}>Repay Value:</span>
+                  <span style={{ fontWeight: 600, color: 'var(--danger-color)' }}>-${repayAmount.toFixed(2)} USDC</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
-                  <span style={{ color: 'var(--text-muted)' }}>Close Factor Limit:</span>
-                  <span style={{ fontWeight: 600 }}>${maxRepayAmount.toFixed(2)} USDC</span>
+                    <span style={{ color: 'var(--text-muted)' }}>Max Protocol Repay:</span>
+                    <span style={{ fontWeight: 600 }}>${maxRepayAmount.toFixed(2)} USDC</span>
                 </div>
               </div>
 
-              <div style={{ marginBottom: '16px' }}>
+              <div style={{ marginBottom: '20px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                  <Text strong style={{ fontSize: '12px' }}>
-                    REPAY AMOUNT (USDC)
+                  <Text strong style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)' }}>
+                    Repay Amount
                   </Text>
-                  <Button size="small" type="dashed" onClick={() => setRepayAmount(maxRepayAmount)}>
-                    Max Close Factor (50%)
+                  <Button size="small" type="dashed" onClick={() => setRepayAmount(maxRepayAmount)} style={{ fontSize: '11px' }}>
+                    Max Safe Repay
                   </Button>
                 </div>
                 <InputNumber
@@ -279,42 +377,45 @@ export const LiquidationDetailPage: React.FC = () => {
                   step={10}
                   value={repayAmount}
                   onChange={(value) => setRepayAmount(value || 0)}
-                  style={{ width: '100%' }}
+                  formatter={(value) => `$ ${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+                  parser={(value) => Number(value!.replace(/\$\s?|(,*)/g, ''))}
+                  style={{ width: '100%', borderRadius: 'var(--radius-sm)' }}
                   size="large"
                 />
               </div>
 
+              {/* Validator Alert Banner */}
               {!eligible ? (
                 <Alert
-                  message="Loan Not Eligible"
-                  description="Liquidation is only allowed when Health Factor is below 1.2 or the loan is defaulted."
+                  message="Position Not Eligible"
+                  description="Liquidation is only allowed when Health Factor is below 1.2 or after a loan is Defaulted by the 7-day grace rule."
                   type="warning"
                   showIcon
-                  style={{ marginBottom: '16px' }}
+                  style={{ marginBottom: '16px', borderRadius: 'var(--radius-sm)' }}
                 />
               ) : !hasValidRepayAmount ? (
                 <Alert
-                  message="Invalid Repay Amount"
-                  description={`Repay amount must be greater than 0 and no more than the 50% close factor (${formatCurrency(maxRepayAmount, 'USDC')}).`}
+                  message="Invalid Amount Entered"
+                  description={`Repay amount must be positive and within the safe liquidation limit (${formatCurrency(maxRepayAmount, 'USDC')}).`}
                   type="error"
                   showIcon
-                  style={{ marginBottom: '16px' }}
+                  style={{ marginBottom: '16px', borderRadius: 'var(--radius-sm)' }}
                 />
               ) : wallet.balanceUSDC < repayAmount ? (
                 <Alert
-                  message="Insufficient USDC"
-                  description={`You need $${repayAmount.toFixed(2)} USDC to execute, but your balance is only $${wallet.balanceUSDC.toLocaleString()} USDC.`}
+                  message="Insufficient Liquidity Balance"
+                  description={`Your wallet holds ${formatCurrency(wallet.balanceUSDC, 'USDC')}. You need ${formatCurrency(repayAmount, 'USDC')} to proceed.`}
                   type="error"
                   showIcon
-                  style={{ marginBottom: '16px' }}
+                  style={{ marginBottom: '16px', borderRadius: 'var(--radius-sm)' }}
                 />
               ) : (
                 <Alert
-                  message="Arbitrage Ready"
-                  description={`Your wallet will receive ${collateralToReceive.toFixed(2)} XLM from the loan escrow in exchange for $${repayAmount.toFixed(2)} USDC.`}
+                  message="Arbitrage Match Ready"
+                  description={`Receive ~${collateralToReceive.toFixed(2)} XLM from escrow in exchange for ${formatCurrency(repayAmount, 'USDC')}.`}
                   type="success"
                   showIcon
-                  style={{ marginBottom: '16px' }}
+                  style={{ marginBottom: '16px', borderRadius: 'var(--radius-sm)' }}
                 />
               )}
 
@@ -323,15 +424,26 @@ export const LiquidationDetailPage: React.FC = () => {
                 danger
                 size="large"
                 disabled={!canExecute}
-                icon={<Flame size={18} style={{ marginRight: 6 }} />}
+                icon={<Flame size={16} />}
                 onClick={handleConfirmLiquidation}
-                style={{ width: '100%', height: '48px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                style={{ 
+                  width: '100%', 
+                  height: '46px', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center', 
+                  gap: '8px', 
+                  borderRadius: 'var(--radius-md)',
+                  fontWeight: 600,
+                  fontSize: '15px'
+                }}
               >
-                Confirm Liquidation
+                Confirm Liquidation Call
               </Button>
             </Card>
           )}
         </Col>
+
       </Row>
 
       {/* Execution Confirmation Modal */}
@@ -344,20 +456,23 @@ export const LiquidationDetailPage: React.FC = () => {
         danger
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <p>You are executing a liquidation transaction on the Stellar Soroban network.</p>
+          <p>You are executing an isolated contract liquidation transaction on the Stellar Soroban network.</p>
           <div style={{
             background: 'var(--bg-color)',
-            padding: '12px',
+            padding: '16px',
             borderRadius: '6px',
             border: '1px solid var(--border-color)',
-            fontSize: '13px'
+            fontSize: '13px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '6px'
           }}>
-            <div>- <b>USDC Debt Repayment:</b> ${repayAmount.toFixed(2)} USDC</div>
+            <div>- <b>USDC Debt Repayment:</b> {formatCurrency(repayAmount, 'USDC')}</div>
             <div>- <b>Collateral to Claim:</b> {collateralToReceive.toFixed(2)} XLM</div>
             <div>- <b>Arbitrage Yield Profit:</b> +${ (collateralValueToReceive - repayAmount).toFixed(2) } USDC</div>
           </div>
           <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '8px' }}>
-            * This action is final. Collateral is transferred directly out of the smart contract escrow into your wallet.
+            * This action is finalized immediately on-chain. Reward collateral is claimed directly out of the smart contract escrow into your wallet.
           </p>
         </div>
       </ConfirmActionModal>
@@ -368,11 +483,11 @@ export const LiquidationDetailPage: React.FC = () => {
         title={
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--success-color)' }}>
             <Sparkles size={20} />
-            <span>Liquidation Success Receipt</span>
+            <span style={{ fontFamily: 'var(--font-heading)', fontWeight: 700 }}>Liquidation Success Receipt</span>
           </div>
         }
         footer={[
-          <Button key="close" type="primary" onClick={() => { setSuccessModalVisible(false); navigate('/app/liquidation'); }}>
+          <Button key="close" type="primary" onClick={() => { setSuccessModalVisible(false); navigate('/app/liquidation'); }} style={{ borderRadius: '6px' }}>
             Dismiss Receipt
           </Button>
         ]}
@@ -404,7 +519,7 @@ export const LiquidationDetailPage: React.FC = () => {
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <Text type="secondary">USDC Repaid by Liquidator:</Text>
-              <Text strong style={{ color: 'var(--danger-color)' }}>${repayAmount.toFixed(2)} USDC</Text>
+              <Text strong style={{ color: 'var(--danger-color)' }}>{formatCurrency(repayAmount, 'USDC')}</Text>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <Text type="secondary">XLM Seized (with {loan.liquidationBonus}% Bonus):</Text>
@@ -441,6 +556,6 @@ export const LiquidationDetailPage: React.FC = () => {
           </div>
         </div>
       </Modal>
-    </div>
+    </motion.div>
   );
 };

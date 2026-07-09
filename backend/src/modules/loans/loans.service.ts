@@ -18,10 +18,28 @@ const activeStatuses: LoanStatus[] = [
   'Defaulted'
 ];
 
+export const DEFAULT_GRACE_PERIOD_DAYS = 7;
+const DAY_MS = 86_400_000;
+
 const statusForRiskZone = (riskZone: RiskZone): LoanStatus => {
   if (riskZone === 'SAFE') return 'Active';
   if (riskZone === 'WARNING') return 'Warning';
   return 'LiquidationPlanning';
+};
+
+const timeBasedStatusForLoan = (loan: {
+  dueTime?: Date | null;
+  outstandingDebt?: Prisma.Decimal | string | number;
+}): LoanStatus | null => {
+  if (!loan.dueTime) return null;
+  if (loan.outstandingDebt !== undefined && decimal(loan.outstandingDebt).lte(0)) return null;
+
+  const now = Date.now();
+  const dueTime = loan.dueTime.getTime();
+  const defaultTime = dueTime + DEFAULT_GRACE_PERIOD_DAYS * DAY_MS;
+  if (now > defaultTime) return 'Defaulted';
+  if (now > dueTime) return 'Expired';
+  return null;
 };
 
 const decimal = (value: Prisma.Decimal.Value): Prisma.Decimal => new Prisma.Decimal(value);
@@ -51,6 +69,7 @@ export const buildRiskPatch = async (loan: {
   collateralAmount: Prisma.Decimal | string | number;
   outstandingDebt: Prisma.Decimal | string | number;
   liquidationThresholdBps: number;
+  dueTime?: Date | null;
 }) => {
   const price = await findPrice(loan.collateralAsset, loan.loanAsset);
   if (!price) return {};
@@ -69,7 +88,7 @@ export const buildRiskPatch = async (loan: {
     healthFactor: new Prisma.Decimal(healthFactor),
     ltv: new Prisma.Decimal(ltv),
     riskZone,
-    status: statusForRiskZone(riskZone)
+    status: timeBasedStatusForLoan(loan) ?? statusForRiskZone(riskZone)
   };
 };
 
@@ -79,6 +98,32 @@ const ensureOpenLoan = (loan: { status: LoanStatus }) => {
   }
 };
 
+const syncTimeBasedLoanStatuses = async () => {
+  const now = new Date();
+  const defaultCutoff = new Date(now.getTime() - DEFAULT_GRACE_PERIOD_DAYS * DAY_MS);
+
+  await prisma.loan.updateMany({
+    where: {
+      status: { in: ['Active', 'Warning', 'LiquidationPlanning', 'Expired'] },
+      outstandingDebt: { gt: new Prisma.Decimal(0) },
+      dueTime: { lt: defaultCutoff }
+    },
+    data: {
+      status: 'Defaulted',
+      riskZone: 'LIQUIDATION_PLANNING'
+    }
+  });
+
+  await prisma.loan.updateMany({
+    where: {
+      status: { in: ['Active', 'Warning', 'LiquidationPlanning'] },
+      outstandingDebt: { gt: new Prisma.Decimal(0) },
+      dueTime: { lt: now, gte: defaultCutoff }
+    },
+    data: { status: 'Expired' }
+  });
+};
+
 export const loansService = {
   async list(query: {
     status?: string;
@@ -86,6 +131,7 @@ export const loansService = {
     lenderWallet?: string;
     riskZone?: string;
   }) {
+    await syncTimeBasedLoanStatuses();
     return prisma.loan.findMany({
       where: {
         status: query.status as never,
@@ -99,6 +145,7 @@ export const loansService = {
   },
 
   async liquidatable() {
+    await syncTimeBasedLoanStatuses();
     return prisma.loan.findMany({
       where: {
         OR: [
@@ -113,6 +160,7 @@ export const loansService = {
   },
 
   async getById(id: string) {
+    await syncTimeBasedLoanStatuses();
     const loan = await prisma.loan.findUnique({
       where: { id },
       include: { offer: true }
@@ -230,7 +278,7 @@ export const loansService = {
         offer?.liquidationThresholdBps ?? input.liquidationThresholdBps,
       liquidationBonusBps: offer?.liquidationBonusBps ?? input.liquidationBonusBps,
       minHealthFactorBps: offer?.minHealthFactorBps ?? input.minHealthFactorBps,
-      gracePeriodDays: offer?.gracePeriodDays ?? input.gracePeriodDays,
+      gracePeriodDays: DEFAULT_GRACE_PERIOD_DAYS,
       txHash: receipt.txHash,
       explorerUrl: receipt.explorerUrl,
       ledger: receipt.ledger,
@@ -401,20 +449,23 @@ export const loansService = {
       if (!eligible) throw new ApiError(400, 'Loan is not eligible for liquidation');
 
       const closeFactorAmount = loan.outstandingDebt.mul(0.5);
-      if (amount.gt(closeFactorAmount)) {
-        throw new ApiError(400, `amount exceeds 50% close factor (${closeFactorAmount.toString()})`);
-      }
-
       const price = await findPrice(loan.collateralAsset, loan.loanAsset);
       if (!price) throw new ApiError(400, 'Oracle price not found for collateral pair');
 
       const bonusMultiplier = new Prisma.Decimal(1).add(
         new Prisma.Decimal(loan.liquidationBonusBps).div(10_000)
       );
-      const collateralReceived = Prisma.Decimal.min(
-        loan.collateralAmount,
-        amount.mul(bonusMultiplier).div(price.price)
+      const maxByCollateral = loan.collateralAmount.mul(price.price).div(bonusMultiplier);
+      const maxLiquidationAmount = Prisma.Decimal.min(
+        closeFactorAmount,
+        loan.outstandingDebt,
+        maxByCollateral
       );
+      if (amount.gt(maxLiquidationAmount)) {
+        throw new ApiError(400, `amount exceeds liquidation limit (${maxLiquidationAmount.toDecimalPlaces(2).toString()})`);
+      }
+
+      const collateralReceived = amount.mul(bonusMultiplier).div(price.price);
       const nextDebt = loan.outstandingDebt.sub(amount).toDecimalPlaces(7);
       const nextCollateral = loan.collateralAmount.sub(collateralReceived).toDecimalPlaces(7);
       const isClosed = nextDebt.lte(0) || nextCollateral.lte(0);

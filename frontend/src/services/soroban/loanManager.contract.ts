@@ -38,6 +38,16 @@ export const loanManagerContract = {
     return buildAndSubmitTx(CONTRACTS.loanManager, 'full_repay', args, wallet, onStage);
   },
 
+  async markExpiredTx(contractLoanId: string | number | bigint, wallet: string, onStage?: (stage: TxStage) => void) {
+    const args = [toU64(contractLoanId)];
+    return buildAndSubmitTx(CONTRACTS.loanManager, 'mark_expired', args, wallet, onStage);
+  },
+
+  async markDefaultedTx(contractLoanId: string | number | bigint, wallet: string, onStage?: (stage: TxStage) => void) {
+    const args = [toU64(contractLoanId)];
+    return buildAndSubmitTx(CONTRACTS.loanManager, 'mark_defaulted', args, wallet, onStage);
+  },
+
   async liquidateTx(
     contractLoanId: string | number | bigint,
     liquidator: string,

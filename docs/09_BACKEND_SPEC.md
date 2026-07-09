@@ -149,7 +149,7 @@ Base URL: `http://localhost:5000/api`
   "maxLtvBps": 7500,
   "liquidationThresholdBps": 8000,
   "liquidationBonusBps": 500,
-  "gracePeriodDays": 3,
+  "gracePeriodDays": 7,
   "minHealthFactorBps": 14000,
   "status": "LISTED",
   "description": "30-day USDC loan at 10% APR",
@@ -174,7 +174,7 @@ Base URL: `http://localhost:5000/api`
   "maxLtvBps": 7500,
   "liquidationThresholdBps": 8000,
   "liquidationBonusBps": 500,
-  "gracePeriodDays": 3,
+  "gracePeriodDays": 7,
   "minHealthFactorBps": 14000,
   "description": "30-day USDC loan at 10% APR"
 }
@@ -246,7 +246,7 @@ Returns loans where `riskZone = LIQUIDATION_PLANNING` or `status = DEFAULTED`.
   "liquidationThresholdBps": 8000,
   "liquidationBonusBps": 500,
   "minHealthFactorBps": 14000,
-  "gracePeriodDays": 3,
+  "gracePeriodDays": 7,
   "healthFactor": "1.984126",
   "ltv": "0.403287",
   "riskZone": "SAFE",

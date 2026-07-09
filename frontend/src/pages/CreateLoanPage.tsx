@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppContext } from '../app/AppContext';
-import { calculateRequiredCollateral } from '../utils/finance';
-import { API_URL, DATA_MODE, apiUnavailableMessage, switchToApiMode, switchToMockMode } from '../services/api/client';
+import { DEFAULT_GRACE_PERIOD_DAYS, calculateRequiredCollateral } from '../utils/finance';
+import { DATA_MODE } from '../services/api/client';
 import type { LoanOffer } from '../types';
 
 import {
@@ -102,20 +102,6 @@ export const CreateLoanPage: React.FC = () => {
   const asset = 'USDC';
   const collateralAsset = 'XLM';
 
-  const canSwitchFailedActionToMock = isApiMode
-    && (
-      errorDetails === apiUnavailableMessage()
-      || errorDetails.includes(`backend API at ${API_URL}`)
-    );
-
-  const handleSwitchToMockMode = () => {
-    switchToMockMode('/app/create-loan');
-  };
-
-  const handleSwitchToApiMode = () => {
-    switchToApiMode('/app/create-loan');
-  };
-
   // Live preview metrics
   const interestEarned = amount && apr && duration ? amount * (apr / 100) * (duration / 365) : 0;
   const totalRepayment = amount ? amount + interestEarned : 0;
@@ -140,9 +126,9 @@ export const CreateLoanPage: React.FC = () => {
 
   const applyRiskPreset = (preset: 'safe' | 'balanced' | 'aggressive') => {
     const config = {
-      safe: { maxLtv: 50, liquidationThreshold: 65, minHealthFactor: 1.5, liquidationBonus: 8, gracePeriod: 5 },
-      balanced: { maxLtv: 60, liquidationThreshold: 75, minHealthFactor: 1.4, liquidationBonus: 10, gracePeriod: 3 },
-      aggressive: { maxLtv: 75, liquidationThreshold: 85, minHealthFactor: 1.4, liquidationBonus: 12, gracePeriod: 1 }
+      safe: { maxLtv: 50, liquidationThreshold: 65, minHealthFactor: 1.5, liquidationBonus: 8, gracePeriod: DEFAULT_GRACE_PERIOD_DAYS },
+      balanced: { maxLtv: 60, liquidationThreshold: 75, minHealthFactor: 1.4, liquidationBonus: 10, gracePeriod: DEFAULT_GRACE_PERIOD_DAYS },
+      aggressive: { maxLtv: 75, liquidationThreshold: 85, minHealthFactor: 1.4, liquidationBonus: 12, gracePeriod: DEFAULT_GRACE_PERIOD_DAYS }
     }[preset];
 
     form.setFieldsValue(config);
@@ -241,7 +227,9 @@ export const CreateLoanPage: React.FC = () => {
         description: values.description ?? '',
       });
       if (!offer) {
-        throw new Error(isApiMode ? apiUnavailableMessage() : 'Failed to create draft offer.');
+        throw new Error(isApiMode
+          ? 'Backend draft creation failed. Start the backend API and confirm the wallet is connected on Stellar Testnet.'
+          : 'Failed to create draft offer.');
       }
       setCreatedOffer(offer);
     } catch (err) {
@@ -307,36 +295,26 @@ export const CreateLoanPage: React.FC = () => {
 
       {isApiMode && (
         <Alert
-          type="warning"
+          type="info"
           showIcon
-          message="Backend API mode is active"
+          message="Integrated Testnet mode is active"
           description={
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-              <span>
-                This flow calls {API_URL}. Start the backend on port 5000, or switch to Mock Mode for local demo data.
-              </span>
-              <Button size="small" onClick={handleSwitchToMockMode}>
-                Switch to Mock Mode
-              </Button>
-            </div>
+            <span>
+              This flow stores state through the backend API and requires Freighter signatures on Stellar Testnet for funding and activation.
+            </span>
           }
         />
       )}
 
       {!isApiMode && (
         <Alert
-          type="info"
+          type="warning"
           showIcon
-          message="Mock Mode is active"
+          message="Unsupported local data mode"
           description={
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-              <span>
-                Mock Mode creates local demo offers only. Switch to API Mode to create a backend draft and trigger Freighter signatures.
-              </span>
-              <Button size="small" onClick={handleSwitchToApiMode}>
-                Switch to API Mode
-              </Button>
-            </div>
+            <span>
+              Freighter Testnet testing requires VITE_DATA_MODE=api. Update frontend/.env and restart the dev server.
+            </span>
           }
         />
       )}
@@ -367,7 +345,7 @@ export const CreateLoanPage: React.FC = () => {
               liquidationThreshold: 75,
               minHealthFactor: 1.4,
               liquidationBonus: 10,
-              gracePeriod: 3,
+              gracePeriod: DEFAULT_GRACE_PERIOD_DAYS,
               expirationDays: 30
             }}
             onValuesChange={(_, all) => {
@@ -622,10 +600,15 @@ export const CreateLoanPage: React.FC = () => {
                         name="gracePeriod"
                         rules={[
                           { required: true, message: 'Required' },
-                          { type: 'number', min: 0, max: 30, message: '0-30 days' }
+                          { type: 'number', min: DEFAULT_GRACE_PERIOD_DAYS, max: DEFAULT_GRACE_PERIOD_DAYS, message: 'Grace period is fixed at 7 days' }
                         ]}
                       >
-                        <InputNumber style={{ width: '100%' }} size="large" placeholder="Enter Grace Period" />
+                        <InputNumber
+                          disabled
+                          style={{ width: '100%' }}
+                          size="large"
+                          placeholder="7-day repayment grace period"
+                        />
                       </Form.Item>
                     </Col>
                   </Row>
@@ -837,16 +820,6 @@ export const CreateLoanPage: React.FC = () => {
                 description={errorDetails}
                 style={{ width: '100%' }}
               />
-              {canSwitchFailedActionToMock && (
-                <Button
-                  type="primary"
-                  size="large"
-                  onClick={handleSwitchToMockMode}
-                  style={{ width: '100%', height: '44px' }}
-                >
-                  Switch to Mock Mode
-                </Button>
-              )}
               <Button
                 size="large"
                 onClick={() => {

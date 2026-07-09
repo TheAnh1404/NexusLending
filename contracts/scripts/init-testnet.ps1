@@ -20,12 +20,16 @@ $vaultId = $deployments.contracts.vault
 $marketplaceId = $deployments.contracts.marketplace
 $loanManagerId = $deployments.contracts.loanManager
 $deployer = $deployments.deployer
+$xlmAssetContract = if ($env:XLM_CONTRACT_ID) { $env:XLM_CONTRACT_ID } else { "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC" }
+$usdcAssetContract = if ($env:USDC_CONTRACT_ID) { $env:USDC_CONTRACT_ID } else { "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA" }
 
 Write-Host ">>> Deployer identity: $deployer" -ForegroundColor Cyan
 Write-Host ">>> Oracle ID: $oracleId" -ForegroundColor Cyan
 Write-Host ">>> Vault ID: $vaultId" -ForegroundColor Cyan
 Write-Host ">>> Marketplace ID: $marketplaceId" -ForegroundColor Cyan
 Write-Host ">>> Loan Manager ID: $loanManagerId" -ForegroundColor Cyan
+Write-Host ">>> XLM Asset Contract: $xlmAssetContract" -ForegroundColor Cyan
+Write-Host ">>> USDC Asset Contract: $usdcAssetContract" -ForegroundColor Cyan
 
 # Step 1: Initialize Oracle
 Write-Host ">>> Initializing Oracle contract..." -ForegroundColor Cyan
@@ -47,9 +51,9 @@ Write-Host ">>> Initializing Loan Manager contract..." -ForegroundColor Cyan
 stellar contract invoke --id $loanManagerId --network testnet --source deployer -- initialize --admin $deployer --vault_contract $vaultId --oracle_contract $oracleId
 if ($LASTEXITCODE -ne 0) { Write-Error "Failed to initialize Loan Manager"; exit 1 }
 
-# Step 5: Set Oracle price for XLM/USDC
+# Step 5: Set Oracle price for XLM/USDC by asset contract pair
 Write-Host ">>> Setting initial oracle price for XLM/USDC (0.125)..." -ForegroundColor Cyan
-stellar contract invoke --id $oracleId --network testnet --source deployer -- set_price --asset_pair "XLM/USDC" --price 1250000 --decimals 7 --source "Nexus Oracle"
+stellar contract invoke --id $oracleId --network testnet --source deployer -- set_price_for_assets --base_asset $xlmAssetContract --quote_asset $usdcAssetContract --asset_pair "XLM/USDC" --price 1250000 --decimals 7 --source "Nexus Oracle"
 if ($LASTEXITCODE -ne 0) { Write-Error "Failed to set Oracle price"; exit 1 }
 
 Write-Host ">>> Initialization successfully completed!" -ForegroundColor Green

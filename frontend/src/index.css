@@ -487,3 +487,173 @@ h1, h2, h3, h4, h5, h6 {
     padding: 0 16px !important;
   }
 }
+
+/* Admin Console Custom Styles */
+.admin-gradient-text {
+  background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  display: inline-block;
+}
+
+.admin-header-bg {
+  background: radial-gradient(circle at top right, rgba(79, 70, 229, 0.05) 0%, rgba(6, 182, 212, 0.02) 50%, transparent 100%);
+  border-radius: var(--radius-xl);
+  padding: 32px;
+  border: 1px solid var(--border-color);
+  margin-bottom: 24px;
+}
+
+.admin-glass-card {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  box-shadow: var(--shadow-md);
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.admin-glass-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-xl), 0 10px 30px -10px rgba(79, 70, 229, 0.1);
+  border-color: rgba(79, 70, 229, 0.25);
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.admin-stat-gradient-1 {
+  background: linear-gradient(135deg, #4F46E5 0%, #6366F1 100%) !important;
+  color: white;
+}
+.admin-stat-gradient-1 .ant-statistic-title, 
+.admin-stat-gradient-1 .ant-statistic-content-value,
+.admin-stat-gradient-1 .metric-card-label,
+.admin-stat-gradient-1 .metric-card-value,
+.admin-stat-gradient-1 .metric-card-sub {
+  color: white !important;
+}
+
+.admin-stat-gradient-2 {
+  background: linear-gradient(135deg, #06B6D4 0%, #0891B2 100%) !important;
+  color: white;
+}
+.admin-stat-gradient-2 .ant-statistic-title, 
+.admin-stat-gradient-2 .ant-statistic-content-value,
+.admin-stat-gradient-2 .metric-card-label,
+.admin-stat-gradient-2 .metric-card-value,
+.admin-stat-gradient-2 .metric-card-sub {
+  color: white !important;
+}
+
+.admin-stat-gradient-3 {
+  background: linear-gradient(135deg, #10B981 0%, #059669 100%) !important;
+  color: white;
+}
+.admin-stat-gradient-3 .ant-statistic-title, 
+.admin-stat-gradient-3 .ant-statistic-content-value,
+.admin-stat-gradient-3 .metric-card-label,
+.admin-stat-gradient-3 .metric-card-value,
+.admin-stat-gradient-3 .metric-card-sub {
+  color: white !important;
+}
+
+.admin-stat-gradient-4 {
+  background: linear-gradient(135deg, #EF4444 0%, #DC2626 100%) !important;
+  color: white;
+}
+.admin-stat-gradient-4 .ant-statistic-title, 
+.admin-stat-gradient-4 .ant-statistic-content-value,
+.admin-stat-gradient-4 .metric-card-label,
+.admin-stat-gradient-4 .metric-card-value,
+.admin-stat-gradient-4 .metric-card-sub {
+  color: white !important;
+}
+
+.admin-pulse-green {
+  box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4);
+  animation: pulse-green 2s infinite;
+}
+
+@keyframes pulse-green {
+  0% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(16, 185, 129, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+  }
+}
+
+.admin-pulse-red {
+  box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+  animation: pulse-red 2s infinite;
+}
+
+@keyframes pulse-red {
+  0% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(239, 68, 68, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+  }
+}
+
+.admin-glow-primary {
+  box-shadow: 0 4px 20px rgba(79, 70, 229, 0.15);
+}
+
+.admin-glow-danger {
+  box-shadow: 0 4px 20px rgba(239, 68, 68, 0.15);
+}
+
+.admin-glow-success {
+  box-shadow: 0 4px 20px rgba(16, 185, 129, 0.15);
+}
+
+.admin-console-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 24px;
+}
+
+.admin-card-inner-desc {
+  background: var(--bg-color);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  border: 1px solid var(--border-light);
+}
+
+.shock-slider-card {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.9) 0%, rgba(248, 250, 252, 0.9) 100%) !important;
+  border: 1px dashed var(--warning-color) !important;
+}
+
+.admin-stat-card-glow-inner {
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  background: var(--surface-color);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-sm);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+  overflow: hidden;
+}
+.admin-stat-card-glow-inner:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+}
+
+.admin-trend-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+

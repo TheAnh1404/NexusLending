@@ -8,17 +8,18 @@ const storedDataMode = typeof window !== 'undefined'
   ? window.localStorage.getItem(DATA_MODE_STORAGE_KEY)
   : null;
 const envDataMode = import.meta.env.VITE_DATA_MODE;
+const normalizedEnvMode = envDataMode === 'api' || envDataMode === 'mock'
+  ? envDataMode
+  : null;
 const normalizedStoredMode = storedDataMode === 'api' || storedDataMode === 'mock'
   ? storedDataMode
   : null;
-export const DATA_MODE = envDataMode === 'mock'
-  ? 'mock'
-  : normalizedStoredMode || envDataMode || 'mock';
+export const DATA_MODE = normalizedEnvMode || normalizedStoredMode || 'mock';
 
 export const CHAIN_MODE = import.meta.env.VITE_CHAIN_MODE === 'mock' ? 'mock' : 'live';
 
 export const apiUnavailableMessage = (): string =>
-  `Cannot connect to backend API at ${API_URL}. Start the backend server on port 5000 or switch to Mock Mode.`;
+  `Cannot connect to backend API at ${API_URL}. Start the backend server on port 5000.`;
 
 export const switchToMockMode = (
   redirectPath = '/app',

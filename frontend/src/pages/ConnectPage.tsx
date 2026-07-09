@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppContext } from '../app/AppContext';
 import { useWallet } from '../hooks/useWallet';
-import { DATA_MODE, DEFAULT_MOCK_WALLET_ADDRESS, switchToMockMode } from '../services/api/client';
 import { freighterService } from '../services/wallet/freighter.service';
 import { Alert, App, Button, Card, Space, Tag, Typography, Row, Col } from 'antd';
 import { 
@@ -24,7 +23,6 @@ export const ConnectPage: React.FC = () => {
   const { message } = App.useApp();
   const {
     connect,
-    connectMockWallet,
     isConnected,
     publicKey,
     shortAddress,
@@ -51,23 +49,23 @@ export const ConnectPage: React.FC = () => {
 
   // Automatic redirect if already connected
   useEffect(() => {
-    if (isConnected && publicKey) {
+    if (isConnected && publicKey && isTestnet) {
       connectDemoWallet(publicKey);
       navigate('/app');
     }
-  }, [isConnected, publicKey, connectDemoWallet, navigate]);
+  }, [isConnected, isTestnet, publicKey, connectDemoWallet, navigate]);
 
   const handleConnect = async () => {
     try {
       const connection = await connect();
-      connectDemoWallet(connection.publicKey);
 
       if (!connection.isTestnet) {
         message.warning('Freighter is connected, but the selected network is not Stellar Testnet.');
-      } else {
-        message.success('Freighter wallet connected on Stellar Testnet.');
+        return;
       }
 
+      connectDemoWallet(connection.publicKey);
+      message.success('Freighter wallet connected on Stellar Testnet.');
       navigate('/app');
     } catch (connectError) {
       message.error(connectError instanceof Error ? connectError.message : 'Unable to connect Freighter wallet.');
@@ -79,32 +77,14 @@ export const ConnectPage: React.FC = () => {
   };
 
   const handleLaunch = () => {
+    if (!isTestnet) {
+      message.warning('Switch Freighter to Stellar Testnet before entering the dashboard.');
+      return;
+    }
     if (publicKey) {
       connectDemoWallet(publicKey);
     }
     navigate('/app');
-  };
-
-  const handleConnectMock = (role?: 'LENDER' | 'BORROWER' | 'LIQUIDATOR') => {
-    const mockAddress = DEFAULT_MOCK_WALLET_ADDRESS;
-    if (DATA_MODE !== 'mock') {
-      switchToMockMode('/app', mockAddress);
-      return;
-    }
-    connectMockWallet(mockAddress);
-    connectDemoWallet(mockAddress);
-    
-    // Auto navigate to the correct dashboard based on selected role
-    message.success(`Sandbox wallet connected in Mock Mode.`);
-    if (role === 'LENDER') {
-      navigate('/app/lender');
-    } else if (role === 'BORROWER') {
-      navigate('/app/borrower');
-    } else if (role === 'LIQUIDATOR') {
-      navigate('/app/liquidation');
-    } else {
-      navigate('/app');
-    }
   };
 
   return (
@@ -308,7 +288,7 @@ export const ConnectPage: React.FC = () => {
                   Connect Wallet
                 </Title>
                 <Paragraph type="secondary" style={{ fontSize: '13px', marginTop: '6px', color: 'var(--text-muted)' }}>
-                  Use your Freighter wallet to access Stellar Testnet.
+                  Freighter on Stellar Testnet is required for every protocol action.
                 </Paragraph>
               </div>
 
@@ -433,34 +413,11 @@ export const ConnectPage: React.FC = () => {
                     icon={<Wallet size={16} />}
                     onClick={isConnected ? handleLaunch : handleConnect}
                     loading={isLoading}
-                    disabled={isAvailable === false}
+                    disabled={isAvailable === false || (isConnected && !isTestnet)}
                     style={{ width: '100%', height: '48px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
                   >
                     {isConnected ? 'Enter Lending Dashboard' : 'Connect Wallet'}
                   </Button>
-
-                  {(!isConnected || isAvailable === false) && (
-                    <Button
-                      type="default"
-                      size="large"
-                      onClick={() => handleConnectMock(selectedRole || undefined)}
-                      style={{
-                        width: '100%',
-                        height: '48px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        borderColor: 'var(--primary-color)',
-                        color: 'var(--primary-color)',
-                        marginTop: '8px',
-                        fontWeight: 600
-                      }}
-                    >
-                      {selectedRole 
-                        ? `Connect Mock ${selectedRole.charAt(0) + selectedRole.slice(1).toLowerCase()} Dashboard` 
-                        : 'Connect Sandbox Wallet (Mock Mode)'}
-                    </Button>
-                  )}
 
                   {isConnected && (
                     <Button

@@ -217,12 +217,15 @@ async function pollEvents() {
 | **3.6** Implement HF simulation | Client-side HF preview on BorrowLoanPage | `10_FRONTEND_INTEGRATION.md` §5.6 |
 | **3.7** Implement liquidation calculator | Client-side profit preview | `10_FRONTEND_INTEGRATION.md` §5.11 |
 | **3.8** Error handling | Toast notifications for transaction failures | `02_SYSTEM_ARCHITECTURE.md` §10 |
+| **3.9** Implement overdue repayment notifications | When a loan passes `due_time`, mark it `Expired`, notify the borrower to repay, show a 7-day countdown, and surface overdue visibility to the lender | `01_BUSINESS_RULES.md` |
+| **3.10** Implement default-to-liquidation flow | After `due_time + 7 days`, mark unpaid loans `Defaulted` and expose them in Liquidation Center as liquidatable regardless of HF | `07_STATE_MACHINE.md`, `10_FRONTEND_INTEGRATION.md` |
 
 ### 6.3 Deliverables
 
 - All pages show real data from the backend
 - Users can create offers, accept offers, repay, and liquidate via the UI
 - Wallet connection and transaction signing works end-to-end
+- Borrowers are notified when loans expire, see a 7-day repayment grace countdown, and defaulted loans become liquidatable after the countdown ends
 
 ---
 
@@ -241,6 +244,7 @@ async function pollEvents() {
 | **4.2** Execute Demo Scenario B | Price crash → liquidation | `12_DEMO_FLOW.md` §4 |
 | **4.3** Execute Demo Scenario C | Borrower rescue | `12_DEMO_FLOW.md` §5 |
 | **4.4** Execute Demo Scenario D | Expiration → default → liquidation | `12_DEMO_FLOW.md` §6 |
+| **4.4A** Verify 7-day overdue grace UX | Confirm due-date notification, repay CTA, grace countdown, and default/liquidation exposure after 7 days | `01_BUSINESS_RULES.md` |
 | **4.5** Execute Demo Scenario E | Offer cancellation | `12_DEMO_FLOW.md` §7 |
 | **4.6** Verify state consistency | On-chain vs. backend DB at each step | `08_DATA_MODEL.md` §4 |
 | **4.7** Edge case testing | Zero amounts, overflow, double-init, stale oracle | `11_SECURITY_RULES.md` §4 |

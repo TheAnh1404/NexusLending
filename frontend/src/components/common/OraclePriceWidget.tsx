@@ -1,5 +1,6 @@
 import React from 'react';
 import { useAppContext } from '../../app/AppContext';
+import { isAdminWallet } from '../../config/admin';
 import { Card, Space, Typography, Tag } from 'antd';
 import { LineChart, TrendingUp, TrendingDown, Clock } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -7,8 +8,9 @@ import { Link } from 'react-router-dom';
 const { Text, Title } = Typography;
 
 export const OraclePriceWidget: React.FC = () => {
-  const { oraclePrices } = useAppContext();
+  const { oraclePrices, wallet } = useAppContext();
   const xlmPriceInfo = oraclePrices.find((p) => p.asset === 'XLM');
+  const isAdmin = isAdminWallet(wallet.address);
 
   if (!xlmPriceInfo) return null;
 
@@ -22,11 +24,11 @@ export const OraclePriceWidget: React.FC = () => {
           <span>Stellar Anchor Oracles</span>
         </div>
       }
-      extra={
+      extra={isAdmin ? (
         <Link to="/app/oracle" style={{ fontSize: '12px', fontWeight: 600, color: 'var(--primary-color)' }}>
           Monitor
         </Link>
-      }
+      ) : null}
       styles={{ body: { padding: '20px' } }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

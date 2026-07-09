@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useAppContext } from '../app/AppContext';
 import { useWallet } from '../hooks/useWallet';
+import { isAdminWallet } from '../config/admin';
+import { filterWalletActivities } from '../utils/activity';
 import { formatCurrency } from '../utils/finance';
 import { App, Card, Row, Col, Descriptions, Button, Switch, List, Typography, Tag, Space, Divider } from 'antd';
 import { Wallet, ShieldCheck, Bell, Activity, Globe, LogOut, ExternalLink } from 'lucide-react';
@@ -12,18 +14,32 @@ const { Title, Paragraph, Text } = Typography;
 const NOTIFICATION_SETTINGS_KEY = 'nexus_notification_settings';
 
 export const SettingsPage: React.FC = () => {
-  const { wallet, activities, disconnectWallet } = useAppContext();
+  const { wallet, activities, loanOffers, loans, disconnectWallet } = useAppContext();
   const { publicKey, isTestnet, disconnect } = useWallet();
   const { message } = App.useApp();
   const navigate = useNavigate();
   const [emailAlerts, setEmailAlerts] = useState(true);
   const [telegramAlerts, setTelegramAlerts] = useState(false);
   const [liqAlerts, setLiqAlerts] = useState(true);
+  const isAdmin = isAdminWallet(publicKey ?? wallet.address);
+  const notificationSettingsKey = React.useMemo(
+    () => wallet.address ? `${NOTIFICATION_SETTINGS_KEY}_${wallet.address}` : NOTIFICATION_SETTINGS_KEY,
+    [wallet.address]
+  );
+  const walletActivities = React.useMemo(
+    () => filterWalletActivities(activities, wallet.address, loans, loanOffers),
+    [activities, loanOffers, loans, wallet.address]
+  );
 
   useEffect(() => {
     try {
-      const stored = localStorage.getItem(NOTIFICATION_SETTINGS_KEY);
-      if (!stored) return;
+      const stored = localStorage.getItem(notificationSettingsKey);
+      if (!stored) {
+        setEmailAlerts(true);
+        setTelegramAlerts(false);
+        setLiqAlerts(true);
+        return;
+      }
       const parsed = JSON.parse(stored) as Partial<{
         emailAlerts: boolean;
         telegramAlerts: boolean;
@@ -35,15 +51,15 @@ export const SettingsPage: React.FC = () => {
     } catch {
       message.warning('Unable to load notification settings.');
     }
-  }, [message]);
+  }, [message, notificationSettingsKey]);
 
   useEffect(() => {
-    localStorage.setItem(NOTIFICATION_SETTINGS_KEY, JSON.stringify({
+    localStorage.setItem(notificationSettingsKey, JSON.stringify({
       emailAlerts,
       telegramAlerts,
       liqAlerts,
     }));
-  }, [emailAlerts, liqAlerts, telegramAlerts]);
+  }, [emailAlerts, liqAlerts, notificationSettingsKey, telegramAlerts]);
 
   const handleDisconnect = () => {
     disconnect();
@@ -60,10 +76,12 @@ export const SettingsPage: React.FC = () => {
       {/* Page Header */}
       <div>
         <Title level={2} style={{ margin: 0, fontFamily: 'var(--font-heading)', fontWeight: 700 }}>
-          Profile & Settings
+          {isAdmin ? 'System Status' : 'Profile & Settings'}
         </Title>
         <Paragraph type="secondary" style={{ margin: 0 }}>
-          Manage your connected Stellar wallet details, RPC node preferences, and notifications.
+          {isAdmin
+            ? 'Admin runtime status, contract references, and notification preferences.'
+            : 'Manage your connected Stellar wallet details and notifications.'}
         </Paragraph>
       </div>
 
@@ -121,57 +139,58 @@ export const SettingsPage: React.FC = () => {
               </Button>
             </Card>
 
-            {/* Network specs */}
-            <Card
-              title={
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Globe size={16} style={{ color: 'var(--primary-color)' }} />
-                  <span>Stellar Network & Node Status</span>
-                </div>
-              }
-              styles={{ body: { padding: '24px' } }}
-            >
-              <Descriptions
-                bordered
-                column={1}
-                size="small"
-                styles={{ label: { fontWeight: 600, width: '180px' } }}
-                items={[
-                  {
-                    key: 'network',
-                    label: 'Selected Network',
-                    children: <Tag color={isTestnet ? 'purple' : 'warning'}>{NETWORK.toUpperCase()}</Tag>,
-                  },
-                  {
-                    key: 'horizonRpc',
-                    label: 'Horizon RPC Endpoint',
-                    children: <Text style={{ fontFamily: 'var(--font-mono)' }}>{HORIZON_URL}</Text>,
-                  },
-                  {
-                    key: 'sorobanRpc',
-                    label: 'Soroban RPC URL',
-                    children: <Text style={{ fontFamily: 'var(--font-mono)' }}>{RPC_URL}</Text>,
-                  },
-                  {
-                    key: 'nodeStatus',
-                    label: 'Node Status',
-                    children: <Tag color={CHAIN_MODE === 'mock' ? 'gold' : 'success'}>{CHAIN_MODE === 'mock' ? 'MOCK CHAIN MODE' : 'ONLINE & ACTIVE'}</Tag>,
-                  },
-                  {
-                    key: 'chainMode',
-                    label: 'Contract Execution',
-                    children: CHAIN_MODE === 'mock'
-                      ? <Text>Backend state is updated with mock chain receipts; Soroban RPC is not called.</Text>
-                      : <Text>Live Soroban calls require Freighter signatures and configured contracts.</Text>,
-                  },
-                  {
-                    key: 'coreVersion',
-                    label: 'Stellar Core Version',
-                    children: <Text>v21.1.0-rc1</Text>,
-                  },
-                ]}
-              />
-            </Card>
+            {isAdmin && (
+              <Card
+                title={
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Globe size={16} style={{ color: 'var(--primary-color)' }} />
+                    <span>Stellar Network & Node Status</span>
+                  </div>
+                }
+                styles={{ body: { padding: '24px' } }}
+              >
+                <Descriptions
+                  bordered
+                  column={1}
+                  size="small"
+                  styles={{ label: { fontWeight: 600, width: '180px' } }}
+                  items={[
+                    {
+                      key: 'network',
+                      label: 'Selected Network',
+                      children: <Tag color={isTestnet ? 'purple' : 'warning'}>{NETWORK.toUpperCase()}</Tag>,
+                    },
+                    {
+                      key: 'horizonRpc',
+                      label: 'Horizon RPC Endpoint',
+                      children: <Text style={{ fontFamily: 'var(--font-mono)' }}>{HORIZON_URL}</Text>,
+                    },
+                    {
+                      key: 'sorobanRpc',
+                      label: 'Soroban RPC URL',
+                      children: <Text style={{ fontFamily: 'var(--font-mono)' }}>{RPC_URL}</Text>,
+                    },
+                    {
+                      key: 'nodeStatus',
+                      label: 'Node Status',
+                      children: <Tag color={CHAIN_MODE === 'mock' ? 'gold' : 'success'}>{CHAIN_MODE === 'mock' ? 'MOCK CHAIN MODE' : 'ONLINE & ACTIVE'}</Tag>,
+                    },
+                    {
+                      key: 'chainMode',
+                      label: 'Contract Execution',
+                      children: CHAIN_MODE === 'mock'
+                        ? <Text>Backend state is updated with mock chain receipts; Soroban RPC is not called.</Text>
+                        : <Text>Live Soroban calls require Freighter signatures and configured contracts.</Text>,
+                    },
+                    {
+                      key: 'coreVersion',
+                      label: 'Stellar Core Version',
+                      children: <Text>v21.1.0-rc1</Text>,
+                    },
+                  ]}
+                />
+              </Card>
+            )}
           </Space>
         </Col>
 
@@ -215,7 +234,7 @@ export const SettingsPage: React.FC = () => {
               </div>
             </Card>
 
-            {/* Smart Contract addresses */}
+            {isAdmin && (
             <Card
               title={
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -307,6 +326,7 @@ export const SettingsPage: React.FC = () => {
                 </div>
               </div>
             </Card>
+            )}
           </Space>
         </Col>
       </Row>
@@ -323,7 +343,7 @@ export const SettingsPage: React.FC = () => {
       >
         <List
           itemLayout="horizontal"
-          dataSource={activities.filter((act) => act.user === wallet.address)}
+          dataSource={walletActivities}
           renderItem={(item) => (
             <List.Item style={{ padding: '16px 24px' }}>
               <List.Item.Meta

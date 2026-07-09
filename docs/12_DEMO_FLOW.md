@@ -54,7 +54,7 @@ This document provides a complete step-by-step demo scenario that exercises ever
 | `max_ltv_bps` | 7,500 | 75% |
 | `liquidation_threshold_bps` | 8,000 | 80% |
 | `liquidation_bonus_bps` | 500 | 5% |
-| `grace_period_days` | 3 | 3 days |
+| `grace_period_days` | 7 | 7 days |
 | `min_health_factor_bps` | 0 → 14,000 | 1.4× (default) |
 
 **Result:**
@@ -265,14 +265,14 @@ current_time > due_time → Expired
 Status → Expired
 ```
 
-Bob can still repay during the 3-day grace period.
+Bob receives an overdue repayment notification and can still repay during the 7-day grace period.
 
-### Step 4: Grace Period Expires (Day 34)
+### Step 4: Grace Period Expires (Day 38)
 
 **Action:** Anyone calls `LoanManager.mark_defaulted(loan_id=1)`
 
 ```
-current_time > due_time + (3 × 86,400) → Defaulted
+current_time > due_time + (7 × 86,400) → Defaulted
 Status → Defaulted
 ```
 

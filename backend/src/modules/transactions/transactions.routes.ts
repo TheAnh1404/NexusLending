@@ -13,6 +13,7 @@ transactionsRouter.get(
   asyncHandler(async (req, res) => {
     const transactions = await transactionsService.list({
       wallet: req.query.wallet?.toString(),
+      relatedWallet: req.query.relatedWallet?.toString(),
       type: req.query.type?.toString(),
       loanId: req.query.loanId?.toString(),
       offerId: req.query.offerId?.toString()
@@ -29,4 +30,3 @@ transactionsRouter.post(
     res.status(201).json({ data: serialize(transaction) });
   })
 );
-

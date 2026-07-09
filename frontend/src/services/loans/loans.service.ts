@@ -1,9 +1,11 @@
 import type { Loan, LoanOffer, LoanStatus } from '../../types';
 import {
+  DEFAULT_GRACE_PERIOD_DAYS,
   calculateHealthFactor,
   calculateLTV,
   calculateRepaymentAmount,
   getLoanStatusFromHealthFactor,
+  getTimeBasedLoanStatus,
   isOpenLoanStatus,
 } from '../../utils/finance';
 
@@ -111,7 +113,8 @@ export const loansService = {
     return {
       ...loan,
       healthFactor,
-      status: getLoanStatusFromHealthFactor(healthFactor),
+      status: getTimeBasedLoanStatus(loan.dueDate, loan.gracePeriod ?? DEFAULT_GRACE_PERIOD_DAYS)
+        ?? getLoanStatusFromHealthFactor(healthFactor),
     };
   },
 

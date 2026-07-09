@@ -1,7 +1,17 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAppContext } from '../app/AppContext';
-import { calculateRequiredCollateral, calculateRepaymentAmount, calculateHealthFactor, getRiskZone, formatCurrency, isLiquidatable as checkLiquidatable } from '../utils/finance';
+import { isAdminWallet } from '../config/admin';
+import {
+  DEFAULT_GRACE_PERIOD_DAYS,
+  calculateRequiredCollateral,
+  calculateRepaymentAmount,
+  calculateHealthFactor,
+  formatCurrency,
+  getGracePeriodDaysRemaining,
+  getRiskZone,
+  isLiquidatable as checkLiquidatable,
+} from '../utils/finance';
 import { HealthFactorGauge } from '../components/common/HealthFactorGauge';
 import { EmptyState } from '../components/common/CommonStates';
 import { OfferStatusBadge } from '../components/common/OfferStatusBadge';
@@ -119,6 +129,7 @@ export const LoanDetailPage: React.FC = () => {
   // Role checks
   const isUserBorrower = activeLoan && wallet.connected && wallet.address === activeLoan.borrower;
   const isUserLender = wallet.connected && wallet.address === lender;
+  const isAdmin = isAdminWallet(wallet.address);
 
   // Actions
   const handleFundOffer = async () => {
@@ -196,6 +207,7 @@ export const LoanDetailPage: React.FC = () => {
   };
 
   const handleRefresh = async () => {
+    if (!isAdmin) return;
     try {
       setLoading(true);
       await recalculateAllHealthFactors();
@@ -426,12 +438,31 @@ export const LoanDetailPage: React.FC = () => {
                 )}
 
                 {['Active', 'Warning', 'LiquidationPlanning', 'Expired', 'Defaulted'].includes(activeLoan.status) && (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {activeLoan.status === 'Expired' && (
+                      <Alert
+                        type="warning"
+                        showIcon
+                        message="Repayment overdue"
+                        description={`This loan has passed maturity. Repay within ${getGracePeriodDaysRemaining(activeLoan.dueDate, activeLoan.gracePeriod ?? DEFAULT_GRACE_PERIOD_DAYS)} days to avoid default and liquidation eligibility regardless of Health Factor.`}
+                      />
+                    )}
+                    {activeLoan.status === 'Defaulted' && (
+                      <Alert
+                        type="error"
+                        showIcon
+                        message="Defaulted: liquidation eligible"
+                        description="The 7-day grace period has ended. This loan can be liquidated regardless of Health Factor until it is fully repaid or liquidated."
+                      />
+                    )}
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
                     {isUserBorrower && (
                       <>
-                        <Button type="primary" onClick={() => setCollateralModalOpen(true)}>
-                          Add XLM Collateral
-                        </Button>
+                        {activeLoan.status !== 'Defaulted' && (
+                          <Button type="primary" onClick={() => setCollateralModalOpen(true)}>
+                            Add XLM Collateral
+                          </Button>
+                        )}
                         <Button onClick={() => setRepayModalOpen(true)}>
                           Repay USDC Debt
                         </Button>
@@ -447,9 +478,12 @@ export const LoanDetailPage: React.FC = () => {
                         Liquidate distressed Position
                       </Button>
                     )}
-                    <Button onClick={handleRefresh} icon={<RefreshCw size={14} style={{ marginRight: 4 }} />}>
-                      Refresh Health & Status
-                    </Button>
+                    {isAdmin && (
+                      <Button onClick={handleRefresh} icon={<RefreshCw size={14} style={{ marginRight: 4 }} />}>
+                        Refresh Health & Status
+                      </Button>
+                    )}
+                    </div>
                   </div>
                 )}
 

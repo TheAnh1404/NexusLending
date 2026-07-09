@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useAppContext } from '../app/AppContext';
 import type { OracleImpact } from '../contexts/LendingContext';
+import { ADMIN_WALLET_ADDRESS, isAdminWallet } from '../config/admin';
 import { calculateHealthFactor, getRiskZone, isOpenLoanStatus } from '../utils/finance';
 import { RiskBadge } from '../components/common/RiskBadge';
 import { EmptyState } from '../components/common/CommonStates';
@@ -31,6 +32,7 @@ export const OracleMonitorPage: React.FC = () => {
   const xlmPriceInfo = oraclePrices.find((p) => p.asset === 'XLM');
   const xlmPrice = xlmPriceInfo?.price || 0.125;
   const usdcPrice = oraclePrices.find((p) => p.asset === 'USDC')?.price || 1.0;
+  const isCurrentWalletAdmin = isAdminWallet(wallet.address);
 
   // Input state for new price
   const [newPrice, setNewPrice] = useState<number>(xlmPrice);
@@ -177,7 +179,8 @@ export const OracleMonitorPage: React.FC = () => {
           Oracle Monitor
         </Title>
         <div style={{ marginTop: '8px', fontSize: '13px', color: 'var(--text-muted)' }}>
-          <Text strong>Current Pair:</Text> XLM/USDC | <Text strong>Oracle Contract:</Text> <span style={{ fontFamily: 'var(--font-mono)' }}>{CONTRACTS.oracle}</span> | <Text strong>Admin:</Text> <Tag color={wallet.connected ? 'success' : 'warning'}>{wallet.connected ? 'Connected' : 'Not Connected'}</Tag>
+          <Text strong>Current Pair:</Text> XLM/USDC | <Text strong>Oracle Contract:</Text> <span style={{ fontFamily: 'var(--font-mono)' }}>{CONTRACTS.oracle}</span> | <Text strong>Admin:</Text> <Tag color={isCurrentWalletAdmin ? 'success' : 'warning'}>{isCurrentWalletAdmin ? 'Authorized' : 'Restricted'}</Tag>
+          <Text copyable={{ text: ADMIN_WALLET_ADDRESS }} style={{ marginLeft: 8, fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{ADMIN_WALLET_ADDRESS.slice(0, 6)}...{ADMIN_WALLET_ADDRESS.slice(-6)}</Text>
         </div>
       </div>
 
@@ -252,7 +255,7 @@ export const OracleMonitorPage: React.FC = () => {
               <Button
                 type="primary"
                 onClick={handleUpdatePrice}
-                disabled={newPrice <= 0 || !wallet.connected}
+                disabled={newPrice <= 0 || !isCurrentWalletAdmin}
                 style={{ width: '100%', height: '40px', marginTop: '8px' }}
               >
                 Update Oracle Price

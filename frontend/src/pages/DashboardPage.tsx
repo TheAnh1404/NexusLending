@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useAppContext } from '../app/AppContext';
+import { filterWalletActivities } from '../utils/activity';
 import { formatCurrency, isLiquidatable, isOpenLoanStatus } from '../utils/finance';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
@@ -52,6 +53,10 @@ export const DashboardPage: React.FC = () => {
   const [swapModalOpen, setSwapModalOpen] = useState(false);
 
   const xlmPrice = oraclePrices.find((p) => p.asset === 'XLM')?.price || 0.125;
+  const walletActivities = React.useMemo(
+    () => filterWalletActivities(activities, wallet.address, loans, loanOffers),
+    [activities, loanOffers, loans, wallet.address]
+  );
 
   const handleCopy = () => {
     if (wallet.address) {
@@ -509,7 +514,7 @@ export const DashboardPage: React.FC = () => {
           <Card
             title={
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '15px', fontWeight: 700 }}>Stellar Ledger Feed</span>
+                <span style={{ fontSize: '15px', fontWeight: 700 }}>My Ledger Feed</span>
                 <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: 'var(--text-muted)' }}>
                   <Activity size={12} className="animate-pulse" style={{ color: 'var(--primary-color)' }} /> Real-time
                 </span>
@@ -519,7 +524,11 @@ export const DashboardPage: React.FC = () => {
             styles={{ body: { padding: '8px 16px' } }}
           >
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', padding: '8px 0', maxHeight: '350px', overflowY: 'auto' }}>
-              {activities.slice(0, 5).map((act, index) => (
+              {walletActivities.length === 0 ? (
+                <div style={{ padding: '36px 8px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
+                  No wallet-specific ledger activity.
+                </div>
+              ) : walletActivities.slice(0, 5).map((act, index) => (
                 <div key={index} style={{ display: 'flex', gap: '12px', paddingBottom: '12px', borderBottom: index < 4 ? '1px solid var(--border-light)' : 'none' }}>
                   <div style={{
                     backgroundColor: 'var(--border-light)',

@@ -5,7 +5,7 @@ import type { Loan, LoanOffer, OraclePrice, Transaction, UserRole, WalletState }
 import { initialLoanOffers, initialLoans } from '../data/mockLoans';
 import { initialOraclePrices } from '../data/mockOracle';
 import { initialActivities } from '../data/mockActivities';
-import { isLiquidatable, isOpenLoanStatus } from '../utils/finance';
+import { calculateMaxLiquidationRepay, isLiquidatable, isOpenLoanStatus } from '../utils/finance';
 import { loansService } from '../services/loans/loans.service';
 import { offersService, type CreateOfferInput } from '../services/offers/offers.service';
 import { oracleService } from '../services/oracle/oracle.service';
@@ -20,8 +20,9 @@ import { marketplaceContract } from '../services/soroban/marketplace.contract';
 import { loanManagerContract } from '../services/soroban/loanManager.contract';
 import { oracleContract } from '../services/soroban/oracle.contract';
 import { CONTRACTS } from '../services/soroban/config';
-import { swapStellarAssets } from '../services/soroban/transaction';
+import { createUsdcTrustline, hasUsdcTrustline, swapStellarAssets } from '../services/soroban/transaction';
 import type { SwapDirection, TxResult, TxStage } from '../services/soroban/transaction';
+import { ADMIN_WALLET_ADDRESS, isAdminWallet } from '../config/admin';
 
 const STORAGE_KEY = 'nexus_lending_state_v3';
 
@@ -29,6 +30,9 @@ export const clearLegacyFrontendData = () => {
   localStorage.removeItem('nexus_lending_state_v2');
   localStorage.removeItem('nexus_lending_state_v3');
   localStorage.removeItem('nexus_notification_settings');
+  Object.keys(localStorage)
+    .filter((key) => key.startsWith('nexus_notification_settings_'))
+    .forEach((key) => localStorage.removeItem(key));
   localStorage.removeItem('nexus_freighter_connected');
 };
 
@@ -382,16 +386,22 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const balancesPromise = address && !isMockChainMode
       ? fetchWalletBalances(address)
       : Promise.resolve(null);
+    const transactionsPromise = address
+      ? isAdminWallet(address)
+        ? transactionsApi.list()
+        : transactionsApi.list({ relatedWallet: address })
+      : Promise.resolve([]);
     const [offers, loans, oraclePrices, transactions, liveBalances] = await Promise.all([
       offersApi.list(),
       loansApi.list(),
       oracleApi.list(),
-      transactionsApi.list(),
+      transactionsPromise,
       balancesPromise,
     ]);
+    const normalizedLoans = normalizeLoans(loans, oraclePrices);
     const balances = address
       ? isMockChainMode
-        ? calculateMockWalletBalances(address, loans, transactions)
+        ? calculateMockWalletBalances(address, normalizedLoans, transactions)
         : liveBalances
       : null;
 
@@ -417,7 +427,7 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         ...prev,
         wallet: nextWallet,
         offers,
-        loans,
+        loans: normalizedLoans,
         oraclePrices,
         transactions,
       };
@@ -426,7 +436,7 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return {
       wallet: updatedWallet,
       offers,
-      loans,
+      loans: normalizedLoans,
       oraclePrices,
       transactions,
     };
@@ -470,6 +480,13 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       ...prev,
       wallet: nextWallet,
     }));
+    walletRef.current = nextWallet;
+
+    if (isApiMode) {
+      void refreshFromApi().catch((error) => {
+        message.error(error instanceof Error ? error.message : 'Unable to load wallet activity.');
+      });
+    }
 
     if (shouldUseLiveBalances || (!isMockSandboxAddress && !isMockChainMode)) {
       void fetchWalletBalances(address, shouldUseLiveBalances ? zeroWalletBalances : mockWalletBalances).then((balances) => {
@@ -486,7 +503,7 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         });
       });
     }
-  }, [isApiMode, isMockChainMode]);
+  }, [isApiMode, isMockChainMode, message, refreshFromApi]);
 
   const disconnectWallet = useCallback(() => {
     setSnapshot((prev) => ({
@@ -938,6 +955,27 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         throw new Error('Loan is missing contractLoanId. The accepted offer was not saved with its Soroban loan id, so it cannot be activated on-chain.');
       }
       const contractLoanId = loan.contractLoanId ?? nextMockContractId();
+
+      if (!isMockChainMode && loan.asset === 'USDC') {
+        let hasTrustline = false;
+        try {
+          hasTrustline = await hasUsdcTrustline(walletAddress);
+        } catch (error) {
+          throw new Error(error instanceof Error ? error.message : 'Unable to verify USDC trustline before loan activation.');
+        }
+
+        if (!hasTrustline) {
+          notification.info({
+            message: 'USDC trustline required',
+            description: 'Approve the Freighter transaction to add a USDC trustline before receiving the loan principal.',
+          });
+          const trustlineTx = await runSorobanTransaction((onStage) => createUsdcTrustline(walletAddress, onStage));
+          if (!trustlineTx) {
+            throw new Error(lastSorobanErrorRef.current ?? 'USDC trustline is required before loan activation.');
+          }
+        }
+      }
+
       const txRes = await runChainTransaction(
         CONTRACTS.loanManager,
         'activate_loan',
@@ -986,7 +1024,7 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       description: `Health Factor is ${updatedLoan.healthFactor.toFixed(2)}. Funds are now available after confirmation.`,
     });
     return updatedLoan;
-  }, [getLatestLoanForAction, isApiMode, isMockChainMode, message, notification, refreshFromApi, runChainTransaction, snapshot]);
+  }, [getLatestLoanForAction, isApiMode, isMockChainMode, message, notification, refreshFromApi, runChainTransaction, runSorobanTransaction, snapshot]);
 
   const addCollateral = useCallback(async (loanId: string, amount: number) => {
     const walletAddress = snapshot.wallet.address;
@@ -1128,6 +1166,16 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   }, [isApiMode, isMockChainMode, message, notification, refreshFromApi, runChainTransaction, snapshot]);
 
   const recalculateAllHealthFactors = useCallback(async (): Promise<OracleImpact[]> => {
+    const walletAddress = snapshot.wallet.address;
+    if (!snapshot.wallet.connected || !walletAddress) {
+      message.error('Connect the admin wallet before recalculating loan health factors.');
+      return [];
+    }
+    if (!isAdminWallet(walletAddress)) {
+      message.error(`This action is restricted to the admin wallet: ${ADMIN_WALLET_ADDRESS}.`);
+      return [];
+    }
+
     if (isApiMode) {
       const previousLoans = snapshot.loans;
       await oracleApi.recalculateHealth();
@@ -1158,7 +1206,7 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }));
 
     return impacts;
-  }, [isApiMode, refreshFromApi, snapshot]);
+  }, [isApiMode, message, refreshFromApi, snapshot]);
 
   const updateOraclePrice = useCallback(async (newPrice: number): Promise<OracleImpact[]> => {
     if (newPrice <= 0) {
@@ -1168,6 +1216,10 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const walletAddress = snapshot.wallet.address;
     if (!snapshot.wallet.connected || !walletAddress) {
       message.error('Connect the oracle admin wallet before updating prices.');
+      return [];
+    }
+    if (!isAdminWallet(walletAddress)) {
+      message.error(`Oracle updates are restricted to the admin wallet: ${ADMIN_WALLET_ADDRESS}.`);
       return [];
     }
 
@@ -1256,9 +1308,15 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       message.error('Loan is not eligible for liquidation.');
       return;
     }
-    const closeFactorAmount = loan.outstandingDebt * 0.5;
-    if (repayAmount <= 0 || repayAmount > closeFactorAmount + 0.01) {
-      message.error(`Repay amount must be between 0 and ${closeFactorAmount.toFixed(2)} USDC.`);
+    const { xlmPrice } = getPrices(snapshot.oraclePrices);
+    const maxRepayAmount = calculateMaxLiquidationRepay(
+      loan.outstandingDebt,
+      loan.collateralAmount,
+      xlmPrice,
+      loan.liquidationBonus
+    );
+    if (repayAmount <= 0 || repayAmount > maxRepayAmount + 0.01) {
+      message.error(`Repay amount must be between 0 and ${maxRepayAmount.toFixed(2)} USDC.`);
       return;
     }
     if (snapshot.wallet.balanceUSDC < repayAmount) {
@@ -1271,6 +1329,18 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         throw new Error('Loan is missing contractLoanId. It cannot be liquidated on-chain.');
       }
       const contractLoanId = loan.contractLoanId ?? nextMockContractId();
+      if (!isMockChainMode && loan.status === 'Defaulted') {
+        notification.info({
+          message: 'Marking loan defaulted on-chain',
+          description: 'Approve the first Freighter transaction to sync the 7-day grace-period default before liquidation.',
+        });
+        const defaultTxRes = await runChainTransaction(
+          CONTRACTS.loanManager,
+          'mark_defaulted',
+          (onStage) => loanManagerContract.markDefaultedTx(contractLoanId, walletAddress, onStage)
+        );
+        if (!defaultTxRes) return;
+      }
       const txRes = await runChainTransaction(
         CONTRACTS.loanManager,
         'liquidate',

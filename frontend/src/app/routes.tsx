@@ -5,6 +5,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { PublicLayout } from '../layouts/PublicLayout';
 import { AppLayout } from '../layouts/AppLayout';
 import { ProtectedRoute } from '../components/common/ProtectedRoute';
+import { AdminRoute } from '../components/common/AdminRoute';
 
 // Pages
 import { LandingPage } from '../pages/LandingPage';
@@ -21,6 +22,7 @@ import { LiquidationDetailPage } from '../pages/LiquidationDetailPage';
 import { OracleMonitorPage } from '../pages/OracleMonitorPage';
 import { MyLoansPage } from '../pages/MyLoansPage';
 import { SettingsPage } from '../pages/SettingsPage';
+import { AdminPage } from '../pages/AdminPage';
 
 export const AppRoutes: React.FC = () => {
   return (
@@ -43,9 +45,10 @@ export const AppRoutes: React.FC = () => {
           <Route path="lender" element={<LenderDashboardPage />} />
           <Route path="liquidation" element={<LiquidationCenterPage />} />
           <Route path="liquidation/:id" element={<LiquidationDetailPage />} />
-          <Route path="oracle" element={<OracleMonitorPage />} />
+          <Route path="oracle" element={<AdminRoute><OracleMonitorPage /></AdminRoute>} />
           <Route path="my-loans" element={<MyLoansPage />} />
           <Route path="settings" element={<SettingsPage />} />
+          <Route path="admin" element={<AdminRoute><AdminPage /></AdminRoute>} />
         </Route>
       </Route>
 

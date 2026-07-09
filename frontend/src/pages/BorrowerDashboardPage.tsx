@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppContext } from '../app/AppContext';
-import { formatCurrency, isOpenLoanStatus } from '../utils/finance';
+import { DEFAULT_GRACE_PERIOD_DAYS, formatCurrency, getGracePeriodDaysRemaining, isOpenLoanStatus } from '../utils/finance';
 import { StatisticCard } from '../components/common/StatisticCard';
 import { RiskBadge } from '../components/common/RiskBadge';
 import { LoanStatusBadge } from '../components/common/LoanStatusBadge';
@@ -249,7 +249,12 @@ export const BorrowerDashboardPage: React.FC = () => {
                         {loan.status !== 'PendingCollateral' && (
                           (() => {
                             const days = getRemainingDays(loan.dueDate);
-                            if (days <= 0) {
+                            if (loan.status === 'Defaulted') {
+                              return <Tag color="error" style={{ margin: 0 }}>Defaulted</Tag>;
+                            } else if (loan.status === 'Expired') {
+                              const graceDays = getGracePeriodDaysRemaining(loan.dueDate, loan.gracePeriod ?? DEFAULT_GRACE_PERIOD_DAYS);
+                              return <Tag color="warning" style={{ margin: 0 }}>{graceDays}d grace left</Tag>;
+                            } else if (days <= 0) {
                               return <Tag color="error" style={{ margin: 0 }}>Matured</Tag>;
                             } else if (days <= 3) {
                               return <Tag color="warning" style={{ margin: 0 }}>{days}d left</Tag>;
@@ -306,14 +311,30 @@ export const BorrowerDashboardPage: React.FC = () => {
                     />
                   )}
 
-                  {['Defaulted', 'Expired'].includes(loan.status) && (
+                  {loan.status === 'Expired' && (
+                     <Alert
+                       type="warning"
+                       showIcon
+                       message={<span style={{ fontWeight: 800 }}>Repayment overdue</span>}
+                       description={
+                         <span style={{ fontSize: '12px', lineHeight: '1.4' }}>
+                           This loan has passed maturity. Repay the outstanding debt within{' '}
+                           <b>{getGracePeriodDaysRemaining(loan.dueDate, loan.gracePeriod ?? DEFAULT_GRACE_PERIOD_DAYS)} days</b>
+                           {' '}to avoid default. It is only liquidatable now if Health Factor is below 1.2.
+                         </span>
+                       }
+                       style={{ marginBottom: '20px' }}
+                     />
+                   )}
+
+                  {loan.status === 'Defaulted' && (
                      <Alert
                        type="error"
                        showIcon
-                       message={<span style={{ fontWeight: 800 }}>CRITICAL STATUS: LIQUIDATION ELIGIBLE</span>}
+                       message={<span style={{ fontWeight: 800 }}>Defaulted: liquidation eligible</span>}
                        description={
                          <span style={{ fontSize: '12px', lineHeight: '1.4' }}>
-                           This loan has breached its maturity date. <b>Under protocol rules, it is eligible for immediate liquidation regardless of its Health Factor.</b> Repay your outstanding debt immediately to prevent your locked XLM collateral from being liquidated.
+                           The 7-day repayment grace period has ended. <b>This loan can now be liquidated regardless of Health Factor.</b> Repay immediately to recover collateral before liquidation is executed.
                          </span>
                        }
                        style={{ marginBottom: '20px', border: '1px solid var(--danger-color)', backgroundColor: 'rgba(239, 68, 68, 0.03)' }}
@@ -333,11 +354,13 @@ export const BorrowerDashboardPage: React.FC = () => {
                          Activate Loan
                        </Button>
                      )}
-                    {['Active', 'Warning', 'LiquidationPlanning'].includes(loan.status) && (
+                    {['Active', 'Warning', 'LiquidationPlanning', 'Expired', 'Defaulted'].includes(loan.status) && (
                       <>
-                        <Button type="primary" onClick={() => openAddCollateralModal(loan.id)} style={{ flex: 2 }}>
-                          Add Collateral
-                        </Button>
+                        {loan.status !== 'Defaulted' && (
+                          <Button type="primary" onClick={() => openAddCollateralModal(loan.id)} style={{ flex: 2 }}>
+                            Add Collateral
+                          </Button>
+                        )}
                         <Button onClick={() => openRepayModal(loan.id)} style={{ flex: 2 }}>
                           Repay Debt
                         </Button>
