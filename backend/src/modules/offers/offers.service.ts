@@ -1,10 +1,13 @@
 import { OfferStatus, Prisma, TransactionType } from '@prisma/client';
 
+import { env } from '../../config/env';
 import { prisma } from '../../prisma/client';
 import { ApiError } from '../../utils/apiError';
 import { calculateRepaymentAmount } from '../../utils/finance';
 import { DEFAULT_GRACE_PERIOD_DAYS, buildRiskPatch } from '../loans/loans.service';
 import { createLedgerTransaction, requireConfirmedReceipt } from '../transactions/chainReceipt';
+import { contractReaderService, verificationService } from '../verification';
+import type { VerifiedTransaction } from '../verification';
 import type {
   AcceptOfferInput,
   CreateOfferInput,
@@ -18,6 +21,57 @@ const decimal = (value: Prisma.Decimal.Value): Prisma.Decimal => new Prisma.Deci
 
 const contractOfferRef = (offer: { contractOfferId: bigint | number | null; id: string }) =>
   offer.contractOfferId?.toString() ?? offer.id;
+
+const requireVerifiedId = (value: string | undefined, label: string): string => {
+  if (!value) throw new ApiError(400, `${label} was not found in verified blockchain event`);
+  return value;
+};
+
+const upsertLedgerTransaction = async (
+  tx: Prisma.TransactionClient,
+  type: TransactionType,
+  wallet: string,
+  input: Parameters<typeof createLedgerTransaction>[2]
+) => {
+  const data = createLedgerTransaction(type, wallet, input);
+  await tx.transaction.upsert({
+    where: { txHash: data.txHash },
+    create: data,
+    update: data
+  });
+};
+
+const markVerifiedEventProcessed = async (
+  tx: Prisma.TransactionClient,
+  verified: VerifiedTransaction
+) => {
+  await tx.indexedEvent.upsert({
+    where: {
+      txHash_eventIndex: {
+        txHash: verified.event.txHash,
+        eventIndex: verified.event.eventIndex
+      }
+    },
+    create: {
+      txHash: verified.event.txHash,
+      eventIndex: verified.event.eventIndex,
+      ledger: verified.event.ledger,
+      contractId: verified.event.contractId,
+      eventName: verified.event.eventName,
+      actor: verified.event.actor,
+      entityType: verified.event.entityType,
+      entityId: verified.event.entityId,
+      amount: verified.event.amount,
+      asset: verified.event.asset,
+      network: verified.event.network,
+      explorerUrl: verified.event.explorerUrl,
+      payload: verified.event.payload
+    },
+    update: {
+      processedAt: new Date()
+    }
+  });
+};
 
 const requireOfferOwner = (
   offer: { lenderWallet: string },
@@ -72,13 +126,22 @@ export const offersService = {
 
   async create(input: CreateOfferInput) {
     validateCreateOffer(input);
-    const receipt = input.txHash ? requireConfirmedReceipt(input as any) : undefined;
+    const verified = input.txHash
+      ? await verificationService.verifyAction({
+          action: 'create_offer',
+          txHash: input.txHash,
+          expectedContractId: env.marketplaceContractId,
+          expectedWallet: input.lenderWallet,
+          expectedAmount: input.loanAmount
+        })
+      : undefined;
+    const receipt = verified ? requireConfirmedReceipt(verified) : undefined;
 
     const data: Prisma.LoanOfferUncheckedCreateInput = {
-      contractOfferId: input.contractOfferId,
-      lenderWallet: input.lenderWallet,
+      contractOfferId: verified?.offerId ? BigInt(verified.offerId) : input.contractOfferId,
+      lenderWallet: verified?.actor ?? input.lenderWallet,
       loanAsset: input.loanAsset,
-      loanAmount: decimal(input.loanAmount),
+      loanAmount: verified?.amount ?? decimal(input.loanAmount),
       fixedAprBps: input.fixedAprBps,
       durationDays: input.durationDays,
       collateralAsset: input.collateralAsset,
@@ -100,19 +163,18 @@ export const offersService = {
         data,
         include: { loans: true }
       });
-      if (receipt) {
-        await tx.transaction.create({
-          data: createLedgerTransaction('CREATE_OFFER', offer.lenderWallet, {
+      if (receipt && verified) {
+        await markVerifiedEventProcessed(tx, verified);
+        await upsertLedgerTransaction(tx, 'CREATE_OFFER', offer.lenderWallet, {
             offerId: offer.id,
             asset: offer.loanAsset,
             amount: offer.loanAmount,
-            receipt,
+            receipt: verified,
             details: `Created Draft offer ${offer.id} for ${offer.loanAmount.toString()} ${offer.loanAsset}.`,
             metadata: {
               contractFunction: 'create_offer',
               contractOfferId: offer.contractOfferId?.toString()
             }
-          })
         });
       }
       return offer;
@@ -121,37 +183,43 @@ export const offersService = {
 
   async fund(id: string, input?: OfferActionWalletInput) {
     const offer = await this.getById(id);
-    requireOfferOwner(offer, input);
-    const receipt = requireConfirmedReceipt(input);
     if (offer.status !== 'Draft') {
       throw new ApiError(400, 'Only Draft offers can be funded');
     }
+    const verified = await verificationService.verifyAction({
+      action: 'fund_offer',
+      txHash: input?.txHash ?? '',
+      expectedContractId: env.marketplaceContractId,
+      expectedOfferId: offer.contractOfferId?.toString(),
+      expectedAmount: offer.loanAmount
+    });
+    if (verified.alreadyProcessed) return this.getById(id);
+    const contractOfferId = requireVerifiedId(verified.offerId, 'contractOfferId');
 
     return prisma.$transaction(async (tx) => {
       const updated = await tx.loanOffer.update({
         where: { id },
         data: {
           status: 'Funding',
-          contractOfferId: input?.contractOfferId ? BigInt(input.contractOfferId) : undefined,
-          txHash: receipt.txHash,
-          explorerUrl: receipt.explorerUrl,
-          ledger: receipt.ledger,
-          blockTimestamp: receipt.blockTimestamp
+          contractOfferId: BigInt(contractOfferId),
+          txHash: verified.transaction.txHash,
+          explorerUrl: verified.explorerUrl,
+          ledger: verified.transaction.ledger,
+          blockTimestamp: verified.transaction.confirmedAt
         },
         include: { loans: true }
       });
-      await tx.transaction.create({
-        data: createLedgerTransaction('FUND_OFFER', updated.lenderWallet, {
+      await markVerifiedEventProcessed(tx, verified);
+      await upsertLedgerTransaction(tx, 'FUND_OFFER', updated.lenderWallet, {
           offerId: id,
           asset: updated.loanAsset,
           amount: updated.loanAmount,
-          receipt,
+          receipt: verified,
           details: `Funded offer ${id}; lender funds are locked in Vault/Escrow.`,
           metadata: {
             contractFunction: 'fund_offer',
             contractOfferId: contractOfferRef(updated)
           }
-        })
       });
       return updated;
     });
@@ -159,36 +227,41 @@ export const offersService = {
 
   async activate(id: string, input?: OfferActionWalletInput) {
     const offer = await this.getById(id);
-    requireOfferOwner(offer, input);
-    const receipt = requireConfirmedReceipt(input);
     if (offer.status !== 'Funding') {
       throw new ApiError(400, 'Only Funding offers can be activated');
     }
+    const verified = await verificationService.verifyAction({
+      action: 'activate_offer',
+      txHash: input?.txHash ?? '',
+      expectedContractId: env.marketplaceContractId,
+      expectedOfferId: contractOfferRef(offer),
+      expectedAmount: offer.loanAmount
+    });
+    if (verified.alreadyProcessed) return this.getById(id);
 
     return prisma.$transaction(async (tx) => {
       const updated = await tx.loanOffer.update({
         where: { id },
         data: {
           status: 'Active',
-          txHash: receipt.txHash,
-          explorerUrl: receipt.explorerUrl,
-          ledger: receipt.ledger,
-          blockTimestamp: receipt.blockTimestamp
+          txHash: verified.transaction.txHash,
+          explorerUrl: verified.explorerUrl,
+          ledger: verified.transaction.ledger,
+          blockTimestamp: verified.transaction.confirmedAt
         },
         include: { loans: true }
       });
-      await tx.transaction.create({
-        data: createLedgerTransaction('ACTIVATE_OFFER', updated.lenderWallet, {
+      await markVerifiedEventProcessed(tx, verified);
+      await upsertLedgerTransaction(tx, 'ACTIVATE_OFFER', updated.lenderWallet, {
           offerId: id,
           asset: updated.loanAsset,
           amount: updated.loanAmount,
-          receipt,
+          receipt: verified,
           details: `Activated offer ${id}; it is now visible in the marketplace.`,
           metadata: {
             contractFunction: 'activate_offer',
             contractOfferId: contractOfferRef(offer)
           }
-        })
       });
       return updated;
     });
@@ -196,30 +269,35 @@ export const offersService = {
 
   async cancel(id: string, input?: OfferActionWalletInput) {
     const offer = await this.getById(id);
-    requireOfferOwner(offer, input);
-    const receipt = requireConfirmedReceipt(input);
     ensureCancelable(offer.status);
+    const verified = await verificationService.verifyAction({
+      action: 'cancel_offer',
+      txHash: input?.txHash ?? '',
+      expectedContractId: env.marketplaceContractId,
+      expectedOfferId: contractOfferRef(offer),
+      expectedAmount: offer.loanAmount
+    });
+    if (verified.alreadyProcessed) return this.getById(id);
 
     return prisma.$transaction(async (tx) => {
       const updated = await tx.loanOffer.update({
         where: { id },
         data: {
           status: 'Cancelled',
-          txHash: receipt.txHash,
-          explorerUrl: receipt.explorerUrl,
-          ledger: receipt.ledger,
-          blockTimestamp: receipt.blockTimestamp
+          txHash: verified.transaction.txHash,
+          explorerUrl: verified.explorerUrl,
+          ledger: verified.transaction.ledger,
+          blockTimestamp: verified.transaction.confirmedAt
         },
         include: { loans: true }
       });
-      await tx.transaction.create({
-        data: createLedgerTransaction('CANCEL_OFFER', updated.lenderWallet, {
+      await markVerifiedEventProcessed(tx, verified);
+      await upsertLedgerTransaction(tx, 'CANCEL_OFFER', updated.lenderWallet, {
           offerId: updated.id,
           asset: updated.loanAsset,
           amount: updated.loanAmount,
-          receipt,
+          receipt: verified,
           details: `Cancelled offer ${updated.id}; locked lender funds are released by Vault/Escrow.`
-        })
       });
       return updated;
     });
@@ -227,29 +305,35 @@ export const offersService = {
 
   async expire(id: string, input: OfferActionWalletInput) {
     const offer = await this.getById(id);
-    const receipt = requireConfirmedReceipt(input);
     ensureCancelable(offer.status);
+    const verified = await verificationService.verifyAction({
+      action: 'expire_offer',
+      txHash: input?.txHash ?? '',
+      expectedContractId: env.marketplaceContractId,
+      expectedOfferId: contractOfferRef(offer),
+      expectedAmount: offer.loanAmount
+    });
+    if (verified.alreadyProcessed) return this.getById(id);
 
     return prisma.$transaction(async (tx) => {
       const updated = await tx.loanOffer.update({
         where: { id },
         data: {
           status: 'Expired',
-          txHash: receipt.txHash,
-          explorerUrl: receipt.explorerUrl,
-          ledger: receipt.ledger,
-          blockTimestamp: receipt.blockTimestamp
+          txHash: verified.transaction.txHash,
+          explorerUrl: verified.explorerUrl,
+          ledger: verified.transaction.ledger,
+          blockTimestamp: verified.transaction.confirmedAt
         },
         include: { loans: true }
       });
-      await tx.transaction.create({
-        data: createLedgerTransaction('EXPIRE_OFFER', updated.lenderWallet, {
+      await markVerifiedEventProcessed(tx, verified);
+      await upsertLedgerTransaction(tx, 'EXPIRE_OFFER', updated.lenderWallet, {
           offerId: updated.id,
           asset: updated.loanAsset,
           amount: updated.loanAmount,
-          receipt,
+          receipt: verified,
           details: `Expired offer ${updated.id}; locked lender funds are released by Vault/Escrow.`
-        })
       });
       return updated;
     });
@@ -257,21 +341,38 @@ export const offersService = {
 
   async accept(id: string, input: AcceptOfferInput) {
     const offer = await this.getById(id);
-    const receipt = requireConfirmedReceipt(input);
     if (offer.status !== 'Active') {
       throw new ApiError(400, 'Borrowers can only accept Active offers');
     }
-    if (input.borrowerWallet === offer.lenderWallet) {
+    const verified = await verificationService.verifyAction({
+      action: 'accept_offer',
+      txHash: input.txHash,
+      expectedContractId: env.marketplaceContractId,
+      expectedOfferId: contractOfferRef(offer)
+    });
+    if (verified.alreadyProcessed) {
+      const existing = await prisma.loan.findFirst({
+        where: { offerId: id },
+        include: { offer: true }
+      });
+      if (existing) return existing;
+      throw new ApiError(409, 'Accept offer transaction was already processed but no indexed loan exists yet');
+    }
+    const contractLoanId = requireVerifiedId(verified.loanId, 'contractLoanId');
+    const onChainLoan = await contractReaderService.readLoan(contractLoanId, verified.actor ?? offer.lenderWallet);
+    const borrowerWallet = onChainLoan.borrower || verified.actor;
+    if (!borrowerWallet) {
+      throw new ApiError(400, 'Borrower wallet was not found in verified chain state');
+    }
+    if (borrowerWallet === offer.lenderWallet) {
       throw new ApiError(400, 'Borrower cannot accept their own offer');
     }
-    const collateralAmount = decimal(input.collateralAmount);
+    const collateralAmount = decimal(onChainLoan.collateralAmount);
     if (collateralAmount.lte(0)) {
       throw new ApiError(400, 'collateralAmount must be greater than zero');
     }
 
-    const outstandingDebt = decimal(
-      calculateRepaymentAmount(offer.loanAmount, offer.fixedAprBps / 100, offer.durationDays)
-    ).toDecimalPlaces(7);
+    const outstandingDebt = decimal(onChainLoan.outstandingDebt || calculateRepaymentAmount(offer.loanAmount, offer.fixedAprBps / 100, offer.durationDays)).toDecimalPlaces(7);
     const riskPatch = await buildRiskPatch({
       collateralAsset: offer.collateralAsset,
       loanAsset: offer.loanAsset,
@@ -284,11 +385,11 @@ export const offersService = {
     return prisma.$transaction(async (tx) => {
       const loan = await tx.loan.create({
         data: {
-          contractLoanId: input.contractLoanId,
+          contractLoanId: BigInt(contractLoanId),
           offerId: offer.id,
           contractOfferId: offer.contractOfferId,
           lenderWallet: offer.lenderWallet,
-          borrowerWallet: input.borrowerWallet,
+          borrowerWallet,
           loanAsset: offer.loanAsset,
           principal: offer.loanAmount,
           outstandingDebt,
@@ -301,10 +402,10 @@ export const offersService = {
           minHealthFactorBps: offer.minHealthFactorBps,
           gracePeriodDays: offer.gracePeriodDays,
           status: 'PendingCollateral',
-          txHash: receipt.txHash,
-          explorerUrl: receipt.explorerUrl,
-          ledger: receipt.ledger,
-          blockTimestamp: receipt.blockTimestamp,
+          txHash: verified.transaction.txHash,
+          explorerUrl: verified.explorerUrl,
+          ledger: verified.transaction.ledger,
+          blockTimestamp: verified.transaction.confirmedAt,
           ...riskMetrics
         },
         include: { offer: true }
@@ -314,27 +415,26 @@ export const offersService = {
         where: { id: offer.id },
         data: {
           status: 'Matched',
-          txHash: receipt.txHash,
-          explorerUrl: receipt.explorerUrl,
-          ledger: receipt.ledger,
-          blockTimestamp: receipt.blockTimestamp
+          txHash: verified.transaction.txHash,
+          explorerUrl: verified.explorerUrl,
+          ledger: verified.transaction.ledger,
+          blockTimestamp: verified.transaction.confirmedAt
         }
       });
 
-      await tx.transaction.create({
-        data: createLedgerTransaction('ACCEPT_OFFER', input.borrowerWallet, {
+      await markVerifiedEventProcessed(tx, verified);
+      await upsertLedgerTransaction(tx, 'ACCEPT_OFFER', borrowerWallet, {
           offerId: offer.id,
           loanId: loan.id,
           asset: offer.collateralAsset,
           amount: collateralAmount,
-          receipt,
+          receipt: verified,
           details: `Accepted offer ${offer.id}; loan ${loan.id} is PendingCollateral until borrower activates it.`,
           metadata: {
             contractFunction: 'accept_offer',
             contractOfferId: contractOfferRef(offer),
             contractLoanId: loan.contractLoanId?.toString()
           }
-        })
       });
 
       return loan;
@@ -343,10 +443,16 @@ export const offersService = {
 
   async updateStatus(id: string, input: UpdateOfferStatusInput) {
     if (input.status === 'Cancelled') {
-      return this.cancel(id, input);
+      if (!input.txHash) {
+        throw new ApiError(400, 'txHash is required to cancel an offer through blockchain verification');
+      }
+      return this.cancel(id, { ...input, txHash: input.txHash });
     }
     if (input.status === 'Expired') {
-      return this.expire(id, input);
+      if (!input.txHash) {
+        throw new ApiError(400, 'txHash is required to expire an offer through blockchain verification');
+      }
+      return this.expire(id, { ...input, txHash: input.txHash });
     }
 
     throw new ApiError(400, 'Direct offer status writes are disabled; use a confirmed blockchain action endpoint');

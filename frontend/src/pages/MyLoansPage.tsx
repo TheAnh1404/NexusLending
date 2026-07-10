@@ -39,7 +39,7 @@ import {
 const { Title, Paragraph, Text } = Typography;
 
 export const MyLoansPage: React.FC = () => {
-  const { wallet, loans, oraclePrices } = useAppContext();
+  const { wallet, loans, oraclePrices, refreshData } = useAppContext();
   const navigate = useNavigate();
   
   const [search, setSearch] = useState('');
@@ -451,8 +451,13 @@ export const MyLoansPage: React.FC = () => {
               type="text" 
               icon={<RefreshCw size={14} />} 
               style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', fontSize: '12px', color: 'var(--text-muted)', marginLeft: 'auto' }}
-              onClick={() => {
-                message.success('Ledger records updated');
+              onClick={async () => {
+                try {
+                  await refreshData();
+                  message.success('Ledger records updated');
+                } catch (error) {
+                  message.error(error instanceof Error ? error.message : 'Unable to sync ledger records');
+                }
               }}
             >
               Sync Ledger

@@ -55,7 +55,7 @@ export const updateLoanSchema = createLoanSchema.partial().extend({
 }).merge(confirmedChainReceiptSchema.partial());
 
 export const activateLoanSchema = z.object({
-  wallet: z.string().min(1),
+  wallet: z.string().min(1).optional(),
   contractLoanId: z.coerce.bigint().optional()
 }).merge(confirmedChainReceiptSchema);
 

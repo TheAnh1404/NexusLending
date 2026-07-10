@@ -88,6 +88,7 @@ interface LendingContextValue {
   liquidateLoan: (loanId: string, repayAmount: number) => Promise<void>;
   addTransaction: (transaction: Transaction) => void;
   swapTokens: (direction: SwapDirection, receiveAmount: number, maxSendAmount: number) => Promise<boolean>;
+  refreshData: () => Promise<void>;
 }
 
 const disconnectedWallet: WalletState = {
@@ -324,6 +325,32 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const isApiMode = DATA_MODE === 'api';
   const isMockChainMode = isApiMode && CHAIN_MODE === 'mock';
 
+  const refreshLiveWalletBalances = useCallback(async (): Promise<void> => {
+    if (!isApiMode || isMockChainMode) return;
+
+    const currentWallet = walletRef.current;
+    if (!currentWallet.connected || !currentWallet.address) return;
+
+    const balances = await fetchWalletBalances(currentWallet.address, {
+      balanceXLM: currentWallet.balanceXLM,
+      balanceUSDC: currentWallet.balanceUSDC,
+    });
+
+    setSnapshot((prev) => {
+      if (!prev.wallet.connected || prev.wallet.address !== currentWallet.address) return prev;
+      const nextWallet = {
+        ...prev.wallet,
+        balanceXLM: balances.balanceXLM,
+        balanceUSDC: balances.balanceUSDC,
+      };
+      walletRef.current = nextWallet;
+      return {
+        ...prev,
+        wallet: nextWallet,
+      };
+    });
+  }, [isApiMode, isMockChainMode]);
+
   const runSorobanTransaction = useCallback(async (
     send: (onStage: (stage: TxStage) => void) => Promise<TxResult>
   ): Promise<TxResult | null> => {
@@ -347,9 +374,12 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const details = error instanceof Error ? error.message : 'Transaction failed';
       lastSorobanErrorRef.current = details;
       message.error(details);
+      void refreshLiveWalletBalances().catch((balanceError) => {
+        console.error('Unable to refresh wallet balances after failed transaction:', balanceError);
+      });
       return null;
     }
-  }, [message, notification]);
+  }, [message, notification, refreshLiveWalletBalances]);
 
   const runChainTransaction = useCallback(async (
     contractId: string,
@@ -464,6 +494,19 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       transactions: [transaction, ...prev.transactions],
     }));
   }, [isApiMode, message, refreshFromApi]);
+
+  const refreshData = useCallback(async (): Promise<void> => {
+    if (isApiMode) {
+      await refreshFromApi();
+      return;
+    }
+
+    setSnapshot((prev) => ({
+      ...prev,
+      loans: normalizeLoans(prev.loans, prev.oraclePrices),
+      offers: normalizeOffers(prev.offers),
+    }));
+  }, [isApiMode, refreshFromApi]);
 
   const connectWallet = useCallback((address: string, _role?: UserRole) => {
     const isMockSandboxAddress = address === DEFAULT_MOCK_WALLET_ADDRESS;
@@ -1120,18 +1163,27 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       );
       if (!txRes) return;
 
-      await loansApi.action(
-        loanId,
-        isFullRepay ? 'FULL_REPAY' : 'PARTIAL_REPAY',
-        walletAddress,
-        repayAmount,
-        txReceiptFromResult(txRes)
-      );
-      await refreshFromApi();
-      notification.success({
-        message: isFullRepay ? 'Loan fully repaid' : 'Partial repayment complete',
-        description: 'Repayment has been recorded and transferred to the lender wallet.',
-      });
+      try {
+        await loansApi.action(
+          loanId,
+          isFullRepay ? 'FULL_REPAY' : 'PARTIAL_REPAY',
+          walletAddress,
+          repayAmount,
+          txReceiptFromResult(txRes)
+        );
+        await refreshFromApi();
+        notification.success({
+          message: isFullRepay ? 'Loan fully repaid' : 'Partial repayment complete',
+          description: 'Repayment has been recorded and transferred to the lender wallet.',
+        });
+      } catch (error) {
+        await refreshFromApi().catch((refreshError) => {
+          console.error('Unable to refresh after repayment verification error:', refreshError);
+        });
+        const details = error instanceof Error ? error.message : 'Repayment verification failed.';
+        message.error(details);
+        throw error;
+      }
       return;
     }
 
@@ -1487,6 +1539,7 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       liquidateLoan,
       addTransaction: pushTransaction,
       swapTokens,
+      refreshData,
     }),
     [
       acceptOffer,
@@ -1500,6 +1553,7 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       liquidateLoan,
       fundOffer,
       pushTransaction,
+      refreshData,
       recalculateAllHealthFactors,
       repayLoan,
       snapshot,

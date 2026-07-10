@@ -26,9 +26,9 @@ export const optionalDateSchema = z.preprocess((value) => {
 
 export const confirmedChainReceiptSchema = z.object({
   txHash,
-  explorerUrl: stellarExpertUrl,
-  ledger: z.coerce.number().int().positive(),
-  txStatus: z.literal('SUCCESS'),
+  explorerUrl: stellarExpertUrl.optional(),
+  ledger: z.coerce.number().int().positive().optional(),
+  txStatus: z.literal('SUCCESS').optional(),
   contractId: z.string().min(1).optional(),
   blockTimestamp: optionalDateSchema,
   contractReturnValue: z.unknown().optional()

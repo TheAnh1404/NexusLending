@@ -1,8 +1,10 @@
 import { Prisma } from '@prisma/client';
 
+import { env } from '../../config/env';
 import { prisma } from '../../prisma/client';
 import { loansService } from '../loans/loans.service';
-import { createLedgerTransaction, requireConfirmedReceipt } from '../transactions/chainReceipt';
+import { createLedgerTransaction } from '../transactions/chainReceipt';
+import { verificationService } from '../verification';
 import type { UpsertOraclePriceInput } from './oracle.schemas';
 
 export const oracleService = {
@@ -11,7 +13,12 @@ export const oracleService = {
   },
 
   async upsert(input: UpsertOraclePriceInput) {
-    const receipt = requireConfirmedReceipt(input);
+    const verified = await verificationService.verifyAction({
+      action: 'oracle_update',
+      txHash: input.txHash,
+      expectedContractId: env.oracleContractId
+    });
+    const priceValue = verified.amount ?? new Prisma.Decimal(input.price);
 
     return prisma.$transaction(async (tx) => {
       const price = await tx.oraclePrice.upsert({
@@ -19,33 +26,61 @@ export const oracleService = {
         update: {
           baseAsset: input.baseAsset,
           quoteAsset: input.quoteAsset,
-          price: new Prisma.Decimal(input.price),
+          price: priceValue,
           decimals: input.decimals,
           source: input.source,
-          updatedAt: input.updatedAt ?? new Date()
+          updatedAt: verified.transaction.confirmedAt
         },
         create: {
           assetPair: input.assetPair,
           baseAsset: input.baseAsset,
           quoteAsset: input.quoteAsset,
-          price: new Prisma.Decimal(input.price),
+          price: priceValue,
           decimals: input.decimals,
           source: input.source,
-          updatedAt: input.updatedAt ?? new Date()
+          updatedAt: verified.transaction.confirmedAt
         }
       });
 
-      await tx.transaction.create({
-        data: createLedgerTransaction('UPDATE_ORACLE', input.wallet, {
+      await tx.indexedEvent.upsert({
+        where: {
+          txHash_eventIndex: {
+            txHash: verified.event.txHash,
+            eventIndex: verified.event.eventIndex
+          }
+        },
+        create: {
+          txHash: verified.event.txHash,
+          eventIndex: verified.event.eventIndex,
+          ledger: verified.event.ledger,
+          contractId: verified.event.contractId,
+          eventName: verified.event.eventName,
+          actor: verified.event.actor,
+          entityType: verified.event.entityType,
+          entityId: verified.event.entityId,
+          amount: verified.event.amount,
+          asset: verified.event.asset,
+          network: verified.event.network,
+          explorerUrl: verified.event.explorerUrl,
+          payload: verified.event.payload
+        },
+        update: { processedAt: new Date() }
+      });
+
+      const transaction = createLedgerTransaction('UPDATE_ORACLE', input.wallet, {
           asset: input.baseAsset ?? input.assetPair,
-          amount: new Prisma.Decimal(input.price),
-          receipt,
-          details: `Updated ${input.assetPair} oracle price to ${input.price}.`,
+          amount: priceValue,
+          receipt: verified,
+          details: `Updated ${input.assetPair} oracle price to ${priceValue.toString()}.`,
           metadata: {
             contractFunction: input.baseAsset && input.quoteAsset ? 'set_price_for_assets' : 'set_price',
             assetPair: input.assetPair
           }
-        })
+      });
+      await tx.transaction.upsert({
+        where: { txHash: transaction.txHash },
+        create: transaction,
+        update: transaction
       });
 
       return price;

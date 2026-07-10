@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 
 import { prisma } from '../../prisma/client';
+import { explorerService, transactionVerifierService } from '../verification';
 import type { CreateTransactionInput } from './transactions.schemas';
 
 interface TransactionListQuery {
@@ -70,12 +71,21 @@ export const transactionsService = {
   },
 
   async create(input: CreateTransactionInput) {
+    const verified = await transactionVerifierService.verifyTransaction(input.txHash);
     const data: Prisma.TransactionUncheckedCreateInput = {
       ...input,
+      explorerUrl: explorerService.getTransactionUrl(input.txHash),
+      ledger: verified.ledger,
+      network: verified.network,
+      confirmedAt: verified.confirmedAt,
+      blockTimestamp: input.blockTimestamp ?? verified.confirmedAt,
       amount: input.amount ? new Prisma.Decimal(input.amount) : undefined,
-      blockTimestamp: input.blockTimestamp,
       metadata: input.metadata as Prisma.InputJsonValue | undefined
     };
-    return prisma.transaction.create({ data });
+    return prisma.transaction.upsert({
+      where: { txHash: input.txHash },
+      create: data,
+      update: data
+    });
   }
 };

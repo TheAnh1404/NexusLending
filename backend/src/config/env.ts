@@ -14,6 +14,7 @@ export const env = {
   frontendUrl: process.env.FRONTEND_URL ?? 'http://localhost:5173',
   stellarNetwork: process.env.STELLAR_NETWORK ?? 'testnet',
   stellarRpcUrl: process.env.STELLAR_RPC_URL ?? '',
+  stellarReadSourceAccount: process.env.STELLAR_READ_SOURCE_ACCOUNT ?? '',
   marketplaceContractId: process.env.MARKETPLACE_CONTRACT_ID ?? '',
   loanManagerContractId: process.env.LOAN_MANAGER_CONTRACT_ID ?? '',
   oracleContractId: process.env.ORACLE_CONTRACT_ID ?? '',

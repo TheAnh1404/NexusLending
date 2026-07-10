@@ -1,171 +1,233 @@
-import { rpc, scValToNative } from '@stellar/stellar-sdk';
+import { rpc } from '@stellar/stellar-sdk';
+import { Prisma } from '@prisma/client';
+
 import { env } from '../../config/env';
+import { prisma } from '../../prisma/client';
+import { explorerService } from '../verification';
+import { TransactionVerifierService } from '../verification/transaction-verifier.service';
+import type { RpcTransaction } from '../verification/verification.types';
+import { eventSyncService, EventSyncService } from './event-sync.service';
+
+interface RpcClient {
+  getLatestLedger(): Promise<{ sequence: number }>;
+  getEvents(input: unknown): Promise<{ events?: unknown[] }>;
+}
+
+export interface IndexerStatus {
+  network: string;
+  status: string;
+  rpcStatus: string;
+  currentLedger: number;
+  lastLedger: number;
+  pendingEvents: number;
+  processedEvents: number;
+  failedEvents: number;
+  lastError?: string | null;
+}
 
 export class IndexerService {
-  private rpcServer: rpc.Server;
-  private isRunning: boolean = false;
-  private pollIntervalMs: number = 10000; // Poll every 10 seconds
-  private lastIndexedLedger: number = 0;
+  private isRunning = false;
+  private readonly pollIntervalMs: number;
+  private readonly rpcClient: RpcClient;
+  private readonly parser: TransactionVerifierService;
 
-  constructor() {
-    this.rpcServer = new rpc.Server(env.stellarRpcUrl || 'https://soroban-testnet.stellar.org');
+  constructor(
+    rpcClient?: RpcClient,
+    private readonly sync: EventSyncService = eventSyncService,
+    pollIntervalMs = 10_000
+  ) {
+    this.rpcClient = rpcClient ?? new rpc.Server(env.stellarRpcUrl || 'https://soroban-testnet.stellar.org:443') as unknown as RpcClient;
+    this.parser = new TransactionVerifierService(this.rpcClient as never, explorerService, env.stellarNetwork);
+    this.pollIntervalMs = pollIntervalMs;
   }
 
-  /**
-   * Start the indexer background polling loop
-   */
-  public start() {
-    if (this.isRunning) {
-      console.warn('Indexer Service is already running');
-      return;
-    }
-
+  start(): void {
+    if (this.isRunning) return;
     this.isRunning = true;
-    console.log('Starting Soroban Event Indexer Service...');
-    this.pollLoop();
+    void this.updateCheckpoint({ status: 'running', rpcStatus: 'starting' }).catch((error) => {
+      console.error('Failed to initialize indexer checkpoint', error);
+    });
+    void this.pollLoop();
   }
 
-  /**
-   * Stop the indexer loop
-   */
-  public stop() {
+  stop(): void {
     this.isRunning = false;
-    console.log('Stopping Soroban Event Indexer Service...');
+    void this.updateCheckpoint({ status: 'stopped' }).catch((error) => {
+      console.error('Failed to stop indexer checkpoint', error);
+    });
   }
 
-  private async pollLoop() {
+  async getStatus(): Promise<IndexerStatus> {
+    const checkpoint = await this.getCheckpoint();
+    return {
+      network: checkpoint.network,
+      status: checkpoint.status,
+      rpcStatus: checkpoint.rpcStatus,
+      currentLedger: checkpoint.currentLedger,
+      lastLedger: checkpoint.lastLedger,
+      pendingEvents: checkpoint.pendingEvents,
+      processedEvents: checkpoint.processedEvents,
+      failedEvents: checkpoint.failedEvents,
+      lastError: checkpoint.lastError,
+    };
+  }
+
+  private async pollLoop(): Promise<void> {
     while (this.isRunning) {
       try {
-        await this.pollEvents();
+        await this.pollOnce();
       } catch (error) {
-        console.error('Error polling Soroban events:', error);
+        await this.updateCheckpoint({
+          rpcStatus: 'error',
+          status: 'running',
+          lastError: error instanceof Error ? error.message : 'Unknown indexer error',
+        });
       }
       await new Promise((resolve) => setTimeout(resolve, this.pollIntervalMs));
     }
   }
 
-  private async pollEvents() {
-    // 1. Fetch current ledger count
-    const latestLedgerRes = await this.rpcServer.getLatestLedger();
-    const latestLedger = latestLedgerRes.sequence;
+  async pollOnce(): Promise<void> {
+    const checkpoint = await this.getCheckpoint();
+    const latestLedger = (await this.rpcClient.getLatestLedger()).sequence;
+    const startLedger = checkpoint.lastLedger > 0
+      ? checkpoint.lastLedger + 1
+      : Math.max(1, latestLedger - 100);
 
-    if (this.lastIndexedLedger === 0) {
-      this.lastIndexedLedger = latestLedger - 100; // Start index 100 ledgers back
-    }
-
-    if (this.lastIndexedLedger >= latestLedger) {
+    if (startLedger > latestLedger) {
+      await this.updateCheckpoint({
+        currentLedger: latestLedger,
+        rpcStatus: 'ok',
+        pendingEvents: 0,
+      });
       return;
     }
 
-    console.log(`Polling Soroban events from ledger ${this.lastIndexedLedger} to ${latestLedger}...`);
-
-    // 2. Query events filter by our contract IDs
     const contractIds = [
       env.marketplaceContractId,
       env.loanManagerContractId,
       env.oracleContractId,
-      env.vaultContractId
+      env.vaultContractId,
     ].filter(Boolean);
 
-    if (contractIds.length === 0) {
-      this.lastIndexedLedger = latestLedger;
-      return;
-    }
-
-    const eventsResponse = await this.rpcServer.getEvents({
-      startLedger: this.lastIndexedLedger,
-      filters: [
-        {
-          type: 'contract',
-          contractIds,
-        },
-      ],
+    const response = await this.rpcClient.getEvents({
+      startLedger,
+      filters: [{ type: 'contract', contractIds }],
       limit: 100,
-    });
+    }) as { events?: unknown[] };
 
-    // 3. Process events
-    for (const event of eventsResponse.events) {
+    const rawEvents = response.events ?? [];
+    let processedEvents = 0;
+    let failedEvents = 0;
+
+    for (let index = 0; index < rawEvents.length; index += 1) {
+      const raw = rawEvents[index] as Record<string, unknown>;
+      const ledger = Number(raw.ledger ?? raw.ledgerSequence ?? latestLedger);
+      const txHash = String(raw.txHash ?? raw.transactionHash ?? '');
+      if (!txHash) continue;
+
+      const transaction: RpcTransaction = {
+        txHash,
+        ledger,
+        status: 'SUCCESS',
+        network: env.stellarNetwork === 'mainnet' || env.stellarNetwork === 'public' ? 'mainnet' : 'testnet',
+        confirmedAt: new Date(),
+        raw,
+      };
+
+      const event = this.parser.normalizeEvent(raw, transaction, index);
+      if (!event) continue;
+
       try {
-        await this.processEvent(event);
-      } catch (err) {
-        console.error(`Failed to process event ${event.id}:`, err);
+        const result = await this.sync.sync(event);
+        if (result === 'processed') processedEvents += 1;
+      } catch (error) {
+        failedEvents += 1;
+        await this.updateCheckpoint({
+          lastError: error instanceof Error ? error.message : 'Failed to process indexed event',
+        });
       }
     }
 
-    this.lastIndexedLedger = latestLedger + 1;
+    await this.updateCheckpoint({
+      status: 'running',
+      rpcStatus: 'ok',
+      currentLedger: latestLedger,
+      lastLedger: latestLedger,
+      pendingEvents: 0,
+      processedEvents: { increment: processedEvents },
+      failedEvents: { increment: failedEvents },
+      ...(failedEvents === 0 ? { lastError: null } : {}),
+    });
   }
 
-  private async processEvent(event: rpc.Api.EventResponse) {
-    const topics = event.topic;
-    if (topics.length === 0) return;
+  private async getCheckpoint() {
+    const checkpoint = await prisma.indexerCheckpoint.findUnique({
+      where: { network: env.stellarNetwork },
+    });
+    if (checkpoint) return checkpoint;
 
-    // Convert topics[0] to string (the event name/type)
-    const eventName = scValToNative(topics[0]);
-    console.log(`Discovered event: ${eventName} on contract ${event.contractId} (Tx: ${event.txHash})`);
-
-    // Implement parser based on topic symbol types:
-    // e.g. "offer_created", "offer_funded", "offer_activated", "offer_accepted", "loan_activated", "collateral_added"
-    switch (eventName) {
-      case 'offer_created':
-        await this.handleOfferCreated(event);
-        break;
-      case 'offer_funded':
-        await this.handleOfferFunded(event);
-        break;
-      case 'offer_activated':
-        await this.handleOfferActivated(event);
-        break;
-      case 'offer_accepted':
-        await this.handleOfferAccepted(event);
-        break;
-      case 'loan_activated':
-        await this.handleLoanActivated(event);
-        break;
-      case 'collateral_added':
-        await this.handleCollateralAdded(event);
-        break;
-      case 'loan_repaid':
-        await this.handleLoanRepaid(event);
-        break;
-      case 'loan_liquidated':
-        await this.handleLoanLiquidated(event);
-        break;
-      default:
-        console.log(`Unhandling or unneeded event type: ${eventName}`);
+    try {
+      return await prisma.indexerCheckpoint.create({
+        data: {
+          network: env.stellarNetwork,
+          status: this.isRunning ? 'running' : 'stopped',
+        },
+      });
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        const existing = await prisma.indexerCheckpoint.findUnique({
+          where: { network: env.stellarNetwork },
+        });
+        if (existing) return existing;
+      }
+      throw error;
     }
   }
 
-  private async handleOfferCreated(event: rpc.Api.EventResponse) {
-    // Sync offer to postgres if not already present
-  }
-
-  private async handleOfferFunded(event: rpc.Api.EventResponse) {
-    // Mark status = 'Funding'
-  }
-
-  private async handleOfferActivated(event: rpc.Api.EventResponse) {
-    // Mark status = 'Active'
-  }
-
-  private async handleOfferAccepted(event: rpc.Api.EventResponse) {
-    // Create new Loan record matched from offer
-  }
-
-  private async handleLoanActivated(event: rpc.Api.EventResponse) {
-    // Mark Loan as active
-  }
-
-  private async handleCollateralAdded(event: rpc.Api.EventResponse) {
-    // Increment collateral and recalculate health
-  }
-
-  private async handleLoanRepaid(event: rpc.Api.EventResponse) {
-    // Record payment details
-  }
-
-  private async handleLoanLiquidated(event: rpc.Api.EventResponse) {
-    // Update loan to liquidated state
+  private async updateCheckpoint(data: Prisma.IndexerCheckpointUpdateInput): Promise<void> {
+    await prisma.indexerCheckpoint.upsert({
+      where: { network: env.stellarNetwork },
+      create: createCheckpointData(data, this.isRunning),
+      update: data,
+    });
   }
 }
 
 export const indexerService = new IndexerService();
+
+function isUniqueConstraintError(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && (error as { code?: string }).code === 'P2002';
+}
+
+function createCheckpointData(
+  data: Prisma.IndexerCheckpointUpdateInput,
+  isRunning: boolean
+): Prisma.IndexerCheckpointCreateInput {
+  return {
+    network: env.stellarNetwork,
+    status: stringValue(data.status) ?? (isRunning ? 'running' : 'stopped'),
+    rpcStatus: stringValue(data.rpcStatus) ?? 'unknown',
+    lastLedger: numberValue(data.lastLedger) ?? 0,
+    currentLedger: numberValue(data.currentLedger) ?? 0,
+    pendingEvents: numberValue(data.pendingEvents) ?? 0,
+    processedEvents: numberValue(data.processedEvents) ?? 0,
+    failedEvents: numberValue(data.failedEvents) ?? 0,
+    lastError: nullableStringValue(data.lastError),
+  };
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
+function numberValue(value: unknown): number | undefined {
+  return typeof value === 'number' ? value : undefined;
+}
+
+function nullableStringValue(value: unknown): string | null | undefined {
+  return value === null || typeof value === 'string' ? value : undefined;
+}

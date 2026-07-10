@@ -31,18 +31,18 @@ export const createOfferSchema = z.object({
 
 export const updateOfferStatusSchema = z.object({
   status: z.enum(['Draft', 'Funding', 'Active', 'Matched', 'Cancelled', 'Expired']),
-  wallet: z.string().min(1)
-}).merge(confirmedChainReceiptSchema);
+  wallet: z.string().min(1).optional()
+}).merge(confirmedChainReceiptSchema.partial());
 
 export const offerActionWalletSchema = z.object({
-  wallet: z.string().min(1),
+  wallet: z.string().min(1).optional(),
   contractOfferId: z.coerce.bigint().optional()
 }).merge(confirmedChainReceiptSchema);
 
 export const acceptOfferSchema = z.object({
-  borrowerWallet: z.string().min(1),
-  collateralAmount: decimalInput,
-  contractLoanId: z.coerce.bigint()
+  borrowerWallet: z.string().min(1).optional(),
+  collateralAmount: decimalInput.optional(),
+  contractLoanId: z.coerce.bigint().optional()
 }).merge(confirmedChainReceiptSchema);
 
 

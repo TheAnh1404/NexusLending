@@ -1,6 +1,8 @@
 import { Prisma, TransactionType } from '@prisma/client';
 
 import { ApiError } from '../../utils/apiError';
+import { explorerService } from '../verification/explorer.service';
+import type { LedgerTransactionInput, VerifiedTransaction } from '../verification/verification.types';
 
 export interface ConfirmedChainReceiptInput {
   txHash?: string;
@@ -23,23 +25,28 @@ export interface ConfirmedChainReceipt {
   contractReturnValue?: unknown;
 }
 
-interface LedgerTransactionInput {
-  offerId?: string | null;
-  loanId?: string;
-  asset?: string;
-  amount?: Prisma.Decimal.Value;
-  details: string;
-  receipt: ConfirmedChainReceiptInput;
-  metadata?: Prisma.InputJsonValue;
-}
-
 const TX_HASH_PATTERN = /^[a-fA-F0-9]{64}$/;
 
 const decimal = (value: Prisma.Decimal.Value): Prisma.Decimal => new Prisma.Decimal(value);
 
+const isVerifiedTransaction = (
+  receipt: ConfirmedChainReceiptInput | VerifiedTransaction
+): receipt is VerifiedTransaction => 'transaction' in receipt && 'event' in receipt;
+
 export const requireConfirmedReceipt = (
-  input: ConfirmedChainReceiptInput | undefined
+  input: ConfirmedChainReceiptInput | VerifiedTransaction | undefined
 ): ConfirmedChainReceipt => {
+  if (input && isVerifiedTransaction(input)) {
+    return {
+      txHash: input.transaction.txHash,
+      explorerUrl: explorerService.getTransactionUrl(input.transaction.txHash),
+      ledger: input.transaction.ledger,
+      status: input.transaction.status,
+      contractId: input.contractId,
+      blockTimestamp: input.transaction.confirmedAt,
+    };
+  }
+
   if (!input?.txHash) {
     throw new ApiError(400, 'txHash is required after confirmed Soroban transaction');
   }
@@ -65,7 +72,7 @@ export const requireConfirmedReceipt = (
 
   return {
     txHash: input.txHash,
-    explorerUrl: input.explorerUrl,
+    explorerUrl: explorerService.getTransactionUrl(input.txHash),
     ledger: input.ledger,
     status: 'SUCCESS',
     contractId: input.contractId,
@@ -80,22 +87,37 @@ export const createLedgerTransaction = (
   input: LedgerTransactionInput
 ): Prisma.TransactionUncheckedCreateInput => {
   const receipt = requireConfirmedReceipt(input.receipt);
+  const verified = isVerifiedTransaction(input.receipt) ? input.receipt : undefined;
+  const event = verified?.event;
+  const actor = input.actor ?? verified?.actor;
+  const entityType = input.entityType ?? verified?.entityType;
+  const entityId = input.entityId ?? verified?.entityId;
+  const eventName = input.eventName ?? verified?.eventName;
+  const network = input.network ?? verified?.transaction.network;
 
   return {
     txHash: receipt.txHash,
     explorerUrl: receipt.explorerUrl,
     contract: receipt.contractId,
+    contractId: receipt.contractId,
     ledger: receipt.ledger,
     type,
-    wallet,
+    wallet: actor ?? wallet,
     offerId: input.offerId ?? undefined,
     loanId: input.loanId,
     asset: input.asset,
     amount: input.amount === undefined ? undefined : decimal(input.amount),
     status: receipt.status,
+    eventName,
+    actor,
+    entityType,
+    entityId,
+    network,
+    confirmedAt: receipt.blockTimestamp,
     blockTimestamp: receipt.blockTimestamp,
     metadata: {
       details: input.details,
+      eventIndex: event?.eventIndex,
       ...(receipt.contractReturnValue === undefined
         ? {}
         : { contractReturnValue: receipt.contractReturnValue as Prisma.InputJsonValue }),
