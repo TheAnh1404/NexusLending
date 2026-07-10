@@ -923,25 +923,18 @@ The following contracts are currently deployed on **Stellar Testnet**:
 
 ## 15. Protocol Roadmap
 
-### Completed Features (Phase 1)
-- [x] Implement Cargo workspace containing 4 core Rust smart contracts (`marketplace`, `loan-manager`, `vault`, `oracle`).
-- [x] Configure standard mathematical models for simple interest and basis point calculations.
-- [x] Build automated test suites verifying contract storage, deposits, loans, repayments, and liquidations.
-- [x] Build Express REST API server providing query endpoints for offers, loans, transactions, and users.
-- [x] Integrate Prisma ORM with PostgreSQL database configuration.
-- [x] Implement the `IndexerService` to query on-chain RPC logs.
-- [x] Refactor backend endpoints to validate verified Freighter transaction hashes prior to DB writes.
-- [x] Design React frontend dashboard using Ant Design and custom CSS variables.
-- [x] Implement isolated vault simulator to test health factor responses.
+### 🚀 MVP Scope & Core Features (Completed)
+- [x] **Freighter Wallet Integration:** Connect and authenticate via Freighter extension with live balance queries fetching directly from the Horizon Stellar Testnet API.
+- [x] **Consolidated Borrow Workflow:** Seamlessly accept lending offers and activate the loan on-chain (locking collateral and disbursing principal) in a single-click UI flow.
+- [x] **Smart Contracts Workspace:** Four fully completed and compiled Rust contracts on Stellar Soroban (`marketplace`, `loan-manager`, `vault`, `oracle`) with 39/39 Cargo integration tests passing.
+- [x] **Escrow Isolation:** Zero shared liquidity risk. Each loan utilizes a dedicated, standalone vault escrow on-chain.
+- [x] **Dynamic Risk Management (Health Factor):** Real-time calculation and display of loan health factors based on oracle prices, categorized into Safe (🟢), Warning (🟠), and Liquidation (🔴) zones.
+- [x] **Automatic Expiration & Default Warning:** Overdue loans auto-transition to `Expired` and raise warning banners, followed by transition to `Defaulted` after the 7-day grace period, making them liquidatable.
+- [x] **Liquidation Engine:** Undercollateralized loans (HF < 1.2) and defaulted loans become liquidatable at a 50% close factor with a 5% liquidation bonus.
+- [x] **Stellar Expert Block Explorer:** Embedded deep-links to Stellar Expert explorer for transactions, accounts, and deployed smart contract instances.
+- [x] **Database Caching & Indexing:** PostgreSQL database indexed via a Node.js event polling `IndexerService` to sync on-chain events and expose fast REST APIs.
 
-### In Progress (Phase 2)
-- [/] **Live Wallet Balance Query:** Replace mock balance overrides with actual SDK balance fetches from the connected Freighter key.
-- [/] **Workflow Consolidation:** Merge the two-step accept and activate workflow into a single click sequence in the frontend client.
-- [/] **Dynamic Decimal Resolution:** Adapt backend/frontend oracle queries to dynamically fetch target decimals from contract metadata.
-- [/] **Explorer Integrations:** Add direct links to Stellar Expert for all active positions and transaction logs.
-- [/] **Default & Expiration Banners:** Integrate warning banners on the Borrower Dashboard for overdue loans.
-
-### Future Roadmap (Phase 3)
+### 🔮 Future Roadmap
 - [ ] **Decentralized Oracle Integration:** Connect to Dia or Band Protocol networks for decentralized pricing.
 - [ ] **Shortened Staleness Window:** Decrease the price expiration threshold from 24 hours to 1 hour for volatile tokens.
 - [ ] **Multi-Collateral Support:** Allow borrowers to lock multiple token assets (e.g. XLM, USDC, native assets) within a single isolated vault.
