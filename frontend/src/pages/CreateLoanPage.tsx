@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppContext } from '../app/AppContext';
-import { DEFAULT_GRACE_PERIOD_DAYS, calculateRequiredCollateral } from '../utils/finance';
+import { DEFAULT_GRACE_PERIOD_DAYS, MAX_FIXED_APR_PERCENT, calculateRequiredCollateral } from '../utils/finance';
 import { DATA_MODE } from '../services/api/client';
 import type { LoanOffer } from '../types';
 
@@ -114,6 +114,7 @@ export const CreateLoanPage: React.FC = () => {
   const reqCollateralVal = isUsdcLend
     ? reqCollateralAmount * xlmPrice
     : reqCollateralAmount;
+  const isAprAboveLimit = typeof apr === 'number' && apr > MAX_FIXED_APR_PERCENT;
 
   // Dynamic Risk classification logic
   const getRiskLevel = () => {
@@ -350,7 +351,7 @@ export const CreateLoanPage: React.FC = () => {
             }}
             onValuesChange={(_, all) => {
               setAmount(all.amount);
-              setApr(all.apr);
+              setApr(typeof all.apr === 'number' ? all.apr : undefined);
               setDuration(all.duration);
               setMaxLtv(all.maxLtv);
               setLiquidationThreshold(all.liquidationThreshold);
@@ -406,18 +407,28 @@ export const CreateLoanPage: React.FC = () => {
                         rules={[
                           { required: true, message: 'Required' },
                           { type: 'number', min: 1, message: 'Min 1%' },
+                          { type: 'number', max: MAX_FIXED_APR_PERCENT, message: `Max ${MAX_FIXED_APR_PERCENT}% per year` },
                         ]}
                       >
                         <InputNumber
                           min={1}
-                          max={50}
                           step={0.5}
                           style={{ width: '100%' }}
                           size="large"
+                          status={isAprAboveLimit ? 'warning' : undefined}
                           prefix={<Percent size={14} />}
-                          placeholder="Enter APR"
+                          placeholder={`Enter APR up to ${MAX_FIXED_APR_PERCENT}%`}
                         />
                       </Form.Item>
+                      {isAprAboveLimit && (
+                        <Alert
+                          type="warning"
+                          showIcon
+                          message={`APR exceeds ${MAX_FIXED_APR_PERCENT}% per year`}
+                          description="You cannot create a loan contract with this interest rate."
+                          style={{ marginTop: '-12px', marginBottom: '20px' }}
+                        />
+                      )}
                       
                       {/* APR templates presets */}
                       <div style={{ display: 'flex', gap: '8px', marginTop: '-12px', marginBottom: '20px', flexWrap: 'wrap' }}>
@@ -468,7 +479,7 @@ export const CreateLoanPage: React.FC = () => {
                   </Row>
 
                   <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '20px', borderTop: '1px solid var(--border-light)', paddingTop: '20px' }}>
-                    <Button type="primary" size="large" onClick={nextStep} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Button type="primary" size="large" onClick={nextStep} disabled={isAprAboveLimit} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       Next: Configure Risk <ChevronRight size={16} />
                     </Button>
                   </div>

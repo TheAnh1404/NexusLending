@@ -3,6 +3,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { ConfigProvider, App as AntdApp } from 'antd';
 import { AppProvider } from './app/AppContext';
 import { AppRoutes } from './app/routes';
+import { ScrollToTop } from './components/common/ScrollToTop';
 import { WalletProvider } from './contexts/WalletContext';
 
 const App: React.FC = () => {
@@ -47,6 +48,7 @@ const App: React.FC = () => {
         <AppProvider>
           <WalletProvider>
             <BrowserRouter>
+              <ScrollToTop />
               <AppRoutes />
             </BrowserRouter>
           </WalletProvider>

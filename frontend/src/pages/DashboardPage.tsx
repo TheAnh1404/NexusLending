@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { useAppContext } from '../app/AppContext';
 import { filterWalletActivities } from '../utils/activity';
-import { formatCurrency, isLiquidatable, isOpenLoanStatus } from '../utils/finance';
+import { formatAddress, formatCurrency, isOpenLoanStatus } from '../utils/finance';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import type { DashboardAnalytics, MaturityBucketKey, RiskZone } from '../types';
+import { analyticsApi } from '../services/api/analytics.api';
 import {
   Card,
   Col,
@@ -19,38 +21,76 @@ import {
   FileBadge2,
   TrendingUp,
   ShieldCheck,
-  AlertTriangle,
   Layers,
   Activity,
   Wallet,
   ArrowUpRight,
   ArrowDownLeft,
   ArrowRightLeft,
+  Calendar,
+  ChevronRight,
   PlusCircle,
   Copy,
   Check,
+  Radar,
 } from 'lucide-react';
-import { AreaChart, Area, XAxis, YAxis, Tooltip as ChartTooltip, ResponsiveContainer } from 'recharts';
+import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip as ChartTooltip } from 'recharts';
 import { SwapModal } from '../components/common/SwapModal';
 
 const { Title, Paragraph, Text } = Typography;
 
-// Mock historical data for premium chart
-const mockChartData = [
-  { date: '07-02', TVL: 120000, Borrowed: 45000 },
-  { date: '07-03', TVL: 135000, Borrowed: 52000 },
-  { date: '07-04', TVL: 130000, Borrowed: 58000 },
-  { date: '07-05', TVL: 155000, Borrowed: 61000 },
-  { date: '07-06', TVL: 172000, Borrowed: 68000 },
-  { date: '07-07', TVL: 198000, Borrowed: 74000 },
-  { date: '07-08', TVL: 215000, Borrowed: 82000 },
-];
+const LIVE_REFRESH_INTERVAL_MS = 10_000;
+
+const EMPTY_ANALYTICS_TEXT = 'Chua co du lieu';
+const BACKEND_ERROR_TEXT = 'Khong the tai du lieu backend.';
+
+const riskZoneMeta: Record<RiskZone, { color: string; background: string }> = {
+  SAFE: {
+    color: 'var(--success-color)',
+    background: 'rgba(16, 185, 129, 0.08)',
+  },
+  WARNING: {
+    color: 'var(--warning-color)',
+    background: 'rgba(245, 158, 11, 0.1)',
+  },
+  LIQUIDATION_PLANNING: {
+    color: 'var(--danger-color)',
+    background: 'rgba(239, 68, 68, 0.1)',
+  },
+};
+
+const maturityMeta: Record<MaturityBucketKey, { color: string; background: string }> = {
+  defaulted: {
+    color: 'var(--danger-color)',
+    background: 'rgba(239, 68, 68, 0.1)',
+  },
+  grace: {
+    color: 'var(--warning-color)',
+    background: 'rgba(245, 158, 11, 0.1)',
+  },
+  due_7d: {
+    color: 'var(--secondary-color)',
+    background: 'rgba(6, 182, 212, 0.1)',
+  },
+  due_30d: {
+    color: 'var(--primary-color)',
+    background: 'rgba(79, 70, 229, 0.08)',
+  },
+  later: {
+    color: 'var(--text-muted)',
+    background: 'var(--border-light)',
+  },
+};
 
 export const DashboardPage: React.FC = () => {
-  const { loans, loanOffers, oraclePrices, activities, wallet } = useAppContext();
+  const { loans, loanOffers, oraclePrices, activities, wallet, refreshData } = useAppContext();
   const navigate = useNavigate();
   const [copied, setCopied] = useState(false);
   const [swapModalOpen, setSwapModalOpen] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
+  const [remoteAnalytics, setRemoteAnalytics] = useState<DashboardAnalytics | null>(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [analyticsError, setAnalyticsError] = useState<string | null>(null);
 
   const xlmPrice = oraclePrices.find((p) => p.asset === 'XLM')?.price || 0.125;
   const walletActivities = React.useMemo(
@@ -86,9 +126,7 @@ export const DashboardPage: React.FC = () => {
   // 2. Protocol Health Calculations (Global)
   const openLoansList = loans.filter((l) => isOpenLoanStatus(l.status));
   const activeLoansList = openLoansList.filter((l) => l.status !== 'PendingCollateral');
-  const activeOffers = loanOffers.filter((offer) => offer.status === 'Active');
   const fundedOffers = loanOffers.filter((offer) => ['Funding', 'Active'].includes(offer.status ?? 'Draft'));
-  const activeLoansCount = activeLoansList.length;
 
   const totalBorrowedVal = activeLoansList.reduce((sum, l) => sum + l.amount, 0);
   const totalCollateralLockedXLM = activeLoansList.reduce((sum, l) => sum + l.collateralAmount, 0);
@@ -97,15 +135,63 @@ export const DashboardPage: React.FC = () => {
   // TVL = Collateral locked + USDC funds remaining in offers
   const totalOffersVal = fundedOffers.reduce((sum, o) => sum + o.amount, 0);
   const tvl = totalCollateralLockedVal + totalOffersVal;
+  const dashboardAnalytics = remoteAnalytics;
+  const hasBackendAnalyticsData = dashboardAnalytics?.hasData === true;
+  const riskChartData = hasBackendAnalyticsData
+    ? dashboardAnalytics.riskExposure.buckets.filter((bucket) => bucket.loanCount > 0 || bucket.debtAmount > 0)
+    : [];
+  const maturityItems = hasBackendAnalyticsData
+    ? dashboardAnalytics.repaymentCalendar.items.slice(0, 5)
+    : [];
+  const dashboardSyncedAt = dashboardAnalytics ? new Date(dashboardAnalytics.generatedAt) : null;
+  const dashboardSyncLabel = dashboardSyncedAt && !Number.isNaN(dashboardSyncedAt.getTime())
+    ? dashboardSyncedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    : '';
 
-  // Average Health Factor
-  const avgHF =
-    activeLoansCount > 0
-      ? activeLoansList.reduce((sum, l) => sum + l.healthFactor, 0) / activeLoansCount
-      : 99.99;
+  const loadBackendAnalytics = React.useCallback(async (): Promise<boolean> => {
+    setAnalyticsLoading(true);
+    try {
+      const analytics = await analyticsApi.dashboard();
+      setRemoteAnalytics(analytics);
+      setAnalyticsError(null);
+      return true;
+    } catch (error) {
+      setRemoteAnalytics(null);
+      setAnalyticsError(error instanceof Error ? error.message : 'Unable to load backend analytics.');
+      return false;
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  }, []);
 
-  // Liquidatable Loans
-  const liquidatableCount = activeLoansList.filter((l) => isLiquidatable(l.healthFactor, l.status)).length;
+  React.useEffect(() => {
+    let active = true;
+
+    const syncLiveData = async () => {
+      void refreshData().catch((error) => {
+        console.error('Unable to refresh dashboard context data:', error);
+      });
+
+      try {
+        const analyticsLoaded = await loadBackendAnalytics();
+        if (active) {
+          setLastSyncedAt(analyticsLoaded ? new Date() : null);
+        }
+      } catch (error) {
+        console.error('Unable to refresh backend analytics:', error);
+      }
+    };
+
+    void syncLiveData();
+    const intervalId = window.setInterval(() => {
+      void syncLiveData();
+    }, LIVE_REFRESH_INTERVAL_MS);
+
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+    };
+  }, [loadBackendAnalytics, refreshData]);
 
   // Render health factor score with colors
   const renderHF = (hf: number) => {
@@ -323,88 +409,283 @@ export const DashboardPage: React.FC = () => {
         </Col>
       </Row>
 
-      {/* 3. Analytics Chart & Protocol Health Overview */}
+      {/* 3. Risk Radar & Repayment Calendar */}
       <Row gutter={[24, 24]}>
         <Col xs={24} lg={16}>
           <Card
             title={
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '15px', fontWeight: 700 }}>Liquidity & Debt Velocity</span>
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Historical Testnet Activity</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '15px', fontWeight: 700 }}>
+                  <Radar size={18} style={{ color: 'var(--primary-color)' }} />
+                  Risk Exposure Radar
+                </span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', color: 'var(--text-muted)' }}>
+                  <Activity size={12} className="animate-pulse" style={{ color: 'var(--success-color)' }} />
+                  Backend analytics
+                  {lastSyncedAt ? ` - synced ${lastSyncedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}` : ''}
+                </span>
               </div>
             }
             style={{ border: '1px solid var(--border-color)', borderRadius: '12px', boxShadow: 'var(--shadow-sm)' }}
-            styles={{ body: { padding: '16px 20px 24px 20px' } }}
+            styles={{ body: { padding: '18px 20px 20px 20px' } }}
           >
-            <div style={{ width: '100%', height: '240px' }}>
-              <ResponsiveContainer>
-                <AreaChart data={mockChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="colorTVL" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="var(--primary-color)" stopOpacity={0.2}/>
-                      <stop offset="95%" stopColor="var(--primary-color)" stopOpacity={0}/>
-                    </linearGradient>
-                    <linearGradient id="colorBorrowed" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="var(--secondary-color)" stopOpacity={0.2}/>
-                      <stop offset="95%" stopColor="var(--secondary-color)" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <XAxis dataKey="date" stroke="#94a3b8" fontSize={11} tickLine={false} />
-                  <YAxis stroke="#94a3b8" fontSize={11} tickLine={false} />
-                  <ChartTooltip 
-                    contentStyle={{ backgroundColor: 'var(--surface-color)', border: '1px solid var(--border-color)', borderRadius: '8px' }}
-                    labelStyle={{ fontWeight: 700 }}
-                  />
-                  <Area type="monotone" dataKey="TVL" stroke="var(--primary-color)" strokeWidth={2} fillOpacity={1} fill="url(#colorTVL)" name="TVL" />
-                  <Area type="monotone" dataKey="Borrowed" stroke="var(--secondary-color)" strokeWidth={2} fillOpacity={1} fill="url(#colorBorrowed)" name="Borrowed" />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
+            <Row gutter={[18, 18]} align="middle">
+              <Col xs={24} md={9}>
+                <div style={{ height: '210px', position: 'relative' }}>
+                  {riskChartData.length > 0 ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={riskChartData}
+                          dataKey="debtAmount"
+                          nameKey="label"
+                          innerRadius={62}
+                          outerRadius={86}
+                          paddingAngle={3}
+                          stroke="var(--surface-color)"
+                          strokeWidth={3}
+                        >
+                          {riskChartData.map((bucket) => (
+                            <Cell key={bucket.riskZone} fill={riskZoneMeta[bucket.riskZone].color} />
+                          ))}
+                        </Pie>
+                        <ChartTooltip
+                          contentStyle={{ backgroundColor: 'var(--surface-color)', border: '1px solid var(--border-color)', borderRadius: '8px' }}
+                          formatter={(value, name) => [formatCurrency(Number(value), 'USDC'), name]}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px', color: 'var(--text-muted)' }}>
+                      <Radar size={34} />
+                      <Text type="secondary">{EMPTY_ANALYTICS_TEXT}</Text>
+                    </div>
+                  )}
+                  {riskChartData.length > 0 && (
+                    <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+                      <Text type="secondary" style={{ fontSize: '11px', fontWeight: 600 }}>AT RISK</Text>
+                      <Text strong style={{ fontSize: '18px' }}>{formatCurrency(dashboardAnalytics?.riskExposure.atRiskDebt ?? 0, 'USDC')}</Text>
+                    </div>
+                  )}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '4px' }}>
+                  <div>
+                    <Text type="secondary" style={{ fontSize: '11px', fontWeight: 600 }}>ACTIVE DEBT</Text>
+                    <Text strong style={{ display: 'block', fontSize: '13px' }}>{hasBackendAnalyticsData ? formatCurrency(dashboardAnalytics?.riskExposure.totalDebt ?? 0, 'USDC') : EMPTY_ANALYTICS_TEXT}</Text>
+                  </div>
+                  <div>
+                    <Text type="secondary" style={{ fontSize: '11px', fontWeight: 600 }}>AVG HF</Text>
+                    <Text strong style={{ display: 'block', fontSize: '13px' }}>
+                      {hasBackendAnalyticsData
+                        ? (dashboardAnalytics?.riskExposure.avgHealthFactor ?? 99) >= 99
+                          ? '100% Safe'
+                          : (dashboardAnalytics?.riskExposure.avgHealthFactor ?? 0).toFixed(2)
+                        : EMPTY_ANALYTICS_TEXT}
+                    </Text>
+                  </div>
+                </div>
+              </Col>
+
+              <Col xs={24} md={15}>
+                {dashboardAnalytics && hasBackendAnalyticsData ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {(dashboardAnalytics?.riskExposure.buckets ?? []).map((bucket) => (
+                    <div key={bucket.riskZone}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '12px', marginBottom: '4px' }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ width: '9px', height: '9px', borderRadius: '50%', backgroundColor: riskZoneMeta[bucket.riskZone].color }} />
+                          <Text strong style={{ fontSize: '13px' }}>{bucket.label}</Text>
+                          <Text type="secondary" style={{ fontSize: '12px' }}>{bucket.loanCount} loans</Text>
+                        </span>
+                        <Text strong style={{ fontSize: '13px' }}>{formatCurrency(bucket.debtAmount, 'USDC')}</Text>
+                      </div>
+                      <Progress
+                        percent={Math.min(100, bucket.debtSharePct)}
+                        showInfo={false}
+                        strokeColor={riskZoneMeta[bucket.riskZone].color}
+                        trailColor="var(--border-light)"
+                      />
+                    </div>
+                  ))}
+
+                  <div style={{ borderTop: '1px solid var(--border-light)', paddingTop: '10px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <Text type="secondary" style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                        Highest Risk Positions
+                      </Text>
+                      <Tag color="blue" style={{ margin: 0 }}>
+                        Backend
+                      </Tag>
+                    </div>
+                    {!hasBackendAnalyticsData || dashboardAnalytics?.riskExposure.topRiskLoans.length === 0 ? (
+                      <Text type="secondary" style={{ fontSize: '13px' }}>{EMPTY_ANALYTICS_TEXT}</Text>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {dashboardAnalytics.riskExposure.topRiskLoans.slice(0, 3).map((loan) => (
+                          <button
+                            key={loan.id}
+                            type="button"
+                            onClick={() => navigate(`/app/loans/${loan.id}`)}
+                            style={{
+                              width: '100%',
+                              border: '1px solid var(--border-light)',
+                              background: 'var(--surface-color)',
+                              borderRadius: '8px',
+                              padding: '10px 12px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              gap: '12px',
+                              cursor: 'pointer',
+                              textAlign: 'left',
+                            }}
+                          >
+                            <span style={{ minWidth: 0 }}>
+                              <Text strong style={{ display: 'block', fontSize: '13px' }}>{formatCurrency(loan.outstandingDebt, loan.loanAsset)}</Text>
+                              <Text type="secondary" style={{ display: 'block', fontSize: '11px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                Borrower {formatAddress(loan.borrowerWallet)} - HF {loan.healthFactor.toFixed(2)}
+                              </Text>
+                            </span>
+                            <Tag
+                              style={{ margin: 0, color: riskZoneMeta[loan.riskZone].color, background: riskZoneMeta[loan.riskZone].background, border: 'none', flexShrink: 0 }}
+                            >
+                              {loan.riskZone === 'LIQUIDATION_PLANNING' ? 'Liquidation' : loan.riskZone}
+                            </Tag>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  </div>
+                ) : (
+                  <div style={{ height: '100%', minHeight: '210px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px', color: 'var(--text-muted)' }}>
+                    <Radar size={34} />
+                    <Text type="secondary">{EMPTY_ANALYTICS_TEXT}</Text>
+                    {analyticsError && (
+                      <Text type="secondary" style={{ fontSize: '11px' }}>
+                        {BACKEND_ERROR_TEXT}
+                      </Text>
+                    )}
+                  </div>
+                )}
+              </Col>
+            </Row>
           </Card>
         </Col>
 
         <Col xs={24} lg={8}>
           <Card
             title={
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <ShieldCheck size={18} style={{ color: 'var(--success-color)' }} />
-                <span style={{ fontSize: '15px', fontWeight: 700 }}>Protocol Risk Parameters</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Calendar size={18} style={{ color: 'var(--secondary-color)' }} />
+                  <span style={{ fontSize: '15px', fontWeight: 700 }}>Repayment Calendar</span>
+                </span>
+                {analyticsLoading && <Tag color="processing" style={{ margin: 0 }}>Syncing</Tag>}
               </div>
             }
             style={{ border: '1px solid var(--border-color)', borderRadius: '12px', height: '100%', boxShadow: 'var(--shadow-sm)' }}
+            styles={{ body: { padding: '18px' } }}
           >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Text type="secondary" style={{ fontSize: '13px' }}>Avg Protocol Health Factor</Text>
-                <Text strong style={{ fontSize: '14px' }}>
-                  {avgHF >= 99.0 ? '100% Safe' : avgHF.toFixed(2)}
-                </Text>
-              </div>
-              <Progress percent={avgHF >= 99.0 ? 100 : Math.min(100, (avgHF / 3) * 100)} showInfo={false} strokeColor="var(--success-color)" />
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--border-color)', paddingTop: '12px' }}>
-                <Text type="secondary" style={{ fontSize: '13px' }}>Active Offers Available</Text>
-                <Text strong style={{ fontSize: '14px' }}>{activeOffers.length} Active</Text>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--border-color)', paddingTop: '12px' }}>
-                <Text type="secondary" style={{ fontSize: '13px' }}>Stressed / Liquidation Risk</Text>
-                <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  {liquidatableCount > 0 ? (
-                    <>
-                      <AlertTriangle size={14} style={{ color: 'var(--danger-color)' }} />
-                      <Text strong style={{ color: 'var(--danger-color)' }}>{liquidatableCount} Loans</Text>
-                    </>
-                  ) : (
-                    <Text strong style={{ color: 'var(--success-color)' }}>0 Positions</Text>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              {!hasBackendAnalyticsData ? (
+                <div style={{ padding: '62px 0', textAlign: 'center' }}>
+                  <Calendar size={32} style={{ color: 'var(--text-muted)', marginBottom: '10px' }} />
+                  <Text type="secondary" style={{ display: 'block', fontSize: '13px' }}>{EMPTY_ANALYTICS_TEXT}</Text>
+                  {analyticsError && (
+                    <Text type="secondary" style={{ display: 'block', marginTop: '6px', fontSize: '11px' }}>
+                      {BACKEND_ERROR_TEXT}
+                    </Text>
                   )}
-                </span>
-              </div>
+                </div>
+              ) : (
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                    {(dashboardAnalytics?.repaymentCalendar.buckets ?? []).slice(0, 4).map((bucket) => (
+                      <div
+                        key={bucket.key}
+                        style={{
+                          background: maturityMeta[bucket.key].background,
+                          borderRadius: '8px',
+                          padding: '10px',
+                          minHeight: '70px',
+                        }}
+                      >
+                        <Text style={{ display: 'block', color: maturityMeta[bucket.key].color, fontSize: '11px', fontWeight: 700 }}>
+                          {bucket.label}
+                        </Text>
+                        <Text strong style={{ display: 'block', fontSize: '18px', lineHeight: 1.2 }}>{bucket.loanCount}</Text>
+                        <Text type="secondary" style={{ fontSize: '11px' }}>{formatCurrency(bucket.debtAmount, 'USDC')}</Text>
+                      </div>
+                    ))}
+                  </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--border-color)', paddingTop: '12px' }}>
-                <Text type="secondary" style={{ fontSize: '13px' }}>Total Collateral Deposited</Text>
-                <Text strong style={{ fontSize: '14px' }}>{totalCollateralLockedXLM.toLocaleString()} XLM</Text>
-              </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', borderTop: '1px solid var(--border-light)', paddingTop: '12px' }}>
+                    <Text type="secondary" style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      Next Repayments
+                    </Text>
+                    {dashboardSyncLabel && <Text type="secondary" style={{ fontSize: '11px' }}>Updated {dashboardSyncLabel}</Text>}
+                  </div>
+
+                  {maturityItems.length === 0 ? (
+                    <div style={{ padding: '28px 0', textAlign: 'center' }}>
+                      <ShieldCheck size={30} style={{ color: 'var(--success-color)', marginBottom: '8px' }} />
+                      <Text type="secondary" style={{ display: 'block', fontSize: '13px' }}>{EMPTY_ANALYTICS_TEXT}</Text>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '270px', overflowY: 'auto', paddingRight: '2px' }}>
+                      {maturityItems.map((item) => {
+                        const dueLabel = item.bucket === 'defaulted'
+                          ? `${item.daysPastDue}d past due`
+                          : item.bucket === 'grace'
+                            ? `${item.daysPastDue}d in grace`
+                            : `${Math.max(0, item.daysUntilDue)}d left`;
+
+                        return (
+                          <div
+                            key={item.id}
+                            style={{
+                              border: '1px solid var(--border-light)',
+                              borderRadius: '8px',
+                              padding: '11px 10px',
+                              display: 'grid',
+                              gridTemplateColumns: '1fr auto',
+                              gap: '10px',
+                              alignItems: 'center',
+                            }}
+                          >
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '3px' }}>
+                                <Tag
+                                  style={{
+                                    margin: 0,
+                                    border: 'none',
+                                    color: maturityMeta[item.bucket].color,
+                                    background: maturityMeta[item.bucket].background,
+                                  }}
+                                >
+                                  {dueLabel}
+                                </Tag>
+                                <Text strong style={{ fontSize: '13px' }}>{formatCurrency(item.outstandingDebt, item.loanAsset)}</Text>
+                              </div>
+                              <Text type="secondary" style={{ display: 'block', fontSize: '11px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {new Date(item.dueTime).toLocaleDateString()} - {item.recommendedAction}
+                              </Text>
+                            </div>
+                            <Button
+                              type="text"
+                              size="small"
+                              aria-label="Open loan detail"
+                              icon={<ChevronRight size={16} />}
+                              onClick={() => navigate(`/app/loans/${item.id}`)}
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           </Card>
         </Col>

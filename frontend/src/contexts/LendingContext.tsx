@@ -5,7 +5,7 @@ import type { Loan, LoanOffer, OraclePrice, Transaction, UserRole, WalletState }
 import { initialLoanOffers, initialLoans } from '../data/mockLoans';
 import { initialOraclePrices } from '../data/mockOracle';
 import { initialActivities } from '../data/mockActivities';
-import { calculateMaxLiquidationRepay, isLiquidatable, isOpenLoanStatus } from '../utils/finance';
+import { MAX_FIXED_APR_PERCENT, calculateMaxLiquidationRepay, isLiquidatable, isOpenLoanStatus } from '../utils/finance';
 import { loansService } from '../services/loans/loans.service';
 import { offersService, type CreateOfferInput } from '../services/offers/offers.service';
 import { oracleService } from '../services/oracle/oracle.service';
@@ -566,6 +566,9 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
     if (offer.maxLTV > offer.liquidationThreshold) {
       throw new Error('Max LTV must be less than or equal to liquidation threshold.');
+    }
+    if (offer.apr > MAX_FIXED_APR_PERCENT) {
+      throw new Error(`Fixed APR cannot exceed ${MAX_FIXED_APR_PERCENT}% per year.`);
     }
     if (offer.minHealthFactor < 1.4) {
       throw new Error('Minimum Health Factor must be at least 1.40.');

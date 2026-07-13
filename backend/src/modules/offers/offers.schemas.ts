@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_FIXED_APR_BPS } from '../../utils/finance';
 import { confirmedChainReceiptSchema, optionalDateSchema } from '../transactions/transactions.schemas';
 
 const decimalInput = z.union([z.string().min(1), z.number()]).transform(String);
@@ -8,7 +9,7 @@ export const createOfferSchema = z.object({
   lenderWallet: z.string().min(1),
   loanAsset: z.string().min(1),
   loanAmount: decimalInput,
-  fixedAprBps: z.coerce.number().int().positive(),
+  fixedAprBps: z.coerce.number().int().positive().max(MAX_FIXED_APR_BPS),
   durationDays: z.coerce.number().int().positive(),
   collateralAsset: z.string().min(1),
   maxLtvBps: z.coerce.number().int().positive(),

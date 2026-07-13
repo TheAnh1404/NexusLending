@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppContext } from '../app/AppContext';
-import { calculateRequiredCollateral, formatCurrency, formatAddress } from '../utils/finance';
+import { MAX_FIXED_APR_PERCENT, calculateRequiredCollateral, formatCurrency, formatAddress } from '../utils/finance';
 import { EmptyState } from '../components/common/CommonStates';
 import {
   Card,
@@ -39,7 +39,7 @@ export const MarketplacePage: React.FC = () => {
   const [collateralFilter, setCollateralFilter] = useState('ALL');
   const [viewMode, setViewMode] = useState<'GRID' | 'TABLE'>('GRID');
   const [aprSort, setAprSort] = useState<'ASC' | 'DESC'>('ASC');
-  const [maxApr, setMaxApr] = useState<number>(15);
+  const [maxApr, setMaxApr] = useState<number>(MAX_FIXED_APR_PERCENT);
   const [maxDuration, setMaxDuration] = useState<number>(180);
 
   const xlmPrice = oraclePrices.find((p) => p.asset === 'XLM')?.price || 0.125;
@@ -250,7 +250,7 @@ export const MarketplacePage: React.FC = () => {
                 <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>MAX INTEREST RATE (APR)</span>
                 <span style={{ fontWeight: 700, color: 'var(--primary-color)' }}>{maxApr}%</span>
               </div>
-              <Slider min={4} max={18} step={0.5} value={maxApr} onChange={setMaxApr} tooltip={{ formatter: (val) => `${val}%` }} />
+              <Slider min={4} max={MAX_FIXED_APR_PERCENT} step={0.5} value={maxApr} onChange={setMaxApr} tooltip={{ formatter: (val) => `${val}%` }} />
             </div>
           </Col>
           <Col xs={24} sm={12}>

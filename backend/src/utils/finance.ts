@@ -2,6 +2,9 @@ import { Prisma } from '@prisma/client';
 
 export type DecimalInput = number | string | Prisma.Decimal;
 
+export const MAX_FIXED_APR_BPS = 2_000;
+export const MAX_FIXED_APR_PERCENT = MAX_FIXED_APR_BPS / 100;
+
 const toDecimal = (value: DecimalInput): Prisma.Decimal => new Prisma.Decimal(value);
 const round2 = (value: Prisma.Decimal): number => value.toDecimalPlaces(2).toNumber();
 
@@ -67,4 +70,3 @@ export const calculateRequiredCollateral = (
   const borrowValue = toDecimal(borrowedAmount).mul(toDecimal(borrowPrice));
   return round2(borrowValue.div(maxLtv.div(100)).div(price));
 };
-

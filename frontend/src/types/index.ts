@@ -119,3 +119,78 @@ export interface Transaction {
   status?: 'SUCCESS';
   blockTimestamp?: string;
 }
+
+export interface RiskExposureBucket {
+  riskZone: RiskZone;
+  label: string;
+  loanCount: number;
+  debtAmount: number;
+  collateralValue: number;
+  debtSharePct: number;
+  avgHealthFactor: number | null;
+}
+
+export interface RiskExposureLoan {
+  id: string;
+  contractLoanId?: string | null;
+  reference: string;
+  borrowerWallet: string;
+  lenderWallet: string;
+  status: LoanStatus;
+  riskZone: RiskZone;
+  healthFactor: number;
+  outstandingDebt: number;
+  loanAsset: string;
+  collateralAmount: number;
+  collateralAsset: string;
+  collateralValue: number;
+  dueTime?: string | null;
+}
+
+export type MaturityBucketKey = 'defaulted' | 'grace' | 'due_7d' | 'due_30d' | 'later';
+
+export interface MaturityBucket {
+  key: MaturityBucketKey;
+  label: string;
+  loanCount: number;
+  debtAmount: number;
+}
+
+export interface MaturityCalendarItem {
+  id: string;
+  contractLoanId?: string | null;
+  reference: string;
+  borrowerWallet: string;
+  lenderWallet: string;
+  status: LoanStatus;
+  riskZone: RiskZone;
+  healthFactor: number;
+  outstandingDebt: number;
+  loanAsset: string;
+  dueTime: string;
+  graceDeadline: string;
+  daysUntilDue: number;
+  daysPastDue: number;
+  bucket: MaturityBucketKey;
+  bucketLabel: string;
+  recommendedAction: string;
+}
+
+export interface DashboardAnalytics {
+  generatedAt: string;
+  source: 'database';
+  hasData: boolean;
+  oracleUpdatedAt?: string | null;
+  riskExposure: {
+    totalDebt: number;
+    atRiskDebt: number;
+    activeLoanCount: number;
+    avgHealthFactor: number;
+    buckets: RiskExposureBucket[];
+    topRiskLoans: RiskExposureLoan[];
+  };
+  repaymentCalendar: {
+    buckets: MaturityBucket[];
+    items: MaturityCalendarItem[];
+  };
+}

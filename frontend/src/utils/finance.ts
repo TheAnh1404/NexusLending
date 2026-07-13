@@ -2,6 +2,8 @@ import type { RiskZone } from '../types';
 
 export const DEFAULT_GRACE_PERIOD_DAYS = 7;
 export const LIQUIDATION_CLOSE_FACTOR = 0.5;
+export const MAX_FIXED_APR_PERCENT = 20;
+export const MAX_FIXED_APR_BPS = MAX_FIXED_APR_PERCENT * 100;
 
 export const calculateHealthFactor = (
   collateralAmount: number,

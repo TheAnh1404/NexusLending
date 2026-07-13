@@ -102,7 +102,10 @@ fn fund_offer() {
 
     f.marketplace.fund_offer(&offer_id);
 
-    assert_eq!(f.marketplace.get_offer(&offer_id).status, OfferStatus::Funding);
+    assert_eq!(
+        f.marketplace.get_offer(&offer_id).status,
+        OfferStatus::Funding
+    );
     assert_eq!(f.vault.get_offer_locked_amount(&offer_id), 100);
     assert_eq!(f.loan_token.balance(&f.lender), 900);
 }
@@ -114,7 +117,10 @@ fn active_offer_after_funding() {
 
     fund_and_activate(&f, offer_id);
 
-    assert_eq!(f.marketplace.get_offer(&offer_id).status, OfferStatus::Active);
+    assert_eq!(
+        f.marketplace.get_offer(&offer_id).status,
+        OfferStatus::Active
+    );
 }
 
 #[test]
@@ -125,7 +131,10 @@ fn cancel_active_offer_before_matched() {
 
     f.marketplace.cancel_offer(&offer_id);
 
-    assert_eq!(f.marketplace.get_offer(&offer_id).status, OfferStatus::Cancelled);
+    assert_eq!(
+        f.marketplace.get_offer(&offer_id).status,
+        OfferStatus::Cancelled
+    );
     assert_eq!(f.vault.get_offer_locked_amount(&offer_id), 0);
     assert_eq!(f.loan_token.balance(&f.lender), 1_000);
 }
@@ -135,9 +144,7 @@ fn cannot_accept_non_active_offer() {
     let f = setup();
     let offer_id = create_offer_record(&f);
 
-    let result = f
-        .marketplace
-        .try_accept_offer(&offer_id, &f.borrower, &20);
+    let result = f.marketplace.try_accept_offer(&offer_id, &f.borrower, &20);
 
     assert!(result.is_err());
 }
@@ -148,9 +155,7 @@ fn accept_active_offer() {
     let offer_id = create_offer_record(&f);
     fund_and_activate(&f, offer_id);
 
-    let loan_id = f
-        .marketplace
-        .accept_offer(&offer_id, &f.borrower, &20);
+    let loan_id = f.marketplace.accept_offer(&offer_id, &f.borrower, &20);
     let offer = f.marketplace.get_offer(&offer_id);
     let loan = f.loan_manager.get_loan(&loan_id);
 
@@ -166,9 +171,7 @@ fn cannot_accept_same_offer_twice() {
     fund_and_activate(&f, offer_id);
 
     f.marketplace.accept_offer(&offer_id, &f.borrower, &20);
-    let result = f
-        .marketplace
-        .try_accept_offer(&offer_id, &f.borrower, &20);
+    let result = f.marketplace.try_accept_offer(&offer_id, &f.borrower, &20);
 
     assert!(result.is_err());
 }
@@ -180,12 +183,13 @@ fn expired_offer_cannot_be_accepted() {
     fund_and_activate(&f, offer_id);
 
     f.marketplace.expire_offer(&offer_id);
-    let result = f
-        .marketplace
-        .try_accept_offer(&offer_id, &f.borrower, &20);
+    let result = f.marketplace.try_accept_offer(&offer_id, &f.borrower, &20);
 
     assert!(result.is_err());
-    assert_eq!(f.marketplace.get_offer(&offer_id).status, OfferStatus::Expired);
+    assert_eq!(
+        f.marketplace.get_offer(&offer_id).status,
+        OfferStatus::Expired
+    );
 }
 
 #[test]
@@ -235,6 +239,47 @@ fn create_offer_default_min_hf() {
     let offer = f.marketplace.get_offer(&offer_id);
     assert_eq!(offer.min_health_factor_bps, 14_000);
     assert_eq!(offer.liquidation_bonus_bps, 500);
+}
+
+#[test]
+fn create_offer_allows_twenty_percent_apr() {
+    let f = setup();
+    let offer_id = f.marketplace.create_offer(
+        &f.lender,
+        &f.loan_asset,
+        &1_000_i128,
+        &2_000_u32,
+        &30_u32,
+        &f.collateral_asset,
+        &5_000_u32,
+        &8_000_u32,
+        &0_u32,
+        &7_u32,
+        &0_u32,
+    );
+    let offer = f.marketplace.get_offer(&offer_id);
+
+    assert_eq!(offer.fixed_apr_bps, 2_000);
+}
+
+#[test]
+fn create_offer_rejects_apr_above_twenty_percent() {
+    let f = setup();
+    let result = f.marketplace.try_create_offer(
+        &f.lender,
+        &f.loan_asset,
+        &1_000_i128,
+        &2_001_u32,
+        &30_u32,
+        &f.collateral_asset,
+        &5_000_u32,
+        &8_000_u32,
+        &0_u32,
+        &7_u32,
+        &0_u32,
+    );
+
+    assert!(result.is_err());
 }
 
 #[test]

@@ -110,9 +110,8 @@ pub struct PriceData {
     pub source: String,
 }
 
-
-
 pub const BPS_DENOMINATOR: u128 = 10_000;
+pub const MAX_FIXED_APR_BPS: u32 = 2_000;
 pub const SAFE_HEALTH_FACTOR_BPS: u32 = 14_000;
 pub const LIQUIDATION_HEALTH_FACTOR_BPS: u32 = 12_000;
 pub const CLOSE_FACTOR_BPS: u32 = 5_000;

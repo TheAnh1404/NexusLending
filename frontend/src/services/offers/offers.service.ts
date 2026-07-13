@@ -1,4 +1,5 @@
 import type { LoanOffer, OfferStatus } from '../../types';
+import { MAX_FIXED_APR_PERCENT } from '../../utils/finance';
 
 export type CreateOfferInput = Omit<LoanOffer, 'id' | 'lender' | 'createTime' | 'status' | 'acceptedLoanId'>;
 
@@ -11,6 +12,10 @@ export const offersService = {
   },
 
   create(input: CreateOfferInput, lender: string): LoanOffer {
+    if (input.apr > MAX_FIXED_APR_PERCENT) {
+      throw new Error(`Fixed APR cannot exceed ${MAX_FIXED_APR_PERCENT}% per year.`);
+    }
+
     return {
       ...input,
       id: `offer_${Date.now()}`,

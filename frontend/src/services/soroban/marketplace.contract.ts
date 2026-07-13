@@ -3,6 +3,7 @@ import { CONTRACTS, resolveAssetContractId, STELLAR_DECIMALS } from './config';
 import { buildAndSubmitTx } from './transaction';
 import type { TxStage } from './transaction';
 import type { CreateOfferInput } from '../offers/offers.service';
+import { MAX_FIXED_APR_PERCENT } from '../../utils/finance';
 
 /**
  * Convert a human-readable token amount to raw contract units (i128 ScVal).
@@ -30,6 +31,9 @@ export const marketplaceContract = {
     // Pre-validate before building the transaction to show clear errors
     if (input.amount <= 0) throw new Error('Loan amount must be greater than 0.');
     if (input.apr <= 0) throw new Error('APR must be greater than 0%.');
+    if (input.apr > MAX_FIXED_APR_PERCENT) {
+      throw new Error(`APR cannot exceed ${MAX_FIXED_APR_PERCENT}% per year.`);
+    }
     if (input.duration <= 0) throw new Error('Duration must be at least 1 day.');
     if (input.maxLTV <= 0) throw new Error('Max LTV must be greater than 0%.');
     if (input.maxLTV > input.liquidationThreshold) {

@@ -81,8 +81,8 @@ fn offer(f: &Fixture) -> LoanOffer {
         lender: f.lender.clone(),
         loan_asset: f.loan_asset.clone(),
         loan_amount: 100,
-        fixed_apr_bps: 3_650,
-        duration_days: 10,
+        fixed_apr_bps: 1_825,
+        duration_days: 20,
         collateral_asset: f.collateral_asset.clone(),
         max_ltv_bps: 7_000,
         liquidation_threshold_bps: 8_000,
@@ -150,6 +150,19 @@ fn create_pending_loan() {
     assert_eq!(loan.outstanding_debt, 101);
     assert_eq!(loan.collateral_amount, 20);
     assert_eq!(f.loan_manager.get_loan_count(), 1);
+}
+
+#[test]
+fn rejects_offer_apr_above_twenty_percent() {
+    let f = setup();
+    let mut offer = offer(&f);
+    offer.fixed_apr_bps = 2_001;
+
+    let result = f
+        .loan_manager
+        .try_create_pending_loan_from_offer(&offer, &f.borrower, &20);
+
+    assert!(result.is_err());
 }
 
 #[test]
@@ -286,9 +299,7 @@ fn liquidation_only_allowed_when_hf_below_threshold() {
     let f = setup();
     let loan_id = activate_loan(&f);
 
-    let result = f
-        .loan_manager
-        .try_liquidate(&loan_id, &f.liquidator, &50);
+    let result = f.loan_manager.try_liquidate(&loan_id, &f.liquidator, &50);
 
     assert!(result.is_err());
 }

@@ -4,6 +4,7 @@ import { env } from '../../config/env';
 import { prisma } from '../../prisma/client';
 import { ApiError } from '../../utils/apiError';
 import {
+  MAX_FIXED_APR_BPS,
   calculateHealthFactor,
   calculateLTV,
   getRiskZone
@@ -397,6 +398,10 @@ export const loansService = {
     if (offer?.status !== 'Active') {
       throw new ApiError(400, 'Offer is not active');
     }
+    const fixedAprBps = offer?.fixedAprBps ?? input.fixedAprBps;
+    if (fixedAprBps > MAX_FIXED_APR_BPS) {
+      throw new ApiError(400, `Loan APR cannot exceed 20% per year (${MAX_FIXED_APR_BPS} bps)`);
+    }
     const verified = await verificationService.verifyAction({
       action: 'accept_offer',
       txHash: input.txHash,
@@ -428,7 +433,7 @@ export const loansService = {
       loanAsset: offer?.loanAsset ?? input.loanAsset,
       principal: new Prisma.Decimal(onChainLoan.principal),
       outstandingDebt: new Prisma.Decimal(onChainLoan.outstandingDebt),
-      fixedAprBps: offer?.fixedAprBps ?? input.fixedAprBps,
+      fixedAprBps,
       collateralAsset: offer?.collateralAsset ?? input.collateralAsset,
       collateralAmount: new Prisma.Decimal(onChainLoan.collateralAmount),
       startTime: input.status && input.status !== 'PendingCollateral' ? startTime : undefined,

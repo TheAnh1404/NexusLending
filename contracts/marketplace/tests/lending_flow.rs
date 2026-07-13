@@ -87,8 +87,8 @@ fn create_active_offer(f: &Fixture) -> u64 {
         &f.lender,
         &f.loan_asset,
         &100,
-        &3_650,
-        &10,
+        &1_825,
+        &20,
         &f.collateral_asset,
         &7_000,
         &8_000,
@@ -109,7 +109,10 @@ fn full_lending_flow_repay() {
     let loan_id = f.marketplace.accept_offer(&offer_id, &f.borrower, &20);
     f.loan_manager.activate_loan(&loan_id);
 
-    assert_eq!(f.marketplace.get_offer(&offer_id).status, OfferStatus::Matched);
+    assert_eq!(
+        f.marketplace.get_offer(&offer_id).status,
+        OfferStatus::Matched
+    );
     assert_eq!(f.loan_manager.get_loan(&loan_id).status, LoanStatus::Active);
     assert_eq!(f.vault.get_offer_locked_amount(&offer_id), 0);
     assert_eq!(f.vault.get_loan_collateral_amount(&loan_id), 20);

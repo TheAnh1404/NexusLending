@@ -1,6 +1,7 @@
 import { LoanStatus, Prisma, TransactionType } from '@prisma/client';
 
 import { prisma } from '../../prisma/client';
+import { MAX_FIXED_APR_BPS } from '../../utils/finance';
 import { buildRiskPatch } from '../loans/loans.service';
 import { createLedgerTransaction } from '../transactions/chainReceipt';
 import { contractReaderService } from '../verification';
@@ -176,6 +177,7 @@ export class EventSyncService {
           where: { contractOfferId: BigInt(event.offerId) },
         });
         if (!offer) return;
+        if (offer.fixedAprBps > MAX_FIXED_APR_BPS) return;
 
         const onChainLoan = await contractReaderService.readLoan(event.loanId, event.actor ?? offer.lenderWallet);
         const outstandingDebt = new Prisma.Decimal(onChainLoan.outstandingDebt);

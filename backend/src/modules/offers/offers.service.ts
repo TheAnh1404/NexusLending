@@ -3,7 +3,7 @@ import { OfferStatus, Prisma, TransactionType } from '@prisma/client';
 import { env } from '../../config/env';
 import { prisma } from '../../prisma/client';
 import { ApiError } from '../../utils/apiError';
-import { calculateRepaymentAmount } from '../../utils/finance';
+import { MAX_FIXED_APR_BPS, calculateRepaymentAmount } from '../../utils/finance';
 import { DEFAULT_GRACE_PERIOD_DAYS, buildRiskPatch } from '../loans/loans.service';
 import { createLedgerTransaction, requireConfirmedReceipt } from '../transactions/chainReceipt';
 import { contractReaderService, verificationService } from '../verification';
@@ -92,11 +92,20 @@ const validateCreateOffer = (input: CreateOfferInput) => {
   if (input.fixedAprBps <= 0) {
     throw new ApiError(400, 'fixedAprBps must be greater than zero');
   }
+  if (input.fixedAprBps > MAX_FIXED_APR_BPS) {
+    throw new ApiError(400, `fixedAprBps cannot exceed ${MAX_FIXED_APR_BPS} (20% APR)`);
+  }
   if (input.minHealthFactorBps < SAFE_HEALTH_FACTOR_BPS) {
     throw new ApiError(400, 'minHealthFactorBps must be at least 14000');
   }
   if (input.gracePeriodDays !== DEFAULT_GRACE_PERIOD_DAYS) {
     throw new ApiError(400, `gracePeriodDays must be ${DEFAULT_GRACE_PERIOD_DAYS}`);
+  }
+};
+
+const ensureAprWithinLimit = (fixedAprBps: number) => {
+  if (fixedAprBps > MAX_FIXED_APR_BPS) {
+    throw new ApiError(400, `Loan APR cannot exceed 20% per year (${MAX_FIXED_APR_BPS} bps)`);
   }
 };
 
@@ -341,6 +350,7 @@ export const offersService = {
 
   async accept(id: string, input: AcceptOfferInput) {
     const offer = await this.getById(id);
+    ensureAprWithinLimit(offer.fixedAprBps);
     if (offer.status !== 'Active') {
       throw new ApiError(400, 'Borrowers can only accept Active offers');
     }

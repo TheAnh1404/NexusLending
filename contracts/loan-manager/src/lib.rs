@@ -3,11 +3,9 @@
 
 use nexus_contracts_shared::{
     Loan, LoanOffer, LoanStatus, OfferStatus, PriceData, BPS_DENOMINATOR, CLOSE_FACTOR_BPS,
-    LIQUIDATION_HEALTH_FACTOR_BPS, SAFE_HEALTH_FACTOR_BPS,
+    LIQUIDATION_HEALTH_FACTOR_BPS, MAX_FIXED_APR_BPS, SAFE_HEALTH_FACTOR_BPS,
 };
-use soroban_sdk::{
-    contract, contractimpl, contracttype, Address, Env, IntoVal, Symbol, Val, Vec,
-};
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, IntoVal, Symbol, Val, Vec};
 
 #[cfg(test)]
 mod test;
@@ -34,7 +32,9 @@ impl LoanManagerContract {
             panic!("loan manager already initialized");
         }
         env.storage().instance().set(&DataKey::Admin, &admin);
-        env.storage().instance().set(&DataKey::Vault, &vault_contract);
+        env.storage()
+            .instance()
+            .set(&DataKey::Vault, &vault_contract);
         env.storage()
             .instance()
             .set(&DataKey::Oracle, &oracle_contract);
@@ -53,6 +53,9 @@ impl LoanManagerContract {
         }
         if offer.loan_amount <= 0 {
             panic!("loan amount must be positive");
+        }
+        if offer.fixed_apr_bps == 0 || offer.fixed_apr_bps > MAX_FIXED_APR_BPS {
+            panic!("fixed apr must be between 1 and 2000 bps");
         }
 
         let loan_id = next_loan_id(&env);
@@ -218,10 +221,8 @@ impl LoanManagerContract {
         env.storage()
             .persistent()
             .set(&DataKey::Loan(loan_id), &loan);
-        env.events().publish(
-            (Symbol::new(&env, "partial_repaid"), loan_id),
-            repay_amount,
-        );
+        env.events()
+            .publish((Symbol::new(&env, "partial_repaid"), loan_id), repay_amount);
     }
 
     pub fn full_repay(env: Env, loan_id: u64) {
