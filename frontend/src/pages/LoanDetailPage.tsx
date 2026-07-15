@@ -196,11 +196,19 @@ export const LoanDetailPage: React.FC = () => {
     if (!activeLoan) return;
     try {
       setLoading(true);
-      await repayLoan(activeLoan.id, amount, isFullRepay);
+      const shouldSettleLoan = isFullRepay || amount >= activeLoan.outstandingDebt - 0.01;
+      const updatedLoan = await repayLoan(activeLoan.id, amount, shouldSettleLoan);
+      if (!updatedLoan) {
+        throw new Error('Repayment was not completed.');
+      }
       setRepayModalOpen(false);
       repayForm.resetFields();
+      if (updatedLoan.status === 'Repaid') {
+        navigate('/app', { replace: true });
+      }
     } catch (e) {
       console.error(e);
+      throw e;
     } finally {
       setLoading(false);
     }

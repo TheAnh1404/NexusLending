@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppContext } from '../app/AppContext';
+import { CHAIN_MODE } from '../services/api/client';
+import { offersApi } from '../services/api/offers.api';
 import { MAX_FIXED_APR_PERCENT, calculateRequiredCollateral, formatCurrency, formatAddress } from '../utils/finance';
 import { EmptyState } from '../components/common/CommonStates';
 import {
@@ -28,9 +30,10 @@ import {
 
 const { Title, Paragraph, Text } = Typography;
 const { Option } = Select;
+const MARKETPLACE_CHAIN_SYNC_INTERVAL_MS = 10_000;
 
 export const MarketplacePage: React.FC = () => {
-  const { loanOffers, oraclePrices } = useAppContext();
+  const { loanOffers, oraclePrices, wallet, refreshData } = useAppContext();
   const navigate = useNavigate();
 
   // State for Filters
@@ -43,6 +46,43 @@ export const MarketplacePage: React.FC = () => {
   const [maxDuration, setMaxDuration] = useState<number>(180);
 
   const xlmPrice = oraclePrices.find((p) => p.asset === 'XLM')?.price || 0.125;
+  const activeChainOfferIds = React.useMemo(
+    () => loanOffers
+      .filter((offer) => offer.status === 'Active' && offer.contractOfferId !== undefined)
+      .map((offer) => offer.id),
+    [loanOffers]
+  );
+  const activeChainOfferIdsKey = activeChainOfferIds.join('|');
+
+  React.useEffect(() => {
+    if (CHAIN_MODE === 'mock' || !wallet.address || activeChainOfferIds.length === 0) return;
+
+    let cancelled = false;
+    const syncActiveOffers = async () => {
+      const ids = activeChainOfferIdsKey.split('|').filter(Boolean);
+      if (ids.length === 0) return;
+
+      const results = await Promise.allSettled(
+        ids.map((offerId) => offersApi.syncChain(offerId, wallet.address!))
+      );
+      const changed = results.some((result) =>
+        result.status === 'fulfilled' && result.value.status !== 'Active'
+      );
+      if (changed && !cancelled) {
+        await refreshData();
+      }
+    };
+
+    void syncActiveOffers();
+    const intervalId = window.setInterval(() => {
+      void syncActiveOffers();
+    }, MARKETPLACE_CHAIN_SYNC_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [activeChainOfferIds.length, activeChainOfferIdsKey, refreshData, wallet.address]);
 
   // Filter loan offers dynamically
   const filteredOffers = loanOffers.filter((offer) => {
@@ -50,12 +90,13 @@ export const MarketplacePage: React.FC = () => {
       offer.id.toLowerCase().includes(search.toLowerCase()) ||
       offer.lender.toLowerCase().includes(search.toLowerCase());
     const isListed = offer.status === 'Active';
+    const isAcceptableOnChain = CHAIN_MODE === 'mock' || offer.contractOfferId !== undefined;
     const matchesAsset = assetFilter === 'ALL' || offer.asset === assetFilter;
     const matchesCollateral = collateralFilter === 'ALL' || offer.collateralAsset === collateralFilter;
     const matchesApr = offer.apr <= maxApr;
     const matchesDuration = offer.duration <= maxDuration;
 
-    return isListed && matchesSearch && matchesAsset && matchesCollateral && matchesApr && matchesDuration;
+    return isListed && isAcceptableOnChain && matchesSearch && matchesAsset && matchesCollateral && matchesApr && matchesDuration;
   }).sort((a, b) => (aprSort === 'ASC' ? a.apr - b.apr : b.apr - a.apr));
 
   const columns = [

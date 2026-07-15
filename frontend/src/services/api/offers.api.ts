@@ -106,6 +106,24 @@ export const offersApi = {
     return mapBackendOffer(offer);
   },
 
+  async deploy(
+    id: string,
+    wallet: string,
+    extra: ConfirmedChainReceiptPayload & { contractOfferId: string | number | bigint }
+  ): Promise<LoanOffer> {
+    const offer = await apiClient.post<BackendLoanOffer>(`/api/offers/${id}/deploy`, {
+      wallet,
+      ...extra,
+      contractOfferId: String(extra.contractOfferId),
+    });
+    return mapBackendOffer(offer);
+  },
+
+  async syncChain(id: string, wallet: string): Promise<LoanOffer> {
+    const offer = await apiClient.post<BackendLoanOffer>(`/api/offers/${id}/sync-chain`, { wallet });
+    return mapBackendOffer(offer);
+  },
+
   async fund(
     id: string,
     wallet: string,

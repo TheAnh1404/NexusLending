@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAppContext } from '../app/AppContext';
+import { CHAIN_MODE } from '../services/api/client';
+import { offersApi } from '../services/api/offers.api';
 import { calculateRequiredCollateral, calculateRepaymentAmount, calculateHealthFactor, calculateLTV, formatCurrency } from '../utils/finance';
 import { HealthFactorGauge } from '../components/common/HealthFactorGauge';
 import { EmptyState } from '../components/common/CommonStates';
@@ -34,11 +36,15 @@ const getErrorMessage = (error: unknown, fallback: string): string => {
 export const BorrowLoanPage: React.FC = () => {
   const id = useParams<{ id: string }>().id || '';
   const navigate = useNavigate();
-  const { loanOffers, oraclePrices, wallet, acceptOffer, activateLoan, transactions } = useAppContext();
+  const { loanOffers, oraclePrices, wallet, acceptOffer, activateLoan, transactions, refreshData } = useAppContext();
   const [form] = Form.useForm();
   const { message } = App.useApp();
 
-  const offer = loanOffers.find((o) => o.id === id && o.status === 'Active');
+  const offer = loanOffers.find((o) =>
+    o.id === id
+    && o.status === 'Active'
+    && (CHAIN_MODE === 'mock' || o.contractOfferId !== undefined)
+  );
 
   const xlmPrice = oraclePrices.find((p) => p.asset === 'XLM')?.price || 0.125;
   const usdcPrice = oraclePrices.find((p) => p.asset === 'USDC')?.price || 1.0;
@@ -54,6 +60,29 @@ export const BorrowLoanPage: React.FC = () => {
   const [createdLoan, setCreatedLoan] = useState<any | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [errorDetails, setErrorDetails] = useState<string>('');
+  const activeOfferId = offer?.id;
+
+  useEffect(() => {
+    if (!activeOfferId || CHAIN_MODE === 'mock' || !wallet.address) return;
+
+    let cancelled = false;
+    const syncOfferState = async () => {
+      try {
+        const synced = await offersApi.syncChain(activeOfferId, wallet.address!);
+        if (!cancelled && synced.status !== 'Active') {
+          await refreshData();
+          setErrorDetails(`Offer is ${synced.status ?? 'unavailable'} on-chain and is no longer available.`);
+        }
+      } catch (error) {
+        console.error('Unable to sync offer before borrowing:', error);
+      }
+    };
+
+    void syncOfferState();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeOfferId, refreshData, wallet.address]);
 
   const getCollateralForTargetHF = (targetHF: number): number => {
     if (!offer) return 0;
@@ -62,12 +91,43 @@ export const BorrowLoanPage: React.FC = () => {
     return Math.ceil(amount);
   };
 
+  const minimumEscrowCollateralAmount = offer
+    ? Math.max(Math.ceil(minRequiredXLM), getCollateralForTargetHF(offer.minHealthFactor))
+    : 0;
+
+  const setCollateralInputAmount = (amount: number) => {
+    const nextAmount = Number.isFinite(amount) ? amount : 0;
+    setCollateralAmount(nextAmount);
+    form.setFieldsValue({ collateral: nextAmount });
+    void form.validateFields(['collateral']).catch(() => undefined);
+  };
+
+  const collateralPresets = offer
+    ? [
+        {
+          key: 'minimum',
+          label: `Min HF ${offer.minHealthFactor.toFixed(2)}`,
+          amount: minimumEscrowCollateralAmount,
+        },
+        {
+          key: 'safe',
+          label: 'Safe HF 1.80',
+          amount: Math.max(minimumEscrowCollateralAmount, getCollateralForTargetHF(1.8)),
+        },
+        {
+          key: 'aggressive',
+          label: 'Aggressive HF 2.50',
+          amount: Math.max(minimumEscrowCollateralAmount, getCollateralForTargetHF(2.5)),
+        },
+      ]
+    : [];
+
   useEffect(() => {
-    if (minRequiredXLM) {
-      setCollateralAmount(Math.ceil(minRequiredXLM));
-      form.setFieldsValue({ collateral: Math.ceil(minRequiredXLM) });
+    if (minimumEscrowCollateralAmount) {
+      setCollateralAmount(minimumEscrowCollateralAmount);
+      form.setFieldsValue({ collateral: minimumEscrowCollateralAmount });
     }
-  }, [minRequiredXLM, form]);
+  }, [minimumEscrowCollateralAmount, form]);
 
   if (!offer && !createdLoan) {
     return (
@@ -104,7 +164,9 @@ export const BorrowLoanPage: React.FC = () => {
     ? repaymentAmt / (collateralAmount * ((offer ? offer.liquidationThreshold : createdLoan.liquidationThreshold) / 100))
     : 0;
 
-  const canBorrow = healthFactor >= (offer ? offer.minHealthFactor : createdLoan.minHealthFactor) && wallet.balanceXLM >= collateralAmount;
+  const canBorrow = collateralAmount >= minimumEscrowCollateralAmount
+    && healthFactor >= (offer ? offer.minHealthFactor : createdLoan.minHealthFactor)
+    && wallet.balanceXLM >= collateralAmount;
 
   const handleBorrowSubmit = () => {
     form.validateFields()
@@ -506,60 +568,66 @@ export const BorrowLoanPage: React.FC = () => {
                 <Form.Item
                   label="Escrow Collateral Amount (XLM)"
                   name="collateral"
+                  style={{ marginBottom: '10px' }}
                   rules={[
                     { required: true, message: 'Please enter collateral amount' },
                     {
                       validator: (_, value) => {
-                        if (!value || value >= minRequiredXLM) {
+                        if (!value || value >= minimumEscrowCollateralAmount) {
                           return Promise.resolve();
                         }
-                        return Promise.reject(new Error(`Minimum required is ${Math.ceil(minRequiredXLM)} XLM`));
+                        return Promise.reject(new Error(`Minimum required is ${minimumEscrowCollateralAmount.toLocaleString()} XLM`));
                       }
                     }
                   ]}
                 >
                   <InputNumber
-                    min={Math.ceil(minRequiredXLM)}
+                    min={minimumEscrowCollateralAmount}
                     style={{ width: '100%' }}
                     size="large"
-                    onChange={(val) => setCollateralAmount(val || 0)}
+                    onChange={(val) => setCollateralAmount(Number(val ?? 0))}
                   />
-                  <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
-                    <Button 
-                      size="small" 
-                      onClick={() => {
-                        const amount = Math.ceil(minRequiredXLM);
-                        setCollateralAmount(amount);
-                        form.setFieldsValue({ collateral: amount });
-                      }}
-                      style={{ fontSize: '11px' }}
-                    >
-                      Min HF ({offer ? offer.minHealthFactor.toFixed(2) : '1.40'})
-                    </Button>
-                    <Button 
-                      size="small" 
-                      onClick={() => {
-                        const amount = getCollateralForTargetHF(1.8);
-                        setCollateralAmount(amount);
-                        form.setFieldsValue({ collateral: amount });
-                      }}
-                      style={{ fontSize: '11px' }}
-                    >
-                      Safe HF (1.80)
-                    </Button>
-                    <Button 
-                      size="small" 
-                      onClick={() => {
-                        const amount = getCollateralForTargetHF(2.5);
-                        setCollateralAmount(amount);
-                        form.setFieldsValue({ collateral: amount });
-                      }}
-                      style={{ fontSize: '11px' }}
-                    >
-                      Aggressive (2.50)
-                    </Button>
-                  </div>
                 </Form.Item>
+
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(122px, 1fr))',
+                    gap: '8px',
+                    marginBottom: '24px',
+                  }}
+                >
+                  {collateralPresets.map((preset) => {
+                    const selected = Math.abs(collateralAmount - preset.amount) < 0.000001;
+
+                    return (
+                      <Button
+                        key={preset.key}
+                        type={selected ? 'primary' : 'default'}
+                        onClick={() => setCollateralInputAmount(preset.amount)}
+                        style={{
+                          height: 'auto',
+                          minHeight: '58px',
+                          padding: '8px 10px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'flex-start',
+                          justifyContent: 'center',
+                          gap: '2px',
+                          textAlign: 'left',
+                          borderRadius: '6px',
+                        }}
+                      >
+                        <span style={{ fontSize: '11px', fontWeight: 700, lineHeight: '14px', color: selected ? '#FFFFFF' : 'var(--text-main)' }}>
+                          {preset.label}
+                        </span>
+                        <span style={{ fontSize: '11px', lineHeight: '14px', color: selected ? 'rgba(255, 255, 255, 0.86)' : 'var(--text-muted)' }}>
+                          {preset.amount.toLocaleString()} XLM
+                        </span>
+                      </Button>
+                    );
+                  })}
+                </div>
 
                 <Form.Item label="Borrow Asset Type" required>
                   <Select disabled value="USDC" size="large">

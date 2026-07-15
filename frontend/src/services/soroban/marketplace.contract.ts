@@ -1,6 +1,6 @@
 import { Address, nativeToScVal, xdr } from '@stellar/stellar-sdk';
 import { CONTRACTS, resolveAssetContractId, STELLAR_DECIMALS } from './config';
-import { buildAndSubmitTx } from './transaction';
+import { buildAndSubmitTx, readContractValue } from './transaction';
 import type { TxStage } from './transaction';
 import type { CreateOfferInput } from '../offers/offers.service';
 import { MAX_FIXED_APR_PERCENT } from '../../utils/finance';
@@ -26,7 +26,18 @@ const toU32 = (value: number): xdr.ScVal =>
 const toU64 = (value: number | bigint | string): xdr.ScVal =>
   nativeToScVal(BigInt(value), { type: 'u64' });
 
+const enumVariantName = (value: unknown): string | null => {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value) && typeof value[0] === 'string') return value[0];
+  return null;
+};
+
 export const marketplaceContract = {
+  async getOfferStatus(contractOfferId: string | number | bigint, sourceWallet: string): Promise<string | null> {
+    const offer = await readContractValue(CONTRACTS.marketplace, 'get_offer', [toU64(contractOfferId)], sourceWallet);
+    return enumVariantName((offer as { status?: unknown } | undefined)?.status);
+  },
+
   async createOfferTx(input: CreateOfferInput, wallet: string, onStage?: (stage: TxStage) => void) {
     // Pre-validate before building the transaction to show clear errors
     if (input.amount <= 0) throw new Error('Loan amount must be greater than 0.');

@@ -7,6 +7,7 @@ import {
   acceptOfferSchema,
   createOfferSchema,
   offerActionWalletSchema,
+  syncOfferSchema,
   updateOfferStatusSchema
 } from './offers.schemas';
 import { offersService } from './offers.service';
@@ -47,6 +48,24 @@ offersRouter.post(
   validateBody(offerActionWalletSchema),
   asyncHandler(async (req, res) => {
     const offer = await offersService.fund(req.params.id as string, req.body);
+    res.json({ data: serialize(offer) });
+  })
+);
+
+offersRouter.post(
+  '/:id/deploy',
+  validateBody(offerActionWalletSchema),
+  asyncHandler(async (req, res) => {
+    const offer = await offersService.deploy(req.params.id as string, req.body);
+    res.json({ data: serialize(offer) });
+  })
+);
+
+offersRouter.post(
+  '/:id/sync-chain',
+  validateBody(syncOfferSchema),
+  asyncHandler(async (req, res) => {
+    const offer = await offersService.syncChain(req.params.id as string, req.body);
     res.json({ data: serialize(offer) });
   })
 );

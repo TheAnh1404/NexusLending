@@ -100,12 +100,19 @@ export const BorrowerDashboardPage: React.FC = () => {
   };
 
   const handleRepaySubmit = async (amount: number, isFullRepay: boolean) => {
-    if (!selectedLoanId || amount <= 0) {
+    if (!selectedLoanId || !selectedLoan || amount <= 0) {
       throw new Error('Invalid repayment amount');
     }
-    await repayLoan(selectedLoanId, amount, isFullRepay);
+    const shouldSettleLoan = isFullRepay || amount >= selectedLoan.outstandingDebt - 0.01;
+    const updatedLoan = await repayLoan(selectedLoanId, amount, shouldSettleLoan);
+    if (!updatedLoan) {
+      throw new Error('Repayment was not completed.');
+    }
     setRepayModalOpen(false);
     repayForm.resetFields();
+    if (updatedLoan.status === 'Repaid') {
+      navigate('/app', { replace: true });
+    }
   };
 
   const openAddCollateralModal = (loanId: string) => {

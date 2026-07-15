@@ -244,6 +244,15 @@ const normalizeSorobanSimulationError = (rawError: string, functionName?: string
     return 'Loan activation failed during simulation. Check that the oracle has XLM/USDC set with set_price_for_assets, the offer is funded on-chain, the borrower has enough unlocked XLM, and the borrower has a USDC trustline.';
   }
 
+  if (lowerRawError.includes('unreachablecodereached')) {
+    if (functionName === 'accept_offer') {
+      return 'Offer cannot be accepted on-chain. It may already be matched, cancelled, expired, or the marketplace data is stale. Refresh the marketplace and choose an active on-chain offer.';
+    }
+    if (functionName === 'activate_loan') {
+      return 'Loan cannot be activated on-chain. It may no longer be PendingCollateral, or the wallet/vault state is stale. Refresh loan details and retry.';
+    }
+  }
+
   return rawError;
 };
 
@@ -334,6 +343,34 @@ const parseReturnValue = (returnValue: unknown): unknown => {
     return undefined;
   }
 };
+
+export async function readContractValue(
+  contractId: string,
+  functionName: string,
+  args: any[],
+  sourceWallet: string
+): Promise<unknown> {
+  const accountResponse = await sorobanRpc.getAccount(sourceWallet);
+  const account = new Account(sourceWallet, accountResponse.sequenceNumber());
+
+  const operation = new Contract(contractId).call(functionName, ...args);
+  const tx = new TransactionBuilder(account, {
+    fee: '100000',
+    networkPassphrase: PASSPHRASE,
+  })
+    .addOperation(operation)
+    .setTimeout(60)
+    .build();
+
+  const simulated = await sorobanRpc.simulateTransaction(tx);
+  if (rpc.Api.isSimulationError(simulated)) {
+    const rawError = simulated.error ?? 'Unknown simulation error';
+    const friendlyMessage = normalizeSorobanSimulationError(rawError, functionName);
+    throw new Error(`Simulation failed: ${friendlyMessage}`);
+  }
+
+  return parseReturnValue(simulated.result?.retval);
+}
 
 const toIsoTimestamp = (value: unknown): string | undefined => {
   if (value instanceof Date) {

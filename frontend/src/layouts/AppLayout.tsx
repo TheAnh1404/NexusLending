@@ -5,6 +5,7 @@ import { useWallet } from '../hooks/useWallet';
 import { SwapModal } from '../components/common/SwapModal';
 import { isAdminWallet } from '../config/admin';
 import { filterWalletActivities } from '../utils/activity';
+import { formatCurrency, isOpenLoanStatus } from '../utils/finance';
 import {
   Layout as AntLayout,
   Menu,
@@ -44,6 +45,7 @@ const { Text, Paragraph } = Typography;
 const { useBreakpoint } = Grid;
 
 const formatActivityType = (type: string): string => type.replace(/_/g, ' ');
+const LIVE_WALLET_OVERVIEW_REFRESH_MS = 10_000;
 
 const formatActivityTime = (timestamp: string): string => {
   const date = new Date(timestamp);
@@ -58,7 +60,7 @@ const shortValue = (value?: string): string => {
 };
 
 export const AppLayout: React.FC = () => {
-  const { wallet, disconnectWallet, activities, loanOffers, loans, connectWallet } = useAppContext();
+  const { wallet, disconnectWallet, activities, loanOffers, loans, connectWallet, refreshData } = useAppContext();
   const {
     isConnected,
     isLoading,
@@ -88,6 +90,20 @@ export const AppLayout: React.FC = () => {
       connectWallet(publicKey);
     }
   }, [isConnected, publicKey, wallet.connected, connectWallet]);
+
+  React.useEffect(() => {
+    if (!isConnected) return;
+
+    const syncWalletOverview = () => {
+      void refreshData().catch((error) => {
+        console.error('Unable to refresh wallet overview data:', error);
+      });
+    };
+
+    syncWalletOverview();
+    const intervalId = window.setInterval(syncWalletOverview, LIVE_WALLET_OVERVIEW_REFRESH_MS);
+    return () => window.clearInterval(intervalId);
+  }, [isConnected, refreshData]);
 
   // If wallet is not connected, redirect to /connect
   React.useEffect(() => {
@@ -282,9 +298,23 @@ export const AppLayout: React.FC = () => {
     </div>
   );
 
-  // Calculate active loans where user is lender or borrower
-  const lenderLoansCount = loans.filter((l) => l.lender === wallet.address && ['Active', 'Warning', 'PendingCollateral'].includes(l.status)).length;
-  const borrowerLoansCount = loans.filter((l) => l.borrower === wallet.address && ['Active', 'Warning', 'PendingCollateral'].includes(l.status)).length;
+  const overviewWalletAddress = publicKey ?? wallet.address;
+  const lenderOpenLoans = loans.filter((loan) =>
+    loan.lender === overviewWalletAddress && isOpenLoanStatus(loan.status)
+  );
+  const borrowerOpenLoans = loans.filter((loan) =>
+    loan.borrower === overviewWalletAddress && isOpenLoanStatus(loan.status)
+  );
+  const lenderOpenOffers = loanOffers.filter((offer) =>
+    offer.lender === overviewWalletAddress && ['Funding', 'Active'].includes(offer.status ?? 'Draft')
+  );
+  const lendingPositionsCount = lenderOpenLoans.length + lenderOpenOffers.length;
+  const borrowingPositionsCount = borrowerOpenLoans.length;
+  const lendingExposure = lenderOpenLoans.reduce((sum, loan) => sum + loan.amount, 0)
+    + lenderOpenOffers.reduce((sum, offer) => sum + offer.amount, 0);
+  const borrowingDebt = borrowerOpenLoans
+    .filter((loan) => loan.status !== 'PendingCollateral')
+    .reduce((sum, loan) => sum + loan.outstandingDebt, 0);
 
   return (
     <AntLayout style={{ minHeight: '100vh' }}>
@@ -404,8 +434,19 @@ export const AppLayout: React.FC = () => {
                         Swap XLM to USDC
                       </Button>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed var(--border-color)', paddingTop: '4px', marginTop: '4px', fontSize: '10px' }}>
-                      <span style={{ color: 'var(--text-muted)' }}>Lending: {lenderLoansCount} | Borrowing: {borrowerLoansCount}</span>
+                    <div style={{ borderTop: '1px dashed var(--border-color)', paddingTop: '6px', marginTop: '4px', fontSize: '10px', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Lending</span>
+                        <span style={{ color: 'var(--text-main)', fontWeight: 700, textAlign: 'right' }}>
+                          {lendingPositionsCount} positions · {formatCurrency(lendingExposure, 'USDC')}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Borrowing</span>
+                        <span style={{ color: 'var(--text-main)', fontWeight: 700, textAlign: 'right' }}>
+                          {borrowingPositionsCount} positions · {formatCurrency(borrowingDebt, 'USDC')}
+                        </span>
+                      </div>
                     </div>
                   </>
                 )}

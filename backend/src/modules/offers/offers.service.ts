@@ -12,6 +12,7 @@ import type {
   AcceptOfferInput,
   CreateOfferInput,
   OfferActionWalletInput,
+  SyncOfferInput,
   UpdateOfferStatusInput
 } from './offers.schemas';
 
@@ -75,10 +76,26 @@ const markVerifiedEventProcessed = async (
 
 const requireOfferOwner = (
   offer: { lenderWallet: string },
-  input: OfferActionWalletInput | undefined
+  input: { wallet?: string } | undefined
 ) => {
   if (input?.wallet && input.wallet !== offer.lenderWallet) {
     throw new ApiError(403, 'Only the offer lender can perform this action');
+  }
+};
+
+const offerStatusFromOnChain = (status: string | undefined): OfferStatus | undefined => {
+  if (!status) return undefined;
+  const match = ['Draft', 'Funding', 'Active', 'Matched', 'Cancelled', 'Expired']
+    .find((item) => status.includes(item));
+  return match as OfferStatus | undefined;
+};
+
+const assertMatchingContractOfferId = (
+  verifiedOfferId: string,
+  expectedOfferId?: string | bigint | number | null
+) => {
+  if (expectedOfferId !== undefined && expectedOfferId !== null && String(expectedOfferId) !== verifiedOfferId) {
+    throw new ApiError(400, `Verified offer id ${verifiedOfferId} does not match expected offer id ${String(expectedOfferId)}`);
   }
 };
 
@@ -190,20 +207,95 @@ export const offersService = {
     });
   },
 
+  async deploy(id: string, input?: OfferActionWalletInput) {
+    const offer = await this.getById(id);
+    requireOfferOwner(offer, input);
+    if (offer.status !== 'Draft') {
+      throw new ApiError(400, 'Only Draft offers can be deployed');
+    }
+
+    const verified = await verificationService.verifyAction({
+      action: 'create_offer',
+      txHash: input?.txHash ?? '',
+      expectedContractId: env.marketplaceContractId,
+      expectedWallet: offer.lenderWallet,
+      expectedAmount: offer.loanAmount
+    });
+    const contractOfferId = requireVerifiedId(verified.offerId, 'contractOfferId');
+    assertMatchingContractOfferId(contractOfferId, input?.contractOfferId);
+    assertMatchingContractOfferId(contractOfferId, offer.contractOfferId);
+
+    return prisma.$transaction(async (tx) => {
+      const updated = await tx.loanOffer.update({
+        where: { id },
+        data: {
+          contractOfferId: BigInt(contractOfferId),
+          txHash: verified.transaction.txHash,
+          explorerUrl: verified.explorerUrl,
+          ledger: verified.transaction.ledger,
+          blockTimestamp: verified.transaction.confirmedAt
+        },
+        include: { loans: true }
+      });
+      await markVerifiedEventProcessed(tx, verified);
+      await upsertLedgerTransaction(tx, 'CREATE_OFFER', updated.lenderWallet, {
+        offerId: id,
+        asset: updated.loanAsset,
+        amount: updated.loanAmount,
+        receipt: verified,
+        details: `Deployed draft offer ${id} on-chain before escrow funding.`,
+        metadata: {
+          contractFunction: 'create_offer',
+          contractOfferId
+        }
+      });
+      return updated;
+    });
+  },
+
+  async syncChain(id: string, input?: SyncOfferInput) {
+    const offer = await this.getById(id);
+    if (!offer.contractOfferId) {
+      return offer;
+    }
+
+    const onChainOffer = await contractReaderService.readOffer(offer.contractOfferId, input?.wallet ?? offer.lenderWallet);
+    if (onChainOffer.lender && onChainOffer.lender !== offer.lenderWallet) {
+      throw new ApiError(400, 'On-chain offer lender does not match this offer');
+    }
+    if (!decimal(onChainOffer.loanAmount).eq(offer.loanAmount)) {
+      throw new ApiError(400, 'On-chain offer amount does not match this offer');
+    }
+    const status = offerStatusFromOnChain(onChainOffer.status);
+    if (!status || status === offer.status) {
+      return offer;
+    }
+
+    return prisma.loanOffer.update({
+      where: { id },
+      data: { status },
+      include: { loans: true }
+    });
+  },
+
   async fund(id: string, input?: OfferActionWalletInput) {
     const offer = await this.getById(id);
-    if (offer.status !== 'Draft') {
-      throw new ApiError(400, 'Only Draft offers can be funded');
-    }
+    requireOfferOwner(offer, input);
+    const expectedOfferId = offer.contractOfferId?.toString() ?? input?.contractOfferId?.toString();
     const verified = await verificationService.verifyAction({
       action: 'fund_offer',
       txHash: input?.txHash ?? '',
       expectedContractId: env.marketplaceContractId,
-      expectedOfferId: offer.contractOfferId?.toString(),
+      expectedOfferId,
       expectedAmount: offer.loanAmount
     });
-    if (verified.alreadyProcessed) return this.getById(id);
     const contractOfferId = requireVerifiedId(verified.offerId, 'contractOfferId');
+    assertMatchingContractOfferId(contractOfferId, input?.contractOfferId);
+    assertMatchingContractOfferId(contractOfferId, offer.contractOfferId);
+
+    if (offer.status !== 'Draft') {
+      return this.getById(id);
+    }
 
     return prisma.$transaction(async (tx) => {
       const updated = await tx.loanOffer.update({
@@ -236,8 +328,9 @@ export const offersService = {
 
   async activate(id: string, input?: OfferActionWalletInput) {
     const offer = await this.getById(id);
-    if (offer.status !== 'Funding') {
-      throw new ApiError(400, 'Only Funding offers can be activated');
+    requireOfferOwner(offer, input);
+    if (offer.status === 'Active') {
+      return offer;
     }
     const verified = await verificationService.verifyAction({
       action: 'activate_offer',
@@ -247,6 +340,9 @@ export const offersService = {
       expectedAmount: offer.loanAmount
     });
     if (verified.alreadyProcessed) return this.getById(id);
+    if (offer.status !== 'Funding') {
+      throw new ApiError(400, 'Only Funding offers can be activated');
+    }
 
     return prisma.$transaction(async (tx) => {
       const updated = await tx.loanOffer.update({
@@ -393,8 +489,11 @@ export const offersService = {
     const { status: _ignoredStatus, ...riskMetrics } = riskPatch;
 
     return prisma.$transaction(async (tx) => {
-      const loan = await tx.loan.create({
-        data: {
+      await markVerifiedEventProcessed(tx, verified);
+
+      const loan = await tx.loan.upsert({
+        where: { contractLoanId: BigInt(contractLoanId) },
+        create: {
           contractLoanId: BigInt(contractLoanId),
           offerId: offer.id,
           contractOfferId: offer.contractOfferId,
@@ -418,6 +517,19 @@ export const offersService = {
           blockTimestamp: verified.transaction.confirmedAt,
           ...riskMetrics
         },
+        update: {
+          offerId: offer.id,
+          contractOfferId: offer.contractOfferId,
+          lenderWallet: offer.lenderWallet,
+          borrowerWallet,
+          outstandingDebt,
+          collateralAmount,
+          txHash: verified.transaction.txHash,
+          explorerUrl: verified.explorerUrl,
+          ledger: verified.transaction.ledger,
+          blockTimestamp: verified.transaction.confirmedAt,
+          ...riskMetrics
+        },
         include: { offer: true }
       });
 
@@ -432,7 +544,6 @@ export const offersService = {
         }
       });
 
-      await markVerifiedEventProcessed(tx, verified);
       await upsertLedgerTransaction(tx, 'ACCEPT_OFFER', borrowerWallet, {
           offerId: offer.id,
           loanId: loan.id,

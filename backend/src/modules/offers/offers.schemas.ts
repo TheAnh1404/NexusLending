@@ -40,6 +40,10 @@ export const offerActionWalletSchema = z.object({
   contractOfferId: z.coerce.bigint().optional()
 }).merge(confirmedChainReceiptSchema);
 
+export const syncOfferSchema = z.object({
+  wallet: z.string().min(1).optional()
+});
+
 export const acceptOfferSchema = z.object({
   borrowerWallet: z.string().min(1).optional(),
   collateralAmount: decimalInput.optional(),
@@ -50,4 +54,5 @@ export const acceptOfferSchema = z.object({
 export type CreateOfferInput = z.infer<typeof createOfferSchema>;
 export type UpdateOfferStatusInput = z.infer<typeof updateOfferStatusSchema>;
 export type OfferActionWalletInput = z.infer<typeof offerActionWalletSchema>;
+export type SyncOfferInput = z.infer<typeof syncOfferSchema>;
 export type AcceptOfferInput = z.infer<typeof acceptOfferSchema>;

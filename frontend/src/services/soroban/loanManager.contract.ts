@@ -1,6 +1,6 @@
 import { Address, nativeToScVal } from '@stellar/stellar-sdk';
 import { CONTRACTS, STELLAR_DECIMALS } from './config';
-import { buildAndSubmitTx } from './transaction';
+import { buildAndSubmitTx, readContractValue } from './transaction';
 import type { TxStage } from './transaction';
 
 /** Convert a JS number/bigint to a Soroban u64 ScVal. */
@@ -11,7 +11,18 @@ const toU64 = (value: number | bigint | string): ReturnType<typeof nativeToScVal
 const toContractAmount = (amount: number, decimals: number = STELLAR_DECIMALS): ReturnType<typeof nativeToScVal> =>
   nativeToScVal(BigInt(Math.round(amount * 10 ** decimals)), { type: 'i128' });
 
+const enumVariantName = (value: unknown): string | null => {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value) && typeof value[0] === 'string') return value[0];
+  return null;
+};
+
 export const loanManagerContract = {
+  async getLoanStatus(contractLoanId: string | number | bigint, sourceWallet: string): Promise<string | null> {
+    const loan = await readContractValue(CONTRACTS.loanManager, 'get_loan', [toU64(contractLoanId)], sourceWallet);
+    return enumVariantName((loan as { status?: unknown } | undefined)?.status);
+  },
+
   async activateLoanTx(contractLoanId: string | number | bigint, wallet: string, onStage?: (stage: TxStage) => void) {
     const args = [toU64(contractLoanId)];
     return buildAndSubmitTx(CONTRACTS.loanManager, 'activate_loan', args, wallet, onStage);
