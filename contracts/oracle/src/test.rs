@@ -1,7 +1,10 @@
 extern crate std;
 
 use super::*;
-use soroban_sdk::{testutils::{Address as _, Ledger}, Address, Env, String};
+use soroban_sdk::{
+    testutils::{Address as _, Ledger},
+    Address, Env, String,
+};
 use std::boxed::Box;
 
 fn setup() -> (&'static Env, Address, OracleContractClient<'static>) {
@@ -90,7 +93,10 @@ fn update_price() {
 
     let price = client.get_price(&String::from_str(env, "XLM/USDC"));
     assert_eq!(price.price, 1_500_000);
-    assert_eq!(client.get_last_updated(&String::from_str(env, "XLM/USDC")), 100);
+    assert_eq!(
+        client.get_last_updated(&String::from_str(env, "XLM/USDC")),
+        100
+    );
 }
 
 #[test]
@@ -123,4 +129,36 @@ fn stale_price_detection() {
     assert!(!client.is_price_stale(&String::from_str(env, "XLM/USDC")));
     env.ledger().set_timestamp(100 + MAX_PRICE_AGE_SECONDS + 1);
     assert!(client.is_price_stale(&String::from_str(env, "XLM/USDC")));
+}
+
+#[test]
+fn fresh_price_rejects_stale_asset_pair() {
+    let (env, _, client) = setup();
+    env.mock_all_auths();
+    let base_asset = Address::generate(env);
+    let quote_asset = Address::generate(env);
+    env.ledger().set_timestamp(100);
+    client.set_price_for_assets(
+        &base_asset,
+        &quote_asset,
+        &String::from_str(env, "XLM/USDC"),
+        &2_500_000,
+        &7,
+        &String::from_str(env, "admin"),
+    );
+
+    assert!(!client.is_price_for_assets_stale(&base_asset, &quote_asset));
+    assert_eq!(
+        client
+            .get_fresh_price_for_assets(&base_asset, &quote_asset)
+            .price,
+        2_500_000
+    );
+
+    env.ledger().set_timestamp(100 + MAX_PRICE_AGE_SECONDS + 1);
+
+    assert!(client.is_price_for_assets_stale(&base_asset, &quote_asset));
+    assert!(client
+        .try_get_fresh_price_for_assets(&base_asset, &quote_asset)
+        .is_err());
 }

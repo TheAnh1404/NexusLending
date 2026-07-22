@@ -1,526 +1,150 @@
-# 09 — Backend Specification
+# 09 - Backend Specification
 
-> REST API reference, module architecture, indexer design, and operational responsibilities for the Nexus backend service.
+The backend is an Express + TypeScript + Prisma service. It is a verified index/cache layer for Nexus protocol state; it is not a wallet, custodian, or transaction signer.
 
----
+## Current Responsibilities
 
-## 1. Purpose
+- Serve REST data to the React frontend.
+- Persist users, offers, loans, oracle prices, transaction receipts, indexed events, and indexer checkpoints.
+- Verify submitted Stellar transaction hashes through Soroban RPC before mutating protocol state.
+- Match expected contract IDs, event names, actors, entities, and amounts for sensitive actions.
+- Read authoritative offer/loan/risk state back from contracts after confirmed mutations.
+- Run a background event indexer that polls Soroban RPC and deduplicates by `(txHash, eventIndex)`.
 
-This document specifies the backend service that sits between the smart contracts and the frontend. It covers every REST endpoint, the module architecture, the event indexer, and the backend's security boundaries. For the data models it serves, see `08_DATA_MODEL.md`. For the frontend that consumes this API, see `10_FRONTEND_INTEGRATION.md`.
+## Verification Boundary
 
----
+In `VITE_DATA_MODE=api`, the frontend signs and submits transactions through Freighter/Stellar SDK. The backend only accepts the resulting confirmed receipt:
 
-## 2. Architecture
-
-```
-┌──────────────────────────────────────────────────┐
-│                Backend Service                   │
-│  Express + TypeScript                            │
-├──────────────────────────────────────────────────┤
-│                                                  │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐       │
-│  │  Routes   │  │Modules   │  │ Prisma   │       │
-│  │  index.ts │→│ *.routes  │→│  ORM     │→ PG   │
-│  └──────────┘  │ *.service │  └──────────┘       │
-│                │ *.controller│                    │
-│                └──────────┘                      │
-│                                                  │
-│  ┌──────────┐  ┌──────────────────┐              │
-│  │ Indexer   │  │ Soroban Service  │              │
-│  │ (events)  │  │ (tx assembly)    │              │
-│  └──────────┘  └──────────────────┘              │
-│                                                  │
-└──────────────────────────────────────────────────┘
+```json
+{
+  "txHash": "64_hex_chars",
+  "explorerUrl": "https://stellar.expert/explorer/testnet/tx/<txHash>",
+  "ledger": 123456,
+  "txStatus": "SUCCESS",
+  "contractId": "C...",
+  "blockTimestamp": "2026-07-22T00:00:00.000Z",
+  "contractReturnValue": "optional"
+}
 ```
 
-### 2.1 Module Structure
+`requireConfirmedReceipt()` rejects missing hashes, non-64-character hashes, non-Stellar-Expert URLs, missing/invalid ledgers, and any non-`SUCCESS` status.
 
-| Module | Directory | Responsibility |
-|--------|-----------|----------------|
-| **Users** | `src/modules/users/` | Wallet registration, user profiles |
-| **Offers** | `src/modules/offers/` | Loan offer CRUD, status management |
-| **Loans** | `src/modules/loans/` | Loan queries, status updates, HF tracking |
-| **Oracle** | `src/modules/oracle/` | Price data, HF recalculation |
-| **Transactions** | `src/modules/transactions/` | Transaction log |
-| **Soroban** | `src/modules/soroban/` | Contract interaction stubs (to be replaced with real Soroban SDK calls) |
+`verificationService.verifyAction()` then verifies the action against Soroban RPC. Services use it for offer deployment/funding/activation/cancel/expire/accept, loan activation/collateral/repay/liquidation, oracle price updates, and transaction logging.
 
-### 2.2 Security Boundary
+## API Surface
 
-> **The backend NEVER stores user funds. It NEVER holds private keys. It NEVER makes financial decisions.**
+Base URL: `/api`.
 
-The backend is a **read cache** and **API gateway**. All authoritative financial state lives on-chain. The backend:
-- Indexes contract events into PostgreSQL for fast queries
-- Serves cached data to the frontend via REST
-- Optionally assembles unsigned transactions for the frontend to sign
-- Computes derived metrics (HF, LTV, risk zone) from on-chain + oracle data
+### Health
 
----
-
-## 3. REST API Reference
-
-Base URL: `http://localhost:5000/api`
-
-### 3.1 Health Check
-
-| Method | Path | Description |
-|--------|------|-------------|
+| Method | Path | Purpose |
+| --- | --- | --- |
 | `GET` | `/health` | Service health check |
 
-**Response:** `200 OK`
-```json
-{ "status": "ok" }
+### Users
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/users/:wallet` | Get a wallet user |
+| `POST` | `/users` | Create/register a wallet user |
+
+### Offers
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/offers` | List offers. Filters: `status`, `lenderWallet`, `marketplaceOnly=true` |
+| `GET` | `/offers/:id` | Get offer by database ID |
+| `POST` | `/offers` | Create local draft terms |
+| `POST` | `/offers/:id/deploy` | Persist verified `create_offer` receipt and contract offer ID |
+| `POST` | `/offers/:id/fund` | Verify `fund_offer`; move `Draft -> Funding` |
+| `POST` | `/offers/:id/sync-chain` | Read current on-chain offer and sync DB |
+| `POST` | `/offers/:id/activate` | Verify `activate_offer`; move `Funding -> Active` |
+| `POST` | `/offers/:id/cancel` | Verify `cancel_offer`; move to `Cancelled` |
+| `POST` | `/offers/:id/expire` | Verify `expire_offer`; move to `Expired` |
+| `POST` | `/offers/:id/accept` | Verify `accept_offer`; move offer to `Matched` and create `PendingCollateral` loan |
+| `PATCH` | `/offers/:id/status` | Administrative/status sync endpoint |
+
+### Loans
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/loans` | List loans. Filters: `status`, `borrowerWallet`, `lenderWallet`, `riskZone` |
+| `GET` | `/loans/liquidatable` | List `LiquidationPlanning` and `Defaulted` loans |
+| `GET` | `/loans/:id` | Get loan by database ID |
+| `POST` | `/loans` | Create a loan record when needed for sync/import paths |
+| `POST` | `/loans/:id/activate` | Verify `activate_loan`; lock collateral and disburse principal |
+| `PATCH` | `/loans/:id` | Verify `ADD_COLLATERAL`, `PARTIAL_REPAY`, `FULL_REPAY`, or `LIQUIDATE` action |
+
+### Oracle
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/oracle/prices` | Return cached oracle prices |
+| `POST` | `/oracle/prices` | Verify oracle update receipt and upsert price |
+| `POST` | `/oracle/recalculate-health` | Read current contract risk for loans and update cache |
+
+### Transactions
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/transactions` | List receipts. Filters: `wallet`, `relatedWallet`, `type`, `loanId`, `offerId` |
+| `POST` | `/transactions` | Verify and persist a confirmed transaction receipt |
+
+## State Names
+
+Backend enum names match the current contract/frontend state names.
+
+Offer statuses:
+
+```text
+Draft, Funding, Active, Matched, Cancelled, Expired
 ```
 
----
+Loan statuses:
 
-### 3.2 Users
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/users/:wallet` | Get user by wallet address |
-| `POST` | `/users` | Create or register a user |
-
-#### `GET /users/:wallet`
-
-**Path Parameters:**
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `wallet` | `string` | Stellar public key |
-
-**Response:** `200 OK`
-```json
-{
-  "id": "clx...",
-  "wallet": "GABC...XYZ",
-  "role": "LENDER",
-  "displayName": "Alice",
-  "createdAt": "2026-01-15T10:00:00Z",
-  "updatedAt": "2026-01-15T10:00:00Z"
-}
+```text
+PendingCollateral, Active, Warning, LiquidationPlanning, Repaid, Closed, Expired, Defaulted, Liquidated
 ```
 
-#### `POST /users`
+## Indexer
 
-**Request Body:**
-```json
-{
-  "wallet": "GABC...XYZ",
-  "role": "LENDER",
-  "displayName": "Alice"
-}
+The background indexer:
+
+- Connects to the configured Soroban RPC network.
+- Filters contract events by the deployed Marketplace, Vault, Loan Manager, and Oracle IDs.
+- Parses event topics/data into normalized `IndexedEvent` records.
+- Applies event changes to `LoanOffer`, `Loan`, `OraclePrice`, and `Transaction`.
+- Uses `(txHash, eventIndex)` uniqueness to make polling idempotent.
+- Keeps `IndexerCheckpoint` with current ledger, processed count, pending count, failures, and last error.
+
+API verification and background indexing share the same persistence rules, so a transaction handled through a mutation route will be ignored safely when later seen by the indexer.
+
+## Soroban Service
+
+`src/modules/soroban/soroban.service.ts` is not a mock transaction generator in the live path. The live frontend assembles, signs, submits, and confirms Soroban calls. Backend services verify receipts and read contract state. Any old mock-chain flow must remain outside `DATA_MODE=api`; API mode requires real Soroban RPC verification.
+
+## Environment
+
+Important backend variables:
+
+| Variable | Purpose |
+| --- | --- |
+| `DATABASE_URL` | PostgreSQL connection string |
+| `PORT` | Express runtime port |
+| `FRONTEND_URL` | CORS allowlist origin |
+| `STELLAR_NETWORK` | `testnet`, `public`, `futurenet`, or standalone/local |
+| `STELLAR_RPC_URL` | Soroban RPC endpoint |
+| `STELLAR_READ_SOURCE_ACCOUNT` | Optional account used for read-only contract simulations when events do not expose a usable source |
+| `MARKETPLACE_CONTRACT_ID` | Marketplace contract ID |
+| `LOAN_MANAGER_CONTRACT_ID` | Loan Manager contract ID |
+| `ORACLE_CONTRACT_ID` | Oracle contract ID |
+| `VAULT_CONTRACT_ID` | Vault contract ID |
+
+## Validation Commands
+
+Run from `backend/`:
+
+```bash
+npm run build
+npm run test
 ```
-
-**Response:** `201 Created` — User object
-
----
-
-### 3.3 Offers
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/offers` | List all offers (with filters) |
-| `GET` | `/offers/:id` | Get offer by internal ID |
-| `POST` | `/offers` | Create a new offer record |
-| `PATCH` | `/offers/:id/status` | Update offer status |
-
-#### `GET /offers`
-
-**Query Parameters:**
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `status` | `string` | Filter by status (LISTED, ACCEPTED, CANCELLED) |
-| `lenderWallet` | `string` | Filter by lender |
-
-**Response:** `200 OK` — Array of LoanOffer objects
-
-#### `GET /offers/:id`
-
-**Response:** `200 OK` — Single LoanOffer object
-```json
-{
-  "id": "clx...",
-  "contractOfferId": 1,
-  "lenderWallet": "GABC...XYZ",
-  "loanAsset": "CDLZ...USDC",
-  "loanAmount": "1000.0000000",
-  "fixedAprBps": 1000,
-  "durationDays": 30,
-  "collateralAsset": "CDLZ...XLM",
-  "maxLtvBps": 7500,
-  "liquidationThresholdBps": 8000,
-  "liquidationBonusBps": 500,
-  "gracePeriodDays": 7,
-  "minHealthFactorBps": 14000,
-  "status": "LISTED",
-  "description": "30-day USDC loan at 10% APR",
-  "txHash": "abc123...",
-  "explorerUrl": "https://stellar.expert/...",
-  "createdAt": "2026-01-15T10:00:00Z",
-  "updatedAt": "2026-01-15T10:00:00Z"
-}
-```
-
-#### `POST /offers`
-
-**Request Body:**
-```json
-{
-  "lenderWallet": "GABC...XYZ",
-  "loanAsset": "CDLZ...USDC",
-  "loanAmount": 1000,
-  "fixedAprBps": 1000,
-  "durationDays": 30,
-  "collateralAsset": "CDLZ...XLM",
-  "maxLtvBps": 7500,
-  "liquidationThresholdBps": 8000,
-  "liquidationBonusBps": 500,
-  "gracePeriodDays": 7,
-  "minHealthFactorBps": 14000,
-  "description": "30-day USDC loan at 10% APR"
-}
-```
-
-**Response:** `201 Created` — LoanOffer object with `txHash` and `contractOfferId`
-
-#### `PATCH /offers/:id/status`
-
-**Request Body:**
-```json
-{
-  "status": "CANCELLED"
-}
-```
-
-**Response:** `200 OK` — Updated LoanOffer object
-
----
-
-### 3.4 Loans
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/loans` | List all loans (with filters) |
-| `GET` | `/loans/liquidatable` | List liquidatable loans |
-| `GET` | `/loans/:id` | Get loan by internal ID |
-| `POST` | `/loans` | Create a loan record |
-| `PATCH` | `/loans/:id` | Update loan fields |
-
-#### `GET /loans`
-
-**Query Parameters:**
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `status` | `string` | Filter by loan status |
-| `borrowerWallet` | `string` | Filter by borrower |
-| `lenderWallet` | `string` | Filter by lender |
-| `riskZone` | `string` | Filter by risk zone |
-
-**Response:** `200 OK` — Array of Loan objects
-
-#### `GET /loans/liquidatable`
-
-Returns loans where `riskZone = LIQUIDATION_PLANNING` or `status = DEFAULTED`.
-
-**Response:** `200 OK` — Array of Loan objects
-
-#### `GET /loans/:id`
-
-**Response:** `200 OK`
-```json
-{
-  "id": "clx...",
-  "contractLoanId": 1,
-  "offerId": "clx...",
-  "contractOfferId": 1,
-  "lenderWallet": "GABC...XYZ",
-  "borrowerWallet": "GDEF...XYZ",
-  "loanAsset": "CDLZ...USDC",
-  "principal": "1000.0000000",
-  "outstandingDebt": "1008.2191780",
-  "fixedAprBps": 1000,
-  "collateralAsset": "CDLZ...XLM",
-  "collateralAmount": "10000.0000000",
-  "startTime": "2026-01-15T10:00:00Z",
-  "dueTime": "2026-02-14T10:00:00Z",
-  "maxLtvBps": 7500,
-  "liquidationThresholdBps": 8000,
-  "liquidationBonusBps": 500,
-  "minHealthFactorBps": 14000,
-  "gracePeriodDays": 7,
-  "healthFactor": "1.984126",
-  "ltv": "0.403287",
-  "riskZone": "SAFE",
-  "status": "ACTIVE",
-  "claimedByLender": false,
-  "createdAt": "2026-01-15T10:05:00Z",
-  "updatedAt": "2026-01-15T12:00:00Z"
-}
-```
-
-#### `POST /loans`
-
-**Request Body:** Loan creation data (typically assembled from an accepted offer)
-
-#### `PATCH /loans/:id`
-
-**Request Body:** Partial update fields (status, outstandingDebt, collateralAmount, healthFactor, ltv, riskZone, etc.)
-
----
-
-### 3.5 Oracle
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/oracle/prices` | Get all current prices |
-| `POST` | `/oracle/prices` | Set / update a price |
-| `POST` | `/oracle/recalculate-health` | Recalculate HF for all active loans |
-
-#### `GET /oracle/prices`
-
-**Response:** `200 OK`
-```json
-[
-  {
-    "id": "clx...",
-    "assetPair": "XLM/USDC",
-    "baseAsset": "CDLZ...XLM",
-    "quoteAsset": "CDLZ...USDC",
-    "price": "0.250000000000",
-    "decimals": 7,
-    "source": "admin",
-    "updatedAt": "2026-01-15T12:00:00Z"
-  }
-]
-```
-
-#### `POST /oracle/prices`
-
-**Request Body:**
-```json
-{
-  "assetPair": "XLM/USDC",
-  "baseAsset": "CDLZ...XLM",
-  "quoteAsset": "CDLZ...USDC",
-  "price": 0.25,
-  "decimals": 7,
-  "source": "admin"
-}
-```
-
-#### `POST /oracle/recalculate-health`
-
-Triggers a recalculation of Health Factor, LTV, and risk zone for all active loans using the latest oracle prices.
-
-**Response:** `200 OK`
-```json
-{
-  "recalculated": 15,
-  "warnings": 2,
-  "liquidatable": 1
-}
-```
-
----
-
-### 3.6 Transactions
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/transactions` | List transactions (with filters) |
-| `POST` | `/transactions` | Create a transaction record |
-
-#### `GET /transactions`
-
-**Query Parameters:**
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `wallet` | `string` | Filter by wallet |
-| `type` | `string` | Filter by transaction type |
-| `loanId` | `string` | Filter by loan |
-| `offerId` | `string` | Filter by offer |
-
-**Response:** `200 OK` — Array of Transaction objects
-
-#### `POST /transactions`
-
-**Request Body:**
-```json
-{
-  "txHash": "abc123...",
-  "type": "CREATE_OFFER",
-  "wallet": "GABC...XYZ",
-  "offerId": "clx...",
-  "asset": "USDC",
-  "amount": 1000,
-  "metadata": { "apr": 1000, "duration": 30 }
-}
-```
-
----
-
-## 4. Event Indexer
-
-### 4.1 Architecture
-
-The indexer polls Soroban RPC for contract events and writes them to PostgreSQL:
-
-```mermaid
-sequenceDiagram
-    participant RPC as Soroban RPC
-    participant IDX as Indexer
-    participant DB as PostgreSQL
-
-    loop Every N seconds
-        IDX->>RPC: getEvents(startLedger, contractIds)
-        RPC-->>IDX: Event[]
-        
-        loop For each event
-            IDX->>IDX: Parse event topic + data
-            IDX->>DB: Upsert record
-        end
-        
-        IDX->>IDX: Update lastProcessedLedger
-    end
-```
-
-### 4.2 Event-to-Database Mapping
-
-| Contract Event | DB Action |
-|----------------|-----------|
-| `offer_new` | Insert `LoanOffer` row |
-| `offer_can` | Update `LoanOffer.status → CANCELLED` |
-| `offer_acc` | Update `LoanOffer.status → ACCEPTED`, Insert `Loan` row |
-| `loan_new` | Insert `Loan` row (or confirm existing) |
-| `state` | Update `Loan.status` |
-| `col_add` | Update `Loan.collateralAmount`, recalculate HF |
-| `part_pay` | Update `Loan.outstandingDebt`, recalculate HF |
-| `repaid` | Update `Loan.status → REPAID`, `outstandingDebt → 0` |
-| `liq` | Update `Loan.outstandingDebt` and `collateralAmount`, update status |
-| `price_upd` | Upsert `OraclePrice` row |
-| All events | Insert `Transaction` row |
-
-### 4.3 HF Recalculation Workflow
-
-```mermaid
-graph TD
-    A[Oracle price updated] --> B[Fetch all Active/Warning/LP loans]
-    B --> C{For each loan}
-    C --> D[Get collateral price from OraclePrice table]
-    D --> E[Calculate HF and LTV]
-    E --> F[Determine riskZone]
-    F --> G[Update Loan row]
-    G --> C
-```
-
-**HF Formula (Backend):**
-```
-collateral_value = collateral_amount × oracle_price
-health_factor = (collateral_value × liquidation_threshold_bps) / outstanding_debt
-ltv = outstanding_debt / collateral_value
-```
-
-**Risk Zone Mapping:**
-```
-if health_factor >= 1.4 → SAFE
-else if health_factor >= 1.2 → WARNING
-else → LIQUIDATION_PLANNING
-```
-
----
-
-## 5. Soroban Service (Integration Layer)
-
-### 5.1 Current State
-
-The Soroban service (`src/modules/soroban/soroban.service.ts`) currently contains **stub implementations** that return mock transaction hashes and explorer URLs. This is documented in the project README.
-
-### 5.2 Target Implementation
-
-When fully integrated, the Soroban service will:
-
-| Function | Description |
-|----------|-------------|
-| `assembleCreateOffer()` | Build unsigned `create_offer()` transaction |
-| `assembleCancelOffer()` | Build unsigned `cancel_offer()` transaction |
-| `assembleAcceptOffer()` | Build unsigned `accept_offer()` transaction |
-| `assembleAddCollateral()` | Build unsigned `add_collateral()` transaction |
-| `assemblePartialRepay()` | Build unsigned `partial_repay()` transaction |
-| `assembleFullRepay()` | Build unsigned `full_repay()` transaction |
-| `assembleLiquidate()` | Build unsigned `liquidate()` transaction |
-| `assembleSetPrice()` | Build unsigned `set_price_for_assets()` transaction |
-| `submitTransaction()` | Submit signed transaction to Soroban RPC |
-| `pollEvents()` | Poll contract events from Soroban RPC |
-
-### 5.3 Transaction Assembly Flow
-
-```mermaid
-sequenceDiagram
-    actor User
-    participant FE as Frontend
-    participant BE as Backend
-    participant RPC as Soroban RPC
-    participant W as Wallet
-
-    User->>FE: Click "Create Offer"
-    FE->>BE: POST /offers (with params)
-    BE->>RPC: Simulate transaction
-    RPC-->>BE: Simulated XDR
-    BE-->>FE: Unsigned transaction XDR
-    FE->>W: Request signature
-    W-->>FE: Signed XDR
-    FE->>RPC: Submit signed transaction
-    RPC-->>FE: Transaction result
-    FE->>BE: POST /transactions (record tx)
-```
-
----
-
-## 6. Database Migrations
-
-| Tool | Description |
-|------|-------------|
-| `npx prisma migrate dev` | Create and apply migrations in development |
-| `npx prisma migrate deploy` | Apply migrations in production |
-| `npx prisma generate` | Generate Prisma client after schema changes |
-| `npx prisma db seed` | Seed database with test data |
-
-The migration files are stored in `backend/prisma/migrations/`.
-
----
-
-## 7. Error Handling
-
-| HTTP Status | Usage |
-|-------------|-------|
-| `200` | Successful GET, PATCH |
-| `201` | Successful POST (created) |
-| `400` | Validation error, invalid parameters |
-| `404` | Resource not found |
-| `409` | Conflict (e.g., duplicate wallet) |
-| `500` | Internal server error |
-
-**Error Response Format:**
-```json
-{
-  "error": "Validation failed",
-  "message": "loan_amount must be positive",
-  "statusCode": 400
-}
-```
-
----
-
-## 8. Best Practices
-
-| Practice | Description |
-|----------|-------------|
-| **Idempotent Indexing** | Use `contractOfferId` and `contractLoanId` as unique keys to prevent duplicate records |
-| **Eventual Consistency** | Backend data may lag behind on-chain state by a few seconds |
-| **No Fund Custody** | Backend never calls token transfer functions directly |
-| **Input Validation** | Validate all incoming request bodies before database writes |
-| **Decimal Precision** | Use `Decimal(30,7)` for amounts to match Stellar's 7-decimal precision |
-| **Audit Trail** | Every mutation creates a `Transaction` record |
-
----
-
-*Previous: `08_DATA_MODEL.md` · Next: `10_FRONTEND_INTEGRATION.md`*

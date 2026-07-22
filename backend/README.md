@@ -7,7 +7,7 @@ Express + TypeScript + Prisma backend for indexing Nexus contract data and servi
 - Store indexed users, offers, loans, oracle prices, and transactions.
 - Serve REST APIs to the frontend.
 - Store `txHash` and explorer URLs.
-- Recalculate health factor/risk zones from indexed oracle prices.
+- Mirror Health Factor, LTV, and risk zones from Loan Manager contract reads.
 - Keep custody and sensitive lending logic inside Soroban contracts.
 
 ## Setup
@@ -71,7 +71,7 @@ Transactions:
 
 ## Finance Utility
 
-`src/utils/finance.ts` mirrors frontend rules:
+`src/utils/finance.ts` supports UI/mock previews and non-authoritative formatting:
 
 - `calculateHealthFactor()`
 - `calculateLTV()`
@@ -83,11 +83,12 @@ Transactions:
 
 The backend is database/indexer only. It never signs transactions, creates transaction hashes, or fabricates explorer URLs. Mutating endpoints accept only confirmed Soroban transaction receipts from the frontend wallet flow: `txHash`, `explorerUrl`, `ledger`, `txStatus=SUCCESS`, contract metadata, and optional block timestamp.
 
-The background `IndexerService` monitors Stellar Testnet RPC for contract events, parses them, and can mirror confirmed on-chain state into PostgreSQL asynchronously.
+The background `IndexerService` monitors Stellar RPC for contract events, paginates every result page, parses them, and mirrors confirmed on-chain state into PostgreSQL asynchronously.
 
 ### Background Indexer Service
 When the server starts:
-- It connects to Stellar Testnet RPC.
+- It connects to the configured Stellar RPC network.
 - Polls events filtered by the deployed `Marketplace`, `Vault`, `Oracle`, and `Loan Manager` contract addresses.
 - Parses topic structures (e.g. `offer_created`, `offer_accepted`, `loan_activated`) and updates database state.
+- Reads Loan Manager for authoritative Health Factor/LTV instead of recalculating them from database oracle rows.
 - Gracefully handles service shutdown.

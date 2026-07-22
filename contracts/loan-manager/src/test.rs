@@ -57,7 +57,7 @@ fn setup() -> Fixture<'static> {
 
     oracle.initialize(&admin);
     vault.initialize(&admin, &marketplace, &loan_manager_id);
-    loan_manager.initialize(&admin, &vault_id, &oracle_id);
+    loan_manager.initialize(&admin, &marketplace, &vault_id, &oracle_id);
     set_collateral_price_raw(env, &oracle, &collateral_asset, &loan_asset, 10, 0);
 
     Fixture {
@@ -153,6 +153,43 @@ fn create_pending_loan() {
 }
 
 #[test]
+fn direct_pending_loan_creation_requires_marketplace_auth() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let marketplace = Address::generate(&env);
+    let vault = Address::generate(&env);
+    let oracle = Address::generate(&env);
+    let lender = Address::generate(&env);
+    let borrower = Address::generate(&env);
+    let loan_asset = Address::generate(&env);
+    let collateral_asset = Address::generate(&env);
+    let loan_manager_id = env.register(LoanManagerContract, ());
+    let loan_manager = LoanManagerContractClient::new(&env, &loan_manager_id);
+    loan_manager.initialize(&admin, &marketplace, &vault, &oracle);
+
+    let forged_offer = LoanOffer {
+        offer_id: 1,
+        lender,
+        loan_asset,
+        loan_amount: 100,
+        fixed_apr_bps: 1_825,
+        duration_days: 20,
+        collateral_asset,
+        max_ltv_bps: 7_000,
+        liquidation_threshold_bps: 8_000,
+        liquidation_bonus_bps: 500,
+        grace_period_days: 3,
+        min_health_factor_bps: 14_000,
+        status: OfferStatus::Active,
+    };
+
+    let result = loan_manager.try_create_pending_loan_from_offer(&forged_offer, &borrower, &20);
+
+    assert!(result.is_err());
+    assert_eq!(loan_manager.get_loan_count(), 0);
+}
+
+#[test]
 fn rejects_offer_apr_above_twenty_percent() {
     let f = setup();
     let mut offer = offer(&f);
@@ -207,6 +244,17 @@ fn calculate_health_factor() {
     let loan_id = create_pending(&f, 20);
 
     assert_eq!(f.loan_manager.calculate_health_factor(&loan_id), 15_841);
+}
+
+#[test]
+fn stale_oracle_price_blocks_risk_calculation() {
+    let f = setup();
+    let loan_id = create_pending(&f, 20);
+    f.env.ledger().set_timestamp(SECONDS_PER_DAY + 1);
+
+    let result = f.loan_manager.try_calculate_health_factor(&loan_id);
+
+    assert!(result.is_err());
 }
 
 #[test]
@@ -295,6 +343,17 @@ fn full_repay_closes_loan() {
 }
 
 #[test]
+fn cleanup_repaid_loan_removes_storage() {
+    let f = setup();
+    let loan_id = activate_loan(&f);
+
+    f.loan_manager.full_repay(&loan_id);
+    f.loan_manager.cleanup_loan(&loan_id);
+
+    assert!(f.loan_manager.try_get_loan(&loan_id).is_err());
+}
+
+#[test]
 fn liquidation_only_allowed_when_hf_below_threshold() {
     let f = setup();
     let loan_id = activate_loan(&f);
@@ -330,9 +389,25 @@ fn defaulted_loan_can_be_liquidated() {
         .set_timestamp(loan.due_time + (loan.grace_period_days as u64 * SECONDS_PER_DAY) + 1);
 
     f.loan_manager.mark_defaulted(&loan_id);
+    set_collateral_price(&f, 10);
     f.loan_manager.liquidate(&loan_id, &f.liquidator, &50);
 
     let loan = f.loan_manager.get_loan(&loan_id);
     assert_eq!(loan.status, LoanStatus::Defaulted);
     assert!(loan.outstanding_debt < 101);
+}
+
+#[test]
+fn defaulted_liquidation_requires_fresh_oracle_price() {
+    let f = setup();
+    let loan_id = activate_loan(&f);
+    let loan = f.loan_manager.get_loan(&loan_id);
+    f.env
+        .ledger()
+        .set_timestamp(loan.due_time + (loan.grace_period_days as u64 * SECONDS_PER_DAY) + 1);
+
+    f.loan_manager.mark_defaulted(&loan_id);
+    let result = f.loan_manager.try_liquidate(&loan_id, &f.liquidator, &50);
+
+    assert!(result.is_err());
 }

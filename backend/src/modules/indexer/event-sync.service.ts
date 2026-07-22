@@ -28,8 +28,23 @@ const transactionTypeForEvent: Record<string, TransactionType> = {
 const loanStatusForEvent: Record<string, LoanStatus> = {
   loan_expired: 'Expired',
   loan_defaulted: 'Defaulted',
-  loan_liquidated: 'Liquidated',
   loan_repaid: 'Repaid',
+};
+
+const statusFromOnChain = (status: string | undefined): LoanStatus | undefined => {
+  if (!status) return undefined;
+  const match = [
+    'PendingCollateral',
+    'Active',
+    'Warning',
+    'LiquidationPlanning',
+    'Repaid',
+    'Closed',
+    'Expired',
+    'Defaulted',
+    'Liquidated',
+  ].find((item) => status.includes(item));
+  return match as LoanStatus | undefined;
 };
 
 const dateFromLedgerSeconds = (seconds: number): Date | undefined =>
@@ -183,12 +198,9 @@ export class EventSyncService {
         const outstandingDebt = new Prisma.Decimal(onChainLoan.outstandingDebt);
         const collateralAmount = new Prisma.Decimal(onChainLoan.collateralAmount);
         const riskPatch = await buildRiskPatch({
-          collateralAsset: offer.collateralAsset,
-          loanAsset: offer.loanAsset,
-          collateralAmount,
+          contractLoanId: event.loanId,
           outstandingDebt,
-          liquidationThresholdBps: offer.liquidationThresholdBps,
-        });
+        }, onChainLoan.borrower);
         const { status: _ignoredStatus, ...riskMetrics } = riskPatch;
 
         const loan = await tx.loan.upsert({
@@ -283,6 +295,7 @@ export class EventSyncService {
           const outstandingDebt = new Prisma.Decimal(onChainLoan.outstandingDebt);
           const collateralAmount = new Prisma.Decimal(onChainLoan.collateralAmount);
           const closedStatus = loanStatusForEvent[event.eventName];
+          const onChainStatus = statusFromOnChain(onChainLoan.status);
           const riskPatch = closedStatus
             ? {
                 status: closedStatus,
@@ -294,9 +307,8 @@ export class EventSyncService {
             : await buildRiskPatch({
                 ...loan,
                 outstandingDebt,
-                collateralAmount,
                 dueTime: dateFromLedgerSeconds(onChainLoan.dueTime) ?? loan.dueTime,
-              });
+              }, onChainLoan.borrower);
 
           data = {
             ...data,
@@ -305,6 +317,7 @@ export class EventSyncService {
             startTime: dateFromLedgerSeconds(onChainLoan.startTime),
             dueTime: dateFromLedgerSeconds(onChainLoan.dueTime),
             ...riskPatch,
+            ...(onChainStatus ? { status: onChainStatus } : {}),
           };
         }
 

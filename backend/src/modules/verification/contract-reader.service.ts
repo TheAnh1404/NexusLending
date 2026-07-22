@@ -53,8 +53,17 @@ export interface OnChainLoan {
   status: string;
 }
 
-const PASSPHRASE = 'Test SDF Network ; September 2015';
+export interface OnChainLoanRisk {
+  healthFactorBps: number;
+  ltvBps: number;
+  healthFactor: string;
+  ltv: string;
+}
+
 const CONTRACT_DECIMALS = 7;
+const HF_BPS_DENOMINATOR = 10_000n;
+const LTV_BPS_DENOMINATOR = 100n;
+const DISPLAY_MAX_HEALTH_FACTOR_BPS = 999_900n;
 
 const toU64 = (value: string | number | bigint) => nativeToScVal(BigInt(value), { type: 'u64' });
 
@@ -84,6 +93,18 @@ const fromContractAmount = (value: unknown): string => {
   const whole = raw / scale;
   const fraction = raw % scale;
   const fractionText = fraction.toString().padStart(CONTRACT_DECIMALS, '0').replace(/0+$/, '');
+  return fractionText ? `${whole.toString()}.${fractionText}` : whole.toString();
+};
+
+const scaledRatioToString = (value: unknown, denominator: bigint): string => {
+  let raw = BigInt(toIntegerString(value));
+  if (denominator === HF_BPS_DENOMINATOR && raw > DISPLAY_MAX_HEALTH_FACTOR_BPS) {
+    raw = DISPLAY_MAX_HEALTH_FACTOR_BPS;
+  }
+  const whole = raw / denominator;
+  const fraction = raw % denominator;
+  const width = denominator.toString().length - 1;
+  const fractionText = fraction.toString().padStart(width, '0').replace(/0+$/, '');
   return fractionText ? `${whole.toString()}.${fractionText}` : whole.toString();
 };
 
@@ -145,6 +166,21 @@ export class ContractReaderService {
     };
   }
 
+  async readLoanRisk(loanId: string | number | bigint, sourceAccount?: string): Promise<OnChainLoanRisk> {
+    const args = [toU64(loanId)];
+    const [healthFactorBps, ltvBps] = await Promise.all([
+      this.simulateRead(env.loanManagerContractId, 'calculate_health_factor', args, sourceAccount),
+      this.simulateRead(env.loanManagerContractId, 'calculate_ltv', args, sourceAccount),
+    ]);
+
+    return {
+      healthFactorBps: toNumber(healthFactorBps),
+      ltvBps: toNumber(ltvBps),
+      healthFactor: scaledRatioToString(healthFactorBps, HF_BPS_DENOMINATOR),
+      ltv: scaledRatioToString(ltvBps, LTV_BPS_DENOMINATOR),
+    };
+  }
+
   private async simulateRead(
     contractId: string,
     functionName: string,
@@ -161,7 +197,7 @@ export class ContractReaderService {
     const contract = new Contract(contractId);
     const tx = new TransactionBuilder(account, {
       fee: '100000',
-      networkPassphrase: PASSPHRASE,
+      networkPassphrase: env.stellarNetworkPassphrase,
     })
       .addOperation(contract.call(functionName, ...args))
       .setTimeout(180)

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "stellar-scout": {
+      "source": "Stellar-Light/stellar-scout",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "929b62c522b9620e5b9d11c6af9b02f2c1f1cf83d55dbe6d649fba4b30a7bfac"
+    }
+  }
+}

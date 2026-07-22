@@ -50,8 +50,7 @@ fn setup() -> Fixture<'static> {
 fn lock_lender_funds() {
     let f = setup();
 
-    f.vault
-        .lock_lender_funds(&1, &f.lender, &f.asset, &100);
+    f.vault.lock_lender_funds(&1, &f.lender, &f.asset, &100);
 
     assert_eq!(f.vault.get_offer_locked_amount(&1), 100);
     assert_eq!(f.token.balance(&f.lender), 900);
@@ -62,10 +61,8 @@ fn lock_lender_funds() {
 fn unlock_lender_funds() {
     let f = setup();
 
-    f.vault
-        .lock_lender_funds(&1, &f.lender, &f.asset, &100);
-    f.vault
-        .unlock_lender_funds(&1, &f.lender, &f.asset, &100);
+    f.vault.lock_lender_funds(&1, &f.lender, &f.asset, &100);
+    f.vault.unlock_lender_funds(&1, &f.lender, &f.asset, &100);
 
     assert_eq!(f.vault.get_offer_locked_amount(&1), 0);
     assert_eq!(f.token.balance(&f.lender), 1_000);
@@ -118,8 +115,7 @@ fn release_borrower_collateral() {
 fn transfer_loan_asset_to_borrower() {
     let f = setup();
 
-    f.vault
-        .lock_lender_funds(&1, &f.lender, &f.asset, &100);
+    f.vault.lock_lender_funds(&1, &f.lender, &f.asset, &100);
     f.vault
         .transfer_loan_asset_to_borrower(&1, &1, &f.borrower, &f.asset, &100);
 

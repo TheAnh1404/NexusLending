@@ -28,6 +28,28 @@ const normalizeAddress = (value?: string): string | undefined => value?.trim().t
 
 const decimal = (value: Prisma.Decimal.Value): Prisma.Decimal => new Prisma.Decimal(value);
 
+const assertExpectedString = (
+  expected: string | undefined,
+  actual: string | undefined,
+  errorFactory: (expected: string, actual?: string) => Error
+) => {
+  if (expected === undefined) return;
+  if (actual === undefined || String(expected) !== String(actual)) {
+    throw errorFactory(String(expected), actual);
+  }
+};
+
+const assertExpectedAddress = (
+  expected: string | undefined,
+  actual: string | undefined,
+  errorFactory: (expected: string, actual?: string) => Error
+) => {
+  if (expected === undefined) return;
+  if (!actual || normalizeAddress(expected) !== normalizeAddress(actual)) {
+    throw errorFactory(expected, actual);
+  }
+};
+
 export class EventVerifierService {
   getExpectedEvents(action: VerificationAction): string[] {
     return actionEvents[action];
@@ -49,49 +71,33 @@ export class EventVerifierService {
       throw new WrongContractError(request.expectedContractId, matchingEvent.contractId);
     }
 
-    if (
-      request.expectedWallet &&
-      matchingEvent.actor &&
-      normalizeAddress(request.expectedWallet) !== normalizeAddress(matchingEvent.actor)
-    ) {
-      throw new WrongWalletError(request.expectedWallet, matchingEvent.actor);
+    assertExpectedAddress(request.expectedWallet, matchingEvent.actor, (expected, actual) =>
+      new WrongWalletError(expected, actual)
+    );
+
+    assertExpectedString(request.expectedOfferId, matchingEvent.offerId, (expected, actual) =>
+      new WrongEntityError(expected, actual)
+    );
+
+    assertExpectedString(request.expectedLoanId, matchingEvent.loanId, (expected, actual) =>
+      new WrongEntityError(expected, actual)
+    );
+
+    if (request.expectedAmount !== undefined) {
+      if (!matchingEvent.amount) {
+        throw new WrongAmountError(decimal(request.expectedAmount).toString());
+      }
+      if (!matchingEvent.amount.eq(decimal(request.expectedAmount))) {
+        throw new WrongAmountError(decimal(request.expectedAmount).toString(), matchingEvent.amount.toString());
+      }
     }
 
-    if (
-      request.expectedOfferId &&
-      matchingEvent.offerId &&
-      String(request.expectedOfferId) !== String(matchingEvent.offerId)
-    ) {
-      throw new WrongEntityError(request.expectedOfferId, matchingEvent.offerId);
-    }
-
-    if (
-      request.expectedLoanId &&
-      matchingEvent.loanId &&
-      String(request.expectedLoanId) !== String(matchingEvent.loanId)
-    ) {
-      throw new WrongEntityError(request.expectedLoanId, matchingEvent.loanId);
-    }
-
-    if (
-      request.expectedAmount !== undefined &&
-      matchingEvent.amount &&
-      !matchingEvent.amount.eq(decimal(request.expectedAmount))
-    ) {
-      throw new WrongAmountError(decimal(request.expectedAmount).toString(), matchingEvent.amount.toString());
-    }
-
-    if (
-      request.expectedAsset &&
-      matchingEvent.asset &&
-      normalizeAddress(request.expectedAsset) !== normalizeAddress(matchingEvent.asset)
-    ) {
-      throw new WrongEntityError(request.expectedAsset, matchingEvent.asset);
-    }
+    assertExpectedAddress(request.expectedAsset, matchingEvent.asset, (expected, actual) =>
+      new WrongEntityError(expected, actual)
+    );
 
     return matchingEvent;
   }
 }
 
 export const eventVerifierService = new EventVerifierService();
-

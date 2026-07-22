@@ -107,6 +107,11 @@ export const loansApi = {
     return loans.map(mapBackendLoan);
   },
 
+  async syncChain(loanId: string, wallet?: string): Promise<Loan> {
+    const loan = await apiClient.post<BackendLoan>(`/api/loans/${loanId}/sync-chain`, { wallet });
+    return mapBackendLoan(loan);
+  },
+
   async createFromOffer(
     offer: LoanOffer,
     borrowerWallet: string,
@@ -152,13 +157,14 @@ export const loansApi = {
     action: 'ADD_COLLATERAL' | 'PARTIAL_REPAY' | 'FULL_REPAY' | 'LIQUIDATE' | 'CLAIM_REPAYMENT',
     wallet: string,
     amount?: number,
-    extra?: ConfirmedChainReceiptPayload
+    extra?: ConfirmedChainReceiptPayload & { contractLoanId?: number | bigint }
   ): Promise<Loan> {
     const loan = await apiClient.patch<BackendLoan>(`/api/loans/${loanId}`, {
       action,
       wallet,
       amount: amount === undefined ? undefined : String(amount),
       ...extra,
+      contractLoanId: extra?.contractLoanId === undefined ? undefined : String(extra.contractLoanId),
     });
     return mapBackendLoan(loan);
   },

@@ -1,6 +1,7 @@
 import { Contract, nativeToScVal, scValToNative } from '@stellar/stellar-sdk';
 import { CONTRACTS, STELLAR_DECIMALS } from './config';
 import { sorobanRpc } from './client';
+import { scaledBigIntToDecimalString } from './amounts';
 
 /** Convert a JS number/bigint to a Soroban u64 ScVal. */
 const toU64 = (value: number | bigint | string): ReturnType<typeof nativeToScVal> =>
@@ -8,7 +9,7 @@ const toU64 = (value: number | bigint | string): ReturnType<typeof nativeToScVal
 
 /** Convert raw contract units back to a human-readable amount. */
 const fromContractAmount = (raw: number | bigint, decimals: number = STELLAR_DECIMALS): number =>
-  Number(raw) / 10 ** decimals;
+  Number(scaledBigIntToDecimalString(raw, decimals));
 
 export const vaultContract = {
   async getOfferLockedAmount(offerId: string | number | bigint): Promise<number> {

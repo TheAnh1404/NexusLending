@@ -2,16 +2,12 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { App } from 'antd';
 
 import type { Loan, LoanOffer, OraclePrice, Transaction, UserRole, WalletState } from '../types';
-import { initialLoanOffers, initialLoans } from '../data/mockLoans';
-import { initialOraclePrices } from '../data/mockOracle';
-import { initialActivities } from '../data/mockActivities';
 import { MAX_FIXED_APR_PERCENT, calculateMaxLiquidationRepay, isLiquidatable, isOpenLoanStatus } from '../utils/finance';
 import { loansService } from '../services/loans/loans.service';
 import { offersService, type CreateOfferInput } from '../services/offers/offers.service';
 import { oracleService } from '../services/oracle/oracle.service';
 import { transactionsService } from '../services/transactions/transactions.service';
-import { CHAIN_MODE, DATA_MODE, DEFAULT_MOCK_WALLET_ADDRESS } from '../services/api/client';
-import type { ConfirmedChainReceiptPayload } from '../services/api/client';
+import { DATA_MODE, DEFAULT_MOCK_WALLET_ADDRESS } from '../services/api/client';
 import { offersApi } from '../services/api/offers.api';
 import { loansApi } from '../services/api/loans.api';
 import { oracleApi } from '../services/api/oracle.api';
@@ -23,42 +19,30 @@ import { CONTRACTS } from '../services/soroban/config';
 import { createUsdcTrustline, hasUsdcTrustline, swapStellarAssets } from '../services/soroban/transaction';
 import type { SwapDirection, TxResult, TxStage } from '../services/soroban/transaction';
 import { ADMIN_WALLET_ADDRESS, isAdminWallet } from '../config/admin';
+import {
+  STORAGE_KEY,
+  buildOracleImpacts,
+  disconnectedWallet,
+  getInitialSnapshot,
+  getPrices,
+  normalizeLoans,
+  normalizeOffers,
+  type LendingSnapshot,
+  type OracleImpact,
+} from './lending/lendingState';
+import { loadLendingSnapshotFromApi } from './lending/lendingApiState';
+import { fetchWalletBalances, mockWalletBalances, zeroWalletBalances } from './lending/walletState';
+import { contractReturnId, txReceiptFromResult, txStageLabels } from './lending/sorobanActions';
+import { confirmedTransactionNotification } from './lending/notifications';
+import { clearDemoData, clearLegacyFrontendData } from './lending/storage';
 
-const STORAGE_KEY = 'nexus_lending_state_v3';
-
-export const clearLegacyFrontendData = () => {
-  localStorage.removeItem('nexus_lending_state_v2');
-  localStorage.removeItem('nexus_lending_state_v3');
-  localStorage.removeItem('nexus_notification_settings');
-  Object.keys(localStorage)
-    .filter((key) => key.startsWith('nexus_notification_settings_'))
-    .forEach((key) => localStorage.removeItem(key));
-  localStorage.removeItem('nexus_freighter_connected');
-};
-
-export const clearDemoData = clearLegacyFrontendData;
+export type { OracleImpact } from './lending/lendingState';
 
 if (typeof window !== 'undefined') {
   (window as any).clearLegacyFrontendData = clearLegacyFrontendData;
   (window as any).clearDemoData = clearDemoData;
 }
 
-
-export interface OracleImpact {
-  loanId: string;
-  oldHF: number;
-  newHF: number;
-  oldStatus: Loan['status'];
-  newStatus: Loan['status'];
-}
-
-interface LendingSnapshot {
-  wallet: WalletState;
-  offers: LoanOffer[];
-  loans: Loan[];
-  oraclePrices: OraclePrice[];
-  transactions: Transaction[];
-}
 
 interface LendingContextValue {
   wallet: WalletState;
@@ -91,229 +75,6 @@ interface LendingContextValue {
   refreshData: () => Promise<void>;
 }
 
-const disconnectedWallet: WalletState = {
-  connected: false,
-  address: null,
-  role: null,
-  balanceXLM: 0,
-  balanceUSDC: 0,
-};
-
-const normalizeOffers = (offers: LoanOffer[]): LoanOffer[] => offers.map(offersService.normalize);
-
-const getPrices = (oraclePrices: OraclePrice[]) => ({
-  xlmPrice: oraclePrices.find((price) => price.asset === 'XLM')?.price ?? 0.125,
-  usdcPrice: oraclePrices.find((price) => price.asset === 'USDC')?.price ?? 1,
-});
-
-const txStageLabels: Record<TxStage, string> = {
-  preparing: 'Preparing Transaction...',
-  wallet: 'Waiting for Wallet Signature...',
-  submitting: 'Submitting Transaction...',
-  confirming: 'Waiting for Blockchain Confirmation...',
-  confirmed: 'Transaction Confirmed',
-};
-
-const txReceiptFromResult = (txRes: TxResult): ConfirmedChainReceiptPayload => ({
-  txHash: txRes.txHash,
-  explorerUrl: txRes.explorerUrl,
-  ledger: txRes.ledger,
-  txStatus: txRes.status,
-  contractId: txRes.contractId,
-  blockTimestamp: txRes.blockTimestamp,
-  contractReturnValue: txRes.contractReturnValue,
-});
-
-const randomHex64 = (): string => {
-  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
-    const bytes = new Uint8Array(32);
-    crypto.getRandomValues(bytes);
-    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-  }
-
-  return Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
-};
-
-const nextMockContractId = (): bigint =>
-  BigInt(Date.now()) * 1000n + BigInt(Math.floor(Math.random() * 1000));
-
-const createMockTxResult = (
-  contractId: string,
-  functionName: string,
-  contractReturnValue?: unknown
-): TxResult => {
-  const txHash = randomHex64();
-  return {
-    txHash,
-    explorerUrl: `https://stellar.expert/explorer/testnet/tx/${txHash}`,
-    ledger: Math.max(1, Math.floor(Date.now() / 1000)),
-    status: 'SUCCESS',
-    contractId,
-    functionName,
-    blockTimestamp: new Date().toISOString(),
-    contractReturnValue,
-  };
-};
-
-const contractReturnId = (txRes: TxResult, label: string): bigint => {
-  if (txRes.contractReturnValue === undefined || txRes.contractReturnValue === null) {
-    throw new Error(`${label} was not returned by the Soroban contract.`);
-  }
-  return BigInt(String(txRes.contractReturnValue));
-};
-
-const normalizeLoans = (loans: Loan[], oraclePrices: OraclePrice[]): Loan[] => {
-  const prices = getPrices(oraclePrices);
-  return loans.map((loan) => loansService.normalize(loan, prices));
-};
-
-const getInitialSnapshot = (): LendingSnapshot => {
-  const fallback: LendingSnapshot = {
-    wallet: disconnectedWallet,
-    offers: normalizeOffers(initialLoanOffers),
-    loans: normalizeLoans(initialLoans, initialOraclePrices),
-    oraclePrices: initialOraclePrices,
-    transactions: initialActivities,
-  };
-
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return fallback;
-    const parsed = JSON.parse(raw) as Partial<LendingSnapshot>;
-    const oraclePrices = parsed.oraclePrices?.length ? parsed.oraclePrices : fallback.oraclePrices;
-    return {
-      wallet: parsed.wallet ?? fallback.wallet,
-      offers: normalizeOffers(parsed.offers?.length ? parsed.offers : fallback.offers),
-      loans: normalizeLoans(parsed.loans?.length ? parsed.loans : fallback.loans, oraclePrices),
-      oraclePrices,
-      transactions: parsed.transactions?.length ? parsed.transactions : fallback.transactions,
-    };
-  } catch {
-    return fallback;
-  }
-};
-
-const buildOracleImpacts = (previousLoans: Loan[], nextLoans: Loan[]): OracleImpact[] => {
-  return nextLoans.flatMap((loan) => {
-    const previous = previousLoans.find((item) => item.id === loan.id);
-    if (!previous || !isOpenLoanStatus(loan.status)) return [];
-    if (previous.healthFactor === loan.healthFactor && previous.status === loan.status) return [];
-    return [{
-      loanId: loan.id,
-      oldHF: previous.healthFactor,
-      newHF: loan.healthFactor,
-      oldStatus: previous.status,
-      newStatus: loan.status,
-    }];
-  });
-};
-
-interface WalletBalances {
-  balanceXLM: number;
-  balanceUSDC: number;
-}
-
-const zeroWalletBalances: WalletBalances = {
-  balanceXLM: 0,
-  balanceUSDC: 0,
-};
-
-const mockWalletBalances: WalletBalances = {
-  balanceXLM: 250000,
-  balanceUSDC: 50000,
-};
-
-const applyAssetDelta = (balances: WalletBalances, asset: string | undefined, amount: number): void => {
-  if (!Number.isFinite(amount) || amount === 0) return;
-  if (asset === 'XLM') {
-    balances.balanceXLM += amount;
-    return;
-  }
-  if (asset === 'USDC') {
-    balances.balanceUSDC += amount;
-  }
-};
-
-const calculateMockWalletBalances = (
-  walletAddress: string,
-  loans: Loan[],
-  transactions: Transaction[]
-): WalletBalances => {
-  const balances = { ...mockWalletBalances };
-  const loansById = new Map(loans.map((loan) => [loan.id, loan]));
-
-  transactions.forEach((transaction) => {
-    const loan = transaction.loanId ? loansById.get(transaction.loanId) : undefined;
-    const amount = Number.isFinite(transaction.amount) ? transaction.amount : 0;
-
-    if (transaction.type === 'FUND_OFFER' && transaction.user === walletAddress) {
-      applyAssetDelta(balances, transaction.asset, -amount);
-      return;
-    }
-
-    if (transaction.type === 'CANCEL_OFFER' && transaction.user === walletAddress) {
-      applyAssetDelta(balances, transaction.asset, amount);
-      return;
-    }
-
-    if (transaction.type === 'ACTIVATE_LOAN' && loan?.borrower === walletAddress) {
-      applyAssetDelta(balances, loan.asset, loan.amount);
-      applyAssetDelta(balances, loan.collateralAsset, -loan.collateralAmount);
-      return;
-    }
-
-    if (transaction.type === 'ADD_COLLATERAL' && transaction.user === walletAddress) {
-      applyAssetDelta(balances, transaction.asset, -amount);
-      return;
-    }
-
-    if (transaction.type === 'PARTIAL_REPAY' || transaction.type === 'FULL_REPAY' || transaction.type === 'REPAY') {
-      if (transaction.user === walletAddress) {
-        applyAssetDelta(balances, transaction.asset, -amount);
-      }
-      if (loan?.lender === walletAddress) {
-        applyAssetDelta(balances, transaction.asset, amount);
-      }
-      return;
-    }
-
-    if (transaction.type === 'LIQUIDATE' && transaction.user === walletAddress) {
-      applyAssetDelta(balances, transaction.asset, -amount);
-    }
-  });
-
-  return balances;
-};
-
-const fetchWalletBalances = async (
-  address: string,
-  fallbackBalances: WalletBalances = zeroWalletBalances
-): Promise<WalletBalances> => {
-  try {
-    const response = await fetch(`https://horizon-testnet.stellar.org/accounts/${address}`);
-    if (!response.ok) {
-      return fallbackBalances;
-    }
-    const data = await response.json();
-    let xlm = 0;
-    let usdc = 0;
-    
-    if (data && Array.isArray(data.balances)) {
-      for (const bal of data.balances) {
-        if (bal.asset_type === 'native') {
-          xlm = parseFloat(bal.balance);
-        } else if (bal.asset_code === 'USDC') {
-          usdc = parseFloat(bal.balance);
-        }
-      }
-    }
-    return { balanceXLM: xlm, balanceUSDC: usdc };
-  } catch (e) {
-    console.error('Error fetching wallet balances from Horizon:', e);
-    return fallbackBalances;
-  }
-};
-
 const LendingContext = createContext<LendingContextValue | undefined>(undefined);
 
 export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -323,10 +84,9 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const walletRef = useRef(snapshot.wallet);
   const lastSorobanErrorRef = useRef<string | null>(null);
   const isApiMode = DATA_MODE === 'api';
-  const isMockChainMode = isApiMode && CHAIN_MODE === 'mock';
 
   const refreshLiveWalletBalances = useCallback(async (): Promise<void> => {
-    if (!isApiMode || isMockChainMode) return;
+    if (!isApiMode) return;
 
     const currentWallet = walletRef.current;
     if (!currentWallet.connected || !currentWallet.address) return;
@@ -349,7 +109,7 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         wallet: nextWallet,
       };
     });
-  }, [isApiMode, isMockChainMode]);
+  }, [isApiMode]);
 
   const runSorobanTransaction = useCallback(async (
     send: (onStage: (stage: TxStage) => void) => Promise<TxResult>
@@ -364,10 +124,7 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       lastSorobanErrorRef.current = null;
       const txRes = await send(showStage);
       closeStageMessage?.();
-      notification.success({
-        message: 'Transaction Confirmed',
-        description: <a href={txRes.explorerUrl} target="_blank" rel="noreferrer">View on Stellar Expert</a>,
-      });
+      notification.success(confirmedTransactionNotification(txRes));
       return txRes;
     } catch (error) {
       closeStageMessage?.();
@@ -384,20 +141,12 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const runChainTransaction = useCallback(async (
     contractId: string,
     functionName: string,
-    send: (onStage: (stage: TxStage) => void) => Promise<TxResult>,
-    mockReturnValue?: unknown
+    send: (onStage: (stage: TxStage) => void) => Promise<TxResult>
   ): Promise<TxResult | null> => {
-    if (!isMockChainMode) {
-      return runSorobanTransaction(send);
-    }
-
-    const txRes = createMockTxResult(contractId, functionName, mockReturnValue);
-    notification.success({
-      message: 'Mock chain transaction confirmed',
-      description: `${functionName} was recorded through the backend without calling Soroban.`,
-    });
-    return txRes;
-  }, [isMockChainMode, notification, runSorobanTransaction]);
+    void contractId;
+    void functionName;
+    return runSorobanTransaction(send);
+  }, [runSorobanTransaction]);
 
 
   useEffect(() => {
@@ -412,65 +161,25 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const refreshFromApi = useCallback(async (): Promise<LendingSnapshot> => {
     const currentWallet = walletRef.current;
-    const address = currentWallet.address;
-    const balancesPromise = address && !isMockChainMode
-      ? fetchWalletBalances(address)
-      : Promise.resolve(null);
-    const transactionsPromise = address
-      ? isAdminWallet(address)
-        ? transactionsApi.list()
-        : transactionsApi.list({ relatedWallet: address })
-      : Promise.resolve([]);
-    const [offers, loans, oraclePrices, transactions, liveBalances] = await Promise.all([
-      offersApi.list(),
-      loansApi.list(),
-      oracleApi.list(),
-      transactionsPromise,
-      balancesPromise,
-    ]);
-    const normalizedLoans = normalizeLoans(loans, oraclePrices);
-    const balances = address
-      ? isMockChainMode
-        ? calculateMockWalletBalances(address, normalizedLoans, transactions)
-        : liveBalances
-      : null;
-
-    let updatedWallet = currentWallet;
-    if (address && balances) {
-      updatedWallet = {
-        ...currentWallet,
-        balanceXLM: balances.balanceXLM,
-        balanceUSDC: balances.balanceUSDC,
-      };
-    }
+    const nextSnapshot = await loadLendingSnapshotFromApi(currentWallet);
 
     setSnapshot((prev) => {
-      const nextWallet = address && balances && prev.wallet.address === address
-        ? {
-            ...prev.wallet,
-            balanceXLM: balances.balanceXLM,
-            balanceUSDC: balances.balanceUSDC,
-          }
+      const nextWallet = nextSnapshot.wallet.address && prev.wallet.address === nextSnapshot.wallet.address
+        ? nextSnapshot.wallet
         : prev.wallet;
       walletRef.current = nextWallet;
       return {
         ...prev,
         wallet: nextWallet,
-        offers,
-        loans: normalizedLoans,
-        oraclePrices,
-        transactions,
+        offers: nextSnapshot.offers,
+        loans: nextSnapshot.loans,
+        oraclePrices: nextSnapshot.oraclePrices,
+        transactions: nextSnapshot.transactions,
       };
     });
 
-    return {
-      wallet: updatedWallet,
-      offers,
-      loans: normalizedLoans,
-      oraclePrices,
-      transactions,
-    };
-  }, [isMockChainMode]);
+    return nextSnapshot;
+  }, []);
 
   useEffect(() => {
     if (!isApiMode) return;
@@ -510,7 +219,7 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const connectWallet = useCallback((address: string, _role?: UserRole) => {
     const isMockSandboxAddress = address === DEFAULT_MOCK_WALLET_ADDRESS;
-    const shouldUseLiveBalances = isApiMode && !isMockChainMode;
+    const shouldUseLiveBalances = isApiMode;
     const initialBalances = shouldUseLiveBalances ? zeroWalletBalances : mockWalletBalances;
     const nextWallet: WalletState = {
       connected: true,
@@ -531,7 +240,7 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       });
     }
 
-    if (shouldUseLiveBalances || (!isMockSandboxAddress && !isMockChainMode)) {
+    if (shouldUseLiveBalances || !isMockSandboxAddress) {
       void fetchWalletBalances(address, shouldUseLiveBalances ? zeroWalletBalances : mockWalletBalances).then((balances) => {
         setSnapshot((prev) => {
           if (!prev.wallet.connected || prev.wallet.address !== address) return prev;
@@ -546,7 +255,7 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         });
       });
     }
-  }, [isApiMode, isMockChainMode, message, refreshFromApi]);
+  }, [isApiMode, message, refreshFromApi]);
 
   const disconnectWallet = useCallback(() => {
     setSnapshot((prev) => ({
@@ -671,7 +380,7 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       let currentOffer = offer;
       let contractOfferId = currentOffer.contractOfferId;
 
-      if (contractOfferId !== undefined && !isMockChainMode) {
+      if (contractOfferId !== undefined) {
         let synced: LoanOffer;
         try {
           synced = await offersApi.syncChain(offerId, walletAddress);
@@ -712,14 +421,15 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
           minHealthFactor: currentOffer.minHealthFactor,
           description: currentOffer.description,
         };
-        const mockContractOfferId = nextMockContractId();
         const createTxRes = await runChainTransaction(
           CONTRACTS.marketplace,
           'create_offer',
-          (onStage) => marketplaceContract.createOfferTx(createInput, walletAddress, onStage),
-          mockContractOfferId.toString()
+          (onStage) => marketplaceContract.createOfferTx(createInput, walletAddress, onStage)
         );
-        if (!createTxRes) return null;
+        if (!createTxRes) {
+          if (lastSorobanErrorRef.current) throw new Error(lastSorobanErrorRef.current);
+          return null;
+        }
 
         contractOfferId = contractReturnId(createTxRes, 'contractOfferId');
         try {
@@ -736,7 +446,7 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
             message: 'Offer deployed but not funded',
             description: 'No escrow funding transaction was submitted because the backend did not persist the contract offer id.',
           });
-          return null;
+          throw error instanceof Error ? error : new Error(details);
         }
       }
 
@@ -746,7 +456,10 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         'fund_offer',
         (onStage) => marketplaceContract.fundOfferTx(contractOfferId, walletAddress, onStage)
       );
-      if (!fundTxRes) return null;
+      if (!fundTxRes) {
+        if (lastSorobanErrorRef.current) throw new Error(lastSorobanErrorRef.current);
+        return null;
+      }
 
       try {
         const funded = await offersApi.fund(offerId, walletAddress, {
@@ -757,25 +470,23 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         notification.success({ message: 'Offer funded', description: 'Offer deployed on-chain and lender funds locked in Vault/Escrow.' });
         return funded;
       } catch (error) {
-        if (!isMockChainMode) {
-          try {
-            const synced = await offersApi.syncChain(offerId, walletAddress);
-            await refreshFromApi();
-            if (['Funding', 'Active', 'Matched'].includes(synced.status ?? 'Draft')) {
-              notification.warning({
-                message: 'Offer funded and synced',
-                description: 'The funding transaction was confirmed. Backend receipt persistence failed, but the on-chain status is now recorded so it will not fund again.',
-              });
-              return synced;
-            }
-          } catch (syncError) {
-            console.error('Unable to sync offer after confirmed funding transaction:', syncError);
+        try {
+          const synced = await offersApi.syncChain(offerId, walletAddress);
+          await refreshFromApi();
+          if (['Funding', 'Active', 'Matched'].includes(synced.status ?? 'Draft')) {
+            notification.warning({
+              message: 'Offer funded and synced',
+              description: 'The funding transaction was confirmed. Backend receipt persistence failed, but the on-chain status is now recorded so it will not fund again.',
+            });
+            return synced;
           }
+        } catch (syncError) {
+          console.error('Unable to sync offer after confirmed funding transaction:', syncError);
         }
 
         const details = error instanceof Error ? error.message : 'Unable to persist the funding transaction.';
         message.error(details);
-        return null;
+        throw error instanceof Error ? error : new Error(details);
       }
     }
 
@@ -802,7 +513,7 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     notification.success({ message: 'Offer funded', description: 'Activate it to list it in the marketplace.' });
     return updatedOffer;
-  }, [getLatestOfferForAction, isApiMode, isMockChainMode, message, notification, refreshFromApi, runChainTransaction, snapshot]);
+  }, [getLatestOfferForAction, isApiMode, message, notification, refreshFromApi, runChainTransaction, snapshot]);
 
   const activateOffer = useCallback(async (offerId: string) => {
     const walletAddress = snapshot.wallet.address;
@@ -816,7 +527,7 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       return null;
     }
 
-    if (isApiMode && !isMockChainMode && offer.contractOfferId !== undefined) {
+    if (isApiMode && offer.contractOfferId !== undefined) {
       try {
         offer = await offersApi.syncChain(offerId, walletAddress);
         await refreshFromApi();
@@ -838,10 +549,10 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
 
     if (isApiMode) {
-      if (!isMockChainMode && offer.contractOfferId === undefined) {
+      if (offer.contractOfferId === undefined) {
         throw new Error('Offer is missing contractOfferId. Fund the offer on-chain before activation.');
       }
-      const contractOfferId = offer.contractOfferId ?? nextMockContractId();
+      const contractOfferId = offer.contractOfferId;
       const txRes = await runChainTransaction(
         CONTRACTS.marketplace,
         'activate_offer',
@@ -855,20 +566,18 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         notification.success({ message: 'Offer activated', description: 'The offer is now visible in the marketplace.' });
         return active;
       } catch (error) {
-        if (!isMockChainMode) {
-          try {
-            const synced = await offersApi.syncChain(offerId, walletAddress);
-            await refreshFromApi();
-            if (synced.status === 'Active') {
-              notification.warning({
-                message: 'Offer activated and synced',
-                description: 'The activation transaction was confirmed. Backend receipt persistence raced with chain indexing, so the Active state was synced.',
-              });
-              return synced;
-            }
-          } catch (syncError) {
-            console.error('Unable to sync offer after confirmed activation transaction:', syncError);
+        try {
+          const synced = await offersApi.syncChain(offerId, walletAddress);
+          await refreshFromApi();
+          if (synced.status === 'Active') {
+            notification.warning({
+              message: 'Offer activated and synced',
+              description: 'The activation transaction was confirmed. Backend receipt persistence raced with chain indexing, so the Active state was synced.',
+            });
+            return synced;
           }
+        } catch (syncError) {
+          console.error('Unable to sync offer after confirmed activation transaction:', syncError);
         }
 
         const details = error instanceof Error ? error.message : 'Unable to persist the activation transaction.';
@@ -895,7 +604,7 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     notification.success({ message: 'Offer activated', description: 'The offer is now listed in the marketplace.' });
     return updatedOffer;
-  }, [getLatestOfferForAction, isApiMode, isMockChainMode, message, notification, refreshFromApi, runChainTransaction, snapshot]);
+  }, [getLatestOfferForAction, isApiMode, message, notification, refreshFromApi, runChainTransaction, snapshot]);
 
   const cancelOffer = useCallback(async (offerId: string) => {
     const walletAddress = snapshot.wallet.address;
@@ -914,10 +623,10 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
 
     if (isApiMode) {
-      if (!isMockChainMode && offer.contractOfferId === undefined) {
+      if (offer.contractOfferId === undefined) {
         throw new Error('Offer is missing contractOfferId. It cannot be cancelled on-chain.');
       }
-      const contractOfferId = offer.contractOfferId ?? nextMockContractId();
+      const contractOfferId = offer.contractOfferId;
       const txRes = await runChainTransaction(
         CONTRACTS.marketplace,
         'cancel_offer',
@@ -953,7 +662,7 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }));
 
     notification.success({ message: 'Offer cancelled', description: `${offerId} is no longer available.` });
-  }, [isApiMode, isMockChainMode, message, notification, refreshFromApi, runChainTransaction, snapshot]);
+  }, [isApiMode, message, notification, refreshFromApi, runChainTransaction, snapshot]);
 
   const acceptOffer = useCallback(async (offerId: string, collateralAmount: number) => {
     const { wallet, oraclePrices } = snapshot;
@@ -978,8 +687,8 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (collateralAmount <= 0) {
       return failAccept('Collateral amount must be greater than zero.');
     }
-    const walletBalances = isApiMode && !isMockChainMode ? await fetchWalletBalances(walletAddress) : wallet;
-    if (isApiMode && !isMockChainMode) {
+    const walletBalances = isApiMode ? await fetchWalletBalances(walletAddress) : wallet;
+    if (isApiMode) {
       setSnapshot((prev) => {
         if (!prev.wallet.connected || prev.wallet.address !== walletAddress) return prev;
         return {
@@ -999,39 +708,37 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       );
     }
 
-    const prices = getPrices(oraclePrices);
-    const preview = loansService.previewBorrow(offer, collateralAmount, prices);
-    if (preview.healthFactor < offer.minHealthFactor) {
-      return failAccept(`Initial Health Factor must be at least ${offer.minHealthFactor.toFixed(2)}.`);
+    if (!isApiMode) {
+      const prices = getPrices(oraclePrices);
+      const preview = loansService.previewBorrow(offer, collateralAmount, prices);
+      if (preview.healthFactor < offer.minHealthFactor) {
+        return failAccept(`Initial Health Factor must be at least ${offer.minHealthFactor.toFixed(2)}.`);
+      }
     }
 
     if (isApiMode) {
-      if (!isMockChainMode && offer.contractOfferId === undefined) {
+      if (offer.contractOfferId === undefined) {
         throw new Error('Offer is missing contractOfferId. It cannot be accepted on-chain.');
       }
-      const contractOfferId = offer.contractOfferId ?? nextMockContractId();
-      if (!isMockChainMode) {
-        const onChainStatus = await marketplaceContract.getOfferStatus(contractOfferId, walletAddress);
-        if (onChainStatus !== 'Active') {
-          try {
-            await offersApi.syncChain(offer.id, walletAddress);
-          } catch (syncError) {
-            console.error('Unable to sync stale offer state:', syncError);
-          }
-          await refreshFromApi().catch((refreshError) => {
-            console.error('Unable to refresh after stale offer state:', refreshError);
-          });
-          return failAccept(
-            `Offer is ${onChainStatus ?? 'unavailable'} on-chain and is no longer available. Choose another active offer.`
-          );
+      const contractOfferId = offer.contractOfferId;
+      const onChainStatus = await marketplaceContract.getOfferStatus(contractOfferId, walletAddress);
+      if (onChainStatus !== 'Active') {
+        try {
+          await offersApi.syncChain(offer.id, walletAddress);
+        } catch (syncError) {
+          console.error('Unable to sync stale offer state:', syncError);
         }
+        await refreshFromApi().catch((refreshError) => {
+          console.error('Unable to refresh after stale offer state:', refreshError);
+        });
+        return failAccept(
+          `Offer is ${onChainStatus ?? 'unavailable'} on-chain and is no longer available. Choose another active offer.`
+        );
       }
-      const mockContractLoanId = nextMockContractId();
       const txRes = await runChainTransaction(
         CONTRACTS.marketplace,
         'accept_offer',
-        (onStage) => marketplaceContract.acceptOfferTx(contractOfferId, walletAddress, collateralAmount, walletAddress, onStage),
-        mockContractLoanId.toString()
+        (onStage) => marketplaceContract.acceptOfferTx(contractOfferId, walletAddress, collateralAmount, walletAddress, onStage)
       );
       if (!txRes) {
         throw new Error(lastSorobanErrorRef.current ?? 'Accept offer transaction failed');
@@ -1049,6 +756,7 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       return loan;
     }
 
+    const prices = getPrices(oraclePrices);
     const loan = loansService.createFromOffer(offer, wallet.address, collateralAmount, prices);
     const transaction = transactionsService.create({
       type: 'ACCEPT_OFFER',
@@ -1073,7 +781,7 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     });
 
     return loan;
-  }, [isApiMode, isMockChainMode, message, notification, refreshFromApi, runChainTransaction, snapshot]);
+  }, [isApiMode, message, notification, refreshFromApi, runChainTransaction, snapshot]);
 
   const activateLoan = useCallback(async (loanId: string) => {
     const walletAddress = snapshot.wallet.address;
@@ -1093,8 +801,8 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (!walletAddress || walletAddress !== loan.borrower) {
       return failActivation('Only the borrower can activate this loan.');
     }
-    const walletBalances = isApiMode && !isMockChainMode ? await fetchWalletBalances(walletAddress) : snapshot.wallet;
-    if (isApiMode && !isMockChainMode) {
+    const walletBalances = isApiMode ? await fetchWalletBalances(walletAddress) : snapshot.wallet;
+    if (isApiMode) {
       setSnapshot((prev) => {
         if (!prev.wallet.connected || prev.wallet.address !== walletAddress) return prev;
         return {
@@ -1113,30 +821,31 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         + `available ${walletBalances.balanceXLM.toLocaleString()} XLM.`
       );
     }
-    const prices = getPrices(snapshot.oraclePrices);
-    const previewLoan = loansService.activateLoan(loan, prices);
-    if (previewLoan.healthFactor < (loan.minHealthFactor ?? 1.4)) {
-      return failActivation(`Initial Health Factor must be at least ${(loan.minHealthFactor ?? 1.4).toFixed(2)}.`);
+    let previewLoan: Loan | null = null;
+    if (!isApiMode) {
+      const prices = getPrices(snapshot.oraclePrices);
+      previewLoan = loansService.activateLoan(loan, prices);
+      if (previewLoan.healthFactor < (loan.minHealthFactor ?? 1.4)) {
+        return failActivation(`Initial Health Factor must be at least ${(loan.minHealthFactor ?? 1.4).toFixed(2)}.`);
+      }
     }
 
     if (isApiMode) {
-      if (!isMockChainMode && loan.contractLoanId === undefined) {
+      if (loan.contractLoanId === undefined) {
         throw new Error('Loan is missing contractLoanId. The accepted offer was not saved with its Soroban loan id, so it cannot be activated on-chain.');
       }
-      const contractLoanId = loan.contractLoanId ?? nextMockContractId();
-      if (!isMockChainMode) {
-        const onChainStatus = await loanManagerContract.getLoanStatus(contractLoanId, walletAddress);
-        if (onChainStatus !== 'PendingCollateral') {
-          await refreshFromApi().catch((refreshError) => {
-            console.error('Unable to refresh after stale loan state:', refreshError);
-          });
-          return failActivation(
-            `Loan is ${onChainStatus ?? 'unavailable'} on-chain. Only PendingCollateral loans can be activated.`
-          );
-        }
+      const contractLoanId = loan.contractLoanId;
+      const onChainStatus = await loanManagerContract.getLoanStatus(contractLoanId, walletAddress);
+      if (onChainStatus !== 'PendingCollateral') {
+        await refreshFromApi().catch((refreshError) => {
+          console.error('Unable to refresh after stale loan state:', refreshError);
+        });
+        return failActivation(
+          `Loan is ${onChainStatus ?? 'unavailable'} on-chain. Only PendingCollateral loans can be activated.`
+        );
       }
 
-      if (!isMockChainMode && loan.asset === 'USDC') {
+      if (loan.asset === 'USDC') {
         let hasTrustline = false;
         try {
           hasTrustline = await hasUsdcTrustline(walletAddress);
@@ -1177,7 +886,7 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       return activated;
     }
 
-    const updatedLoan = previewLoan;
+    const updatedLoan = previewLoan ?? loansService.activateLoan(loan, getPrices(snapshot.oraclePrices));
     const transaction = transactionsService.create({
       type: 'ACTIVATE_LOAN',
       user: loan.borrower,
@@ -1204,7 +913,7 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       description: `Health Factor is ${updatedLoan.healthFactor.toFixed(2)}. Funds are now available after confirmation.`,
     });
     return updatedLoan;
-  }, [getLatestLoanForAction, isApiMode, isMockChainMode, message, notification, refreshFromApi, runChainTransaction, runSorobanTransaction, snapshot]);
+  }, [getLatestLoanForAction, isApiMode, message, notification, refreshFromApi, runChainTransaction, runSorobanTransaction, snapshot]);
 
   const addCollateral = useCallback(async (loanId: string, amount: number) => {
     const walletAddress = snapshot.wallet.address;
@@ -1223,10 +932,10 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
 
     if (isApiMode) {
-      if (!isMockChainMode && loan.contractLoanId === undefined) {
+      if (loan.contractLoanId === undefined) {
         throw new Error('Loan is missing contractLoanId. It cannot add collateral on-chain.');
       }
-      const contractLoanId = loan.contractLoanId ?? nextMockContractId();
+      const contractLoanId = loan.contractLoanId;
       const txRes = await runChainTransaction(
         CONTRACTS.loanManager,
         'add_collateral',
@@ -1262,11 +971,11 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }));
 
     notification.success({ message: 'Collateral added', description: `Health Factor is now ${updatedLoan.healthFactor.toFixed(2)}.` });
-  }, [isApiMode, isMockChainMode, message, notification, refreshFromApi, runChainTransaction, snapshot]);
+  }, [isApiMode, message, notification, refreshFromApi, runChainTransaction, snapshot]);
 
   const repayLoan = useCallback(async (loanId: string, amount: number, isFullRepay: boolean): Promise<Loan | null> => {
     const walletAddress = snapshot.wallet.address;
-    const loan = snapshot.loans.find((item) => item.id === loanId);
+    let loan = snapshot.loans.find((item) => item.id === loanId);
     if (!loan) {
       message.error('Loan not found.');
       return null;
@@ -1275,6 +984,29 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       message.error('Only the borrower can repay this loan.');
       return null;
     }
+
+    if (isApiMode && loan.contractLoanId !== undefined) {
+      try {
+        const syncedLoan = await loansApi.syncChain(loanId, walletAddress);
+        const stateChanged = syncedLoan.status !== loan.status
+          || Math.abs(syncedLoan.outstandingDebt - loan.outstandingDebt) > 0.000001
+          || Math.abs(syncedLoan.collateralAmount - loan.collateralAmount) > 0.000001;
+        if (stateChanged) {
+          loan = syncedLoan;
+          await refreshFromApi();
+          if (!isOpenLoanStatus(loan.status)) {
+            notification.info({
+              message: 'Loan state synced',
+              description: 'This loan was already updated on-chain, so no new repayment transaction was submitted.',
+            });
+            return loan;
+          }
+        }
+      } catch (syncError) {
+        console.error('Unable to sync loan before repayment:', syncError);
+      }
+    }
+
     const repayAmount = isFullRepay ? loan.outstandingDebt : amount;
     if (repayAmount <= 0 || repayAmount > loan.outstandingDebt + 0.01) {
       message.error('Invalid repayment amount.');
@@ -1286,10 +1018,10 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
 
     if (isApiMode) {
-      if (!isMockChainMode && loan.contractLoanId === undefined) {
+      if (loan.contractLoanId === undefined) {
         throw new Error('Loan is missing contractLoanId. It cannot be repaid on-chain.');
       }
-      const contractLoanId = loan.contractLoanId ?? nextMockContractId();
+      const contractLoanId = loan.contractLoanId;
       const functionName = isFullRepay ? 'full_repay' : 'partial_repay';
       const txRes = await runChainTransaction(
         CONTRACTS.loanManager,
@@ -1298,7 +1030,9 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
           ? loanManagerContract.fullRepayTx(contractLoanId, walletAddress, onStage)
           : loanManagerContract.partialRepayTx(contractLoanId, repayAmount, walletAddress, onStage)
       );
-      if (!txRes) return null;
+      if (!txRes) {
+        throw new Error(lastSorobanErrorRef.current ?? 'Repayment transaction failed');
+      }
 
       try {
         const updatedLoan = await loansApi.action(
@@ -1306,7 +1040,10 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
           isFullRepay ? 'FULL_REPAY' : 'PARTIAL_REPAY',
           walletAddress,
           repayAmount,
-          txReceiptFromResult(txRes)
+          {
+            ...txReceiptFromResult(txRes),
+            contractLoanId,
+          }
         );
         await refreshFromApi();
         notification.success({
@@ -1353,7 +1090,7 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       description: isFullRepay ? 'Collateral has been released after confirmation.' : `Health Factor is now ${updatedLoan.healthFactor.toFixed(2)}.`,
     });
     return updatedLoan;
-  }, [isApiMode, isMockChainMode, message, notification, refreshFromApi, runChainTransaction, snapshot]);
+  }, [isApiMode, message, notification, refreshFromApi, runChainTransaction, snapshot]);
 
   const recalculateAllHealthFactors = useCallback(async (): Promise<OracleImpact[]> => {
     const walletAddress = snapshot.wallet.address;
@@ -1515,11 +1252,11 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
 
     if (isApiMode) {
-      if (!isMockChainMode && loan.contractLoanId === undefined) {
+      if (loan.contractLoanId === undefined) {
         throw new Error('Loan is missing contractLoanId. It cannot be liquidated on-chain.');
       }
-      const contractLoanId = loan.contractLoanId ?? nextMockContractId();
-      if (!isMockChainMode && loan.status === 'Defaulted') {
+      const contractLoanId = loan.contractLoanId;
+      if (loan.status === 'Defaulted') {
         notification.info({
           message: 'Marking loan defaulted on-chain',
           description: 'Approve the first Freighter transaction to sync the 7-day grace-period default before liquidation.',
@@ -1573,7 +1310,7 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       message: 'Liquidation executed',
       description: `Received ${result.collateralReceived.toFixed(2)} ${loan.collateralAsset} collateral after confirmation.`,
     });
-  }, [isApiMode, isMockChainMode, message, notification, refreshFromApi, runChainTransaction, snapshot]);
+  }, [isApiMode, message, notification, refreshFromApi, runChainTransaction, snapshot]);
 
   const swapTokens = useCallback(async (
     direction: SwapDirection,

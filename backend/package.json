@@ -10,7 +10,8 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "prisma db seed",
-    "prisma:studio": "prisma studio"
+    "prisma:studio": "prisma studio",
+    "loans:recover": "tsx src/scripts/recover-chain-loans.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

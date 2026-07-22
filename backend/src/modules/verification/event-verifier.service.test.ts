@@ -3,7 +3,13 @@ import assert from 'node:assert/strict';
 import { Prisma } from '@prisma/client';
 
 import { EventVerifierService } from './event-verifier.service';
-import { WrongAmountError, WrongContractError, WrongEventError, WrongWalletError } from './verification.errors';
+import {
+  WrongAmountError,
+  WrongContractError,
+  WrongEntityError,
+  WrongEventError,
+  WrongWalletError,
+} from './verification.errors';
 import type { NormalizedEvent } from './verification.types';
 
 const baseEvent: NormalizedEvent = {
@@ -67,3 +73,30 @@ test('EventVerifier rejects wrong contract wallet and amount', () => {
   }, [baseEvent]), WrongAmountError);
 });
 
+test('EventVerifier rejects missing expected fields', () => {
+  const verifier = new EventVerifierService();
+  const eventWithoutOptionalFields: NormalizedEvent = {
+    ...baseEvent,
+    actor: undefined,
+    offerId: undefined,
+    amount: undefined,
+  };
+
+  assert.throws(() => verifier.verify({
+    action: 'fund_offer',
+    txHash: baseEvent.txHash,
+    expectedWallet: 'GABC',
+  }, [eventWithoutOptionalFields]), WrongWalletError);
+
+  assert.throws(() => verifier.verify({
+    action: 'fund_offer',
+    txHash: baseEvent.txHash,
+    expectedOfferId: '42',
+  }, [eventWithoutOptionalFields]), WrongEntityError);
+
+  assert.throws(() => verifier.verify({
+    action: 'fund_offer',
+    txHash: baseEvent.txHash,
+    expectedAmount: 100,
+  }, [eventWithoutOptionalFields]), WrongAmountError);
+});

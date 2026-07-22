@@ -16,11 +16,13 @@ Oracle stores `PriceData` by string pair and asset-address pair. MVP price updat
 
 Vault / Escrow is a pure custodian. Marketplace can lock/unlock lender offer funds. Loan Manager can lock/release collateral, disburse loan assets, move repayments, and transfer seized collateral.
 
-Marketplace enforces the offer state machine: `Draft -> Funding -> Active -> Matched`, with terminal `Cancelled` and `Expired`. Borrowers can accept only `Active` offers.
+Marketplace enforces the offer state machine: `Draft -> Funding -> Active -> Matched`, with terminal `Cancelled` and `Expired`. Borrowers can accept only `Active` offers, cannot accept their own offers, and offer asset pairs must use distinct loan/collateral assets.
 
 Loan Manager enforces the loan state machine: `PendingCollateral -> Active/Warning/LiquidationPlanning`, then repayment, expiration/default, or liquidation. Risk and liquidation logic live here; there is no separate risk engine or liquidation contract.
 
-Offer creation defaults `min_health_factor_bps` to 14,000 and `liquidation_bonus_bps` to 500 when those inputs are passed as 0. Loan activation also floors the effective minimum Health Factor at 14,000.
+Offer creation defaults `min_health_factor_bps` to 14,000 and `liquidation_bonus_bps` to 500 when those inputs are passed as 0. Loan activation also floors the effective minimum Health Factor at 14,000. Marketplace validates max LTV, liquidation threshold, and liquidation bonus on-chain.
+
+Persistent records bump TTL on writes. Vault removes zero-value lock entries. Admin-only cleanup methods can remove terminal offer/loan records after off-chain indexers have captured the history.
 
 ## Main Functions
 
@@ -31,8 +33,11 @@ Oracle:
 - `set_price_for_assets(base_asset, quote_asset, asset_pair, price, decimals, source)`
 - `get_price(asset_pair)`
 - `get_price_for_assets(base_asset, quote_asset)`
+- `get_fresh_price(asset_pair)`
+- `get_fresh_price_for_assets(base_asset, quote_asset)`
 - `get_last_updated(asset_pair)`
 - `is_price_stale(asset_pair)`
+- `is_price_for_assets_stale(base_asset, quote_asset)`
 
 Vault / Escrow:
 
@@ -59,13 +64,14 @@ Marketplace:
 - `cancel_offer(offer_id)`
 - `expire_offer(offer_id)`
 - `accept_offer(offer_id, borrower, collateral_amount)`
+- `cleanup_offer(offer_id)`
 - `get_offer(offer_id)`
 - `get_offer_count()`
 
 Loan Manager:
 
-- `initialize(admin, vault_contract, oracle_contract)`
-- `create_pending_loan_from_offer(offer, borrower, collateral_amount)`
+- `initialize(admin, marketplace_contract, vault_contract, oracle_contract)`
+- `create_pending_loan_from_offer(offer, borrower, collateral_amount)`; Marketplace-only
 - `activate_loan(loan_id)`
 - `get_loan(loan_id)`
 - `get_loan_count()`
@@ -78,6 +84,7 @@ Loan Manager:
 - `mark_expired(loan_id)`
 - `mark_defaulted(loan_id)`
 - `liquidate(loan_id, liquidator, repay_amount)`
+- `cleanup_loan(loan_id)`
 
 ## Risk Rules
 
@@ -104,10 +111,10 @@ $env:CARGO_INCREMENTAL='0'; cargo test --workspace --target-dir ..\.tmp\contract
 ## Current Limitations
 
 - Oracle is MVP admin-controlled; decentralized oracle integration is a future step.
-- `is_price_stale` uses a fixed 24-hour staleness window.
+- Fresh oracle getters reject prices older than the fixed 24-hour staleness window.
 - Liquidation collateral transfer uses the shortened function name `transfer_collateral_to_liq` due Soroban name length limits.
-- Contract deployment scripts and backend/frontend transaction assembly are not part of Phase 1.
+- Backend/frontend live transaction submission and receipt verification are implemented outside this contracts workspace.
 
 ## Next Integration Step
 
-Wire the backend Soroban service to assemble unsigned transactions for the new Phase 1 ABI, then update the event indexer to consume the emitted contract events and mirror offer/loan state into PostgreSQL.
+Run an end-to-end testnet smoke flow using the deployed contract IDs, real USDC issuer/contract configuration, Freighter signing, backend receipt verification, and the event indexer checkpoint.

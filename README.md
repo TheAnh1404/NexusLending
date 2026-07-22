@@ -297,19 +297,20 @@ sequenceDiagram
     participant API as Express API
 
     Lender->>UI: Input terms (amount, APR, duration, LTV, etc.)
+    UI->>API: POST /api/offers (draft terms, no receipt)
+    API-->>UI: Offer persisted as Draft
+    
+    Lender->>UI: Click "Fund Offer"
     UI->>M: Call create_offer(terms) via Freighter
     M-->>Lender: Prompt signature
     Lender->>M: Approve & Sign
     M->>UI: Success (returns contractOfferId)
-    UI->>API: POST /api/offers (Draft Offer + Receipt)
-    API-->>UI: Offer persisted as Draft
-    
-    Lender->>UI: Click "Fund Offer"
-    UI->>V: Call lock_lender_funds(offer_id, amount) via Freighter
-    V-->>Lender: Prompt signature
-    Lender->>V: Approve & Sign (transfers USDC to Vault escrow)
-    V->>UI: Success
-    UI->>API: POST /api/offers/:id/fund (Receipt)
+    UI->>API: POST /api/offers/:id/deploy (verified receipt)
+    API-->>UI: Contract offer ID persisted
+    UI->>M: Call fund_offer(offer_id) via Freighter
+    M->>V: Lock lender funds in Vault escrow
+    M->>UI: Success
+    UI->>API: POST /api/offers/:id/fund (verified receipt)
     API-->>UI: Offer status updated to Funding
     
     Lender->>UI: Click "Activate Offer"
@@ -725,20 +726,24 @@ Mutating endpoints require a valid Stellar transaction receipt inside the reques
 | :--- | :--- | :--- | :--- |
 | **GET** | `/api/offers` | List offers (marketplace) | Query params: `status`, `marketplaceOnly` |
 | **GET** | `/api/offers/:id` | Get offer by DB ID | None |
-| **POST** | `/api/offers` | Create offer (Draft status) | `{ txHash, explorerUrl, ledger, lenderWallet, loanAmount, fixedAprBps, ... }` |
-| **POST** | `/api/offers/:id/fund` | Transition offer to Funding | `{ txHash, explorerUrl, ledger, wallet }` |
-| **POST** | `/api/offers/:id/activate` | Transition offer to Active | `{ txHash, explorerUrl, ledger, wallet }` |
-| **POST** | `/api/offers/:id/cancel` | Cancel offer (Draft/Funding) | `{ txHash, explorerUrl, ledger, wallet }` |
-| **POST** | `/api/offers/:id/accept` | Accept active offer (creates Loan)| `{ txHash, explorerUrl, ledger, borrowerWallet, collateralAmount }` |
+| **POST** | `/api/offers` | Create local draft terms | `{ lenderWallet, loanAmount, fixedAprBps, ... }` |
+| **POST** | `/api/offers/:id/deploy` | Persist verified `create_offer` receipt and contract offer ID | Confirmed receipt + `wallet` |
+| **POST** | `/api/offers/:id/fund` | Transition offer to Funding | Confirmed receipt + `wallet` |
+| **POST** | `/api/offers/:id/sync-chain` | Read and sync current on-chain offer state | `{ wallet }` |
+| **POST** | `/api/offers/:id/activate` | Transition offer to Active | Confirmed receipt + `wallet` |
+| **POST** | `/api/offers/:id/cancel` | Cancel offer (Draft/Funding/Active) | Confirmed receipt + `wallet` |
+| **POST** | `/api/offers/:id/expire` | Expire offer | Confirmed receipt + `wallet` |
+| **POST** | `/api/offers/:id/accept` | Accept active offer (creates Loan)| Confirmed receipt + `borrowerWallet` + `collateralAmount` |
 | **GET** | `/api/loans` | List active loans | Query params: `status`, `borrowerWallet`, `riskZone` |
 | **GET** | `/api/loans/liquidatable`| List loans eligible for liquidation| None |
 | **GET** | `/api/loans/:id` | Get loan details | None |
 | **POST** | `/api/loans/:id/activate`| Activate loan (disburses principal) | `{ txHash, explorerUrl, ledger, wallet }` |
-| **PATCH**| `/api/loans/:id` | Update debt, collateral, or status | `{ txHash, explorerUrl, ledger, outstandingDebt, collateralAmount, status }` |
+| **PATCH**| `/api/loans/:id` | Apply verified loan action (`ADD_COLLATERAL`, `PARTIAL_REPAY`, `FULL_REPAY`, `LIQUIDATE`) | Confirmed receipt + `wallet` + action amount |
 | **GET** | `/api/oracle/prices` | Get current cached asset prices | None |
 | **POST** | `/api/oracle/prices` | Update price in DB (admin only) | `{ txHash, explorerUrl, ledger, assetPair, price, decimals, source }` |
 | **POST** | `/api/oracle/recalculate-health` | Recalculate health factors | None |
-| **POST** | `/api/transactions` | Log manual confirmed transaction | `{ txHash, explorerUrl, ledger, type, wallet, amount, asset }` |
+| **GET** | `/api/transactions` | List transaction receipts | Query params: `wallet`, `relatedWallet`, `type`, `loanId`, `offerId` |
+| **POST** | `/api/transactions` | Log confirmed transaction | Confirmed receipt + `type`, `wallet`, `amount`, `asset` |
 
 ---
 
@@ -883,6 +888,7 @@ Now, start the frontend development server:
 | `FRONTEND_URL` | String | Allowed CORS origin | `http://localhost:5173` |
 | `STELLAR_NETWORK` | String | Stellar network configuration | `testnet` |
 | `STELLAR_RPC_URL`| String | Stellar RPC endpoint | `https://soroban-testnet.stellar.org:443`|
+| `STELLAR_READ_SOURCE_ACCOUNT` | String | Optional read-only source account for contract simulations | Empty |
 | `MARKETPLACE_CONTRACT_ID` | String | Marketplace contract address | Deployed address |
 | `LOAN_MANAGER_CONTRACT_ID`| String | Loan Manager contract address | Deployed address |
 | `ORACLE_CONTRACT_ID` | String | Oracle Price Feed contract address | Deployed address |
@@ -894,13 +900,16 @@ Now, start the frontend development server:
 | :--- | :--- | :--- | :--- |
 | `VITE_API_URL` | String | Endpoint of backend REST API server | `http://localhost:5000` |
 | `VITE_DATA_MODE` | String | Backend query layer mode (`api` or `mock`) | `api` |
-| `VITE_CHAIN_MODE` | String | Transaction execution layer (`live` or `mock`)| `live` |
+| `VITE_CHAIN_MODE` | String | Transaction execution layer (`live` or local `mock`; ignored as live when `VITE_DATA_MODE=api`) | `live` |
 | `VITE_ADMIN_WALLET_ADDRESS`| String| Admin address for pricing updates | Wallet address |
 | `VITE_STELLAR_NETWORK`| String | Stellar network target | `testnet` |
 | `VITE_MARKETPLACE_CONTRACT_ID`| String | Deployed marketplace contract ID | Deployed address |
 | `VITE_LOAN_MANAGER_CONTRACT_ID`|String | Deployed loan manager contract ID | Deployed address |
 | `VITE_ORACLE_CONTRACT_ID`| String | Deployed oracle contract ID | Deployed address |
 | `VITE_VAULT_CONTRACT_ID` | String | Deployed vault contract ID | Deployed address |
+| `VITE_USDC_ASSET_CODE` | String | Stellar classic asset code for balance/trustline lookup | `USDC` |
+| `VITE_USDC_ISSUER` | String | Real Stellar issuer used for Horizon balance lookup and classic DEX trustline flow | Empty |
+| `VITE_USDC_CONTRACT_ID` | String | Optional Soroban SAC contract ID for USDC | Derived from issuer or empty |
 
 ---
 
@@ -926,7 +935,7 @@ The following contracts are currently deployed on **Stellar Testnet**:
 ### 🚀 MVP Scope & Core Features (Completed)
 - [x] **Freighter Wallet Integration:** Connect and authenticate via Freighter extension with live balance queries fetching directly from the Horizon Stellar Testnet API.
 - [x] **Consolidated Borrow Workflow:** Seamlessly accept lending offers and activate the loan on-chain (locking collateral and disbursing principal) in a single-click UI flow.
-- [x] **Smart Contracts Workspace:** Four fully completed and compiled Rust contracts on Stellar Soroban (`marketplace`, `loan-manager`, `vault`, `oracle`) with 39/39 Cargo integration tests passing.
+- [x] **Smart Contracts Workspace:** Four fully completed Rust contracts on Stellar Soroban (`marketplace`, `loan-manager`, `vault`, `oracle`) plus shared ABI crate, with the current workspace test suite passing.
 - [x] **Escrow Isolation:** Zero shared liquidity risk. Each loan utilizes a dedicated, standalone vault escrow on-chain.
 - [x] **Dynamic Risk Management (Health Factor):** Real-time calculation and display of loan health factors based on oracle prices, categorized into Safe (🟢), Warning (🟠), and Liquidation (🔴) zones.
 - [x] **Automatic Expiration & Default Warning:** Overdue loans auto-transition to `Expired` and raise warning banners, followed by transition to `Defaulted` after the 7-day grace period, making them liquidatable.

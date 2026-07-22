@@ -1,13 +1,41 @@
-import { Asset, StrKey } from '@stellar/stellar-sdk';
+import { Asset, Networks, StrKey } from '@stellar/stellar-sdk';
 import testnetDeployments from '../../../../deployments/testnet.json';
 
-export const NETWORK = import.meta.env.VITE_STELLAR_NETWORK ?? 'testnet';
+export type StellarNetworkName = 'testnet' | 'public' | 'futurenet' | 'standalone';
+
+export const normalizeStellarNetworkName = (network: string | undefined): StellarNetworkName => {
+  const normalized = (network ?? 'testnet').trim().toLowerCase();
+  if (normalized === 'mainnet' || normalized === 'public') return 'public';
+  if (normalized === 'futurenet') return 'futurenet';
+  if (normalized === 'standalone' || normalized === 'localnet') return 'standalone';
+  return 'testnet';
+};
+
+const passphraseForNetwork = (network: StellarNetworkName): string => {
+  if (network === 'public') return Networks.PUBLIC;
+  if (network === 'futurenet') return Networks.FUTURENET;
+  if (network === 'standalone') return Networks.STANDALONE;
+  return Networks.TESTNET;
+};
+
+export const NETWORK = normalizeStellarNetworkName(import.meta.env.VITE_STELLAR_NETWORK);
 export const RPC_URL = import.meta.env.VITE_STELLAR_RPC_URL ?? 'https://soroban-testnet.stellar.org:443';
 export const HORIZON_URL = import.meta.env.VITE_STELLAR_HORIZON_URL
-  ?? (NETWORK === 'mainnet' || NETWORK === 'public'
+  ?? (NETWORK === 'public'
     ? 'https://horizon.stellar.org'
     : 'https://horizon-testnet.stellar.org');
-export const PASSPHRASE = 'Test SDF Network ; September 2015';
+export const NETWORK_PASSPHRASE = import.meta.env.VITE_STELLAR_NETWORK_PASSPHRASE
+  ?? passphraseForNetwork(NETWORK);
+export const PASSPHRASE = NETWORK_PASSPHRASE;
+export const EXPLORER_NETWORK = NETWORK === 'public' ? 'public' : 'testnet';
+export const NETWORK_DISPLAY_NAME =
+  NETWORK === 'public'
+    ? 'Stellar Mainnet'
+    : NETWORK === 'futurenet'
+    ? 'Stellar Futurenet'
+    : NETWORK === 'standalone'
+    ? 'Stellar Standalone'
+    : 'Stellar Testnet';
 
 /** Stellar classic assets use 7 decimal places (stroops). */
 export const STELLAR_DECIMALS = 7;
@@ -20,12 +48,19 @@ export const CONTRACTS = {
 };
 
 export const USDC_ASSET_CODE = import.meta.env.VITE_USDC_ASSET_CODE ?? 'USDC';
-export const USDC_ISSUER = import.meta.env.VITE_USDC_ISSUER ?? 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5';
-export const USDC_ASSET = new Asset(USDC_ASSET_CODE, USDC_ISSUER);
+export const USDC_ISSUER = (import.meta.env.VITE_USDC_ISSUER ?? '').trim();
+export const USDC_ASSET = USDC_ISSUER ? new Asset(USDC_ASSET_CODE, USDC_ISSUER) : undefined;
 
 export const ASSET_CONTRACTS: Record<string, string> = {
-  XLM: import.meta.env.VITE_XLM_CONTRACT_ID || Asset.native().contractId(PASSPHRASE),
-  USDC: import.meta.env.VITE_USDC_CONTRACT_ID || USDC_ASSET.contractId(PASSPHRASE),
+  XLM: import.meta.env.VITE_XLM_CONTRACT_ID || Asset.native().contractId(NETWORK_PASSPHRASE),
+  USDC: import.meta.env.VITE_USDC_CONTRACT_ID || USDC_ASSET?.contractId(NETWORK_PASSPHRASE) || '',
+};
+
+export const requireUsdcAsset = (): Asset => {
+  if (!USDC_ASSET) {
+    throw new Error('Missing USDC issuer. Set VITE_USDC_ISSUER for Horizon trustlines and classic DEX swaps, or configure a supported USDC asset.');
+  }
+  return USDC_ASSET;
 };
 
 export const resolveAssetContractId = (asset: string): string => {

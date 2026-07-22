@@ -2,13 +2,18 @@
 #![allow(deprecated)]
 
 use nexus_contracts_shared::{
-    ContractError, LoanOffer, OfferStatus, DEFAULT_LIQUIDATION_BONUS_BPS, MAX_FIXED_APR_BPS,
-    SAFE_HEALTH_FACTOR_BPS,
+    ContractError, LoanOffer, OfferStatus, BPS_DENOMINATOR, DEFAULT_LIQUIDATION_BONUS_BPS,
+    MAX_FIXED_APR_BPS, SAFE_HEALTH_FACTOR_BPS,
 };
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, IntoVal, Symbol, Val, Vec};
 
 #[cfg(test)]
 mod test;
+
+const MAX_LIQUIDATION_BONUS_BPS: u32 = 5_000;
+const LEDGERS_PER_DAY: u32 = 17_280;
+const TTL_THRESHOLD: u32 = 7 * LEDGERS_PER_DAY;
+const TTL_EXTEND_TO: u32 = 365 * LEDGERS_PER_DAY;
 
 #[derive(Clone)]
 #[contracttype]
@@ -42,6 +47,7 @@ impl MarketplaceContract {
             .instance()
             .set(&DataKey::LoanManager, &loan_manager_contract);
         env.storage().instance().set(&DataKey::OfferCount, &0_u64);
+        bump_instance(&env);
         Ok(())
     }
 
@@ -62,11 +68,14 @@ impl MarketplaceContract {
     ) -> Result<u64, ContractError> {
         lender.require_auth();
         validate_offer_input(
+            &loan_asset,
             loan_amount,
             fixed_apr_bps,
             duration_days,
+            &collateral_asset,
             max_ltv_bps,
             liquidation_threshold_bps,
+            liquidation_bonus_bps,
             min_health_factor_bps,
         )?;
 
@@ -96,9 +105,7 @@ impl MarketplaceContract {
             status: OfferStatus::Draft,
         };
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::Offer(offer_id), &offer);
+        store_offer(&env, offer_id, &offer);
         env.events().publish(
             (Symbol::new(&env, "offer_created"), offer_id, lender),
             loan_amount,
@@ -120,11 +127,13 @@ impl MarketplaceContract {
             offer.loan_amount,
         )?;
         offer.status = OfferStatus::Funding;
-        env.storage()
-            .persistent()
-            .set(&DataKey::Offer(offer_id), &offer);
+        store_offer(&env, offer_id, &offer);
         env.events().publish(
-            (Symbol::new(&env, "offer_funded"), offer_id),
+            (
+                Symbol::new(&env, "offer_funded"),
+                offer_id,
+                offer.lender.clone(),
+            ),
             offer.loan_amount,
         );
         Ok(())
@@ -141,11 +150,13 @@ impl MarketplaceContract {
             return Err(ContractError::InsufficientLockedFunds);
         }
         offer.status = OfferStatus::Active;
-        env.storage()
-            .persistent()
-            .set(&DataKey::Offer(offer_id), &offer);
+        store_offer(&env, offer_id, &offer);
         env.events().publish(
-            (Symbol::new(&env, "offer_activated"), offer_id),
+            (
+                Symbol::new(&env, "offer_activated"),
+                offer_id,
+                offer.lender.clone(),
+            ),
             offer.loan_amount,
         );
         Ok(())
@@ -162,11 +173,13 @@ impl MarketplaceContract {
         }
         unlock_offer_if_needed(&env, &offer)?;
         offer.status = OfferStatus::Cancelled;
-        env.storage()
-            .persistent()
-            .set(&DataKey::Offer(offer_id), &offer);
+        store_offer(&env, offer_id, &offer);
         env.events().publish(
-            (Symbol::new(&env, "offer_cancelled"), offer_id),
+            (
+                Symbol::new(&env, "offer_cancelled"),
+                offer_id,
+                offer.lender.clone(),
+            ),
             offer.loan_amount,
         );
         Ok(())
@@ -182,9 +195,7 @@ impl MarketplaceContract {
         }
         unlock_offer_if_needed(&env, &offer)?;
         offer.status = OfferStatus::Expired;
-        env.storage()
-            .persistent()
-            .set(&DataKey::Offer(offer_id), &offer);
+        store_offer(&env, offer_id, &offer);
         env.events().publish(
             (Symbol::new(&env, "offer_expired"), offer_id),
             offer.loan_amount,
@@ -203,20 +214,38 @@ impl MarketplaceContract {
             return Err(ContractError::InvalidCollateralAmount);
         }
         let mut offer = get_offer_internal(&env, offer_id)?;
+        if borrower == offer.lender {
+            return Err(ContractError::BorrowerIsLender);
+        }
         if offer.status != OfferStatus::Active {
             return Err(ContractError::OfferNotActive);
         }
         let loan_id =
             call_create_pending_loan_from_offer(&env, &offer, &borrower, collateral_amount)?;
         offer.status = OfferStatus::Matched;
-        env.storage()
-            .persistent()
-            .set(&DataKey::Offer(offer_id), &offer);
+        store_offer(&env, offer_id, &offer);
         env.events().publish(
             (Symbol::new(&env, "offer_matched"), offer_id, borrower),
             loan_id,
         );
         Ok(loan_id)
+    }
+
+    pub fn cleanup_offer(env: Env, offer_id: u64) -> Result<(), ContractError> {
+        require_admin(&env)?;
+        let offer = get_offer_internal(&env, offer_id)?;
+        match offer.status {
+            OfferStatus::Matched | OfferStatus::Cancelled | OfferStatus::Expired => {}
+            _ => return Err(ContractError::OfferNotActive),
+        }
+        let locked = call_vault_get_offer_locked_amount(&env, offer_id)?;
+        if locked > 0 {
+            return Err(ContractError::InsufficientLockedFunds);
+        }
+        env.storage().persistent().remove(&DataKey::Offer(offer_id));
+        env.events()
+            .publish((Symbol::new(&env, "offer_cleaned"), offer_id), 0_i128);
+        Ok(())
     }
 
     pub fn get_offer(env: Env, offer_id: u64) -> Result<LoanOffer, ContractError> {
@@ -232,13 +261,19 @@ impl MarketplaceContract {
 }
 
 fn validate_offer_input(
+    loan_asset: &Address,
     loan_amount: i128,
     fixed_apr_bps: u32,
     duration_days: u32,
+    collateral_asset: &Address,
     max_ltv_bps: u32,
     liquidation_threshold_bps: u32,
+    liquidation_bonus_bps: u32,
     min_health_factor_bps: u32,
 ) -> Result<(), ContractError> {
+    if loan_asset == collateral_asset {
+        return Err(ContractError::InvalidAssetPair);
+    }
     if loan_amount <= 0 {
         return Err(ContractError::InvalidLoanAmount);
     }
@@ -248,8 +283,14 @@ fn validate_offer_input(
     if duration_days == 0 {
         return Err(ContractError::InvalidDuration);
     }
-    if max_ltv_bps == 0 || liquidation_threshold_bps == 0 {
+    if max_ltv_bps == 0 || max_ltv_bps > BPS_DENOMINATOR as u32 {
+        return Err(ContractError::InvalidMaxLtv);
+    }
+    if liquidation_threshold_bps == 0 || liquidation_threshold_bps > BPS_DENOMINATOR as u32 {
         return Err(ContractError::InvalidLiquidationThreshold);
+    }
+    if liquidation_bonus_bps > MAX_LIQUIDATION_BONUS_BPS {
+        return Err(ContractError::InvalidLiquidationBonus);
     }
     if max_ltv_bps > liquidation_threshold_bps {
         return Err(ContractError::LtvExceedsThreshold);
@@ -265,6 +306,31 @@ fn get_offer_internal(env: &Env, offer_id: u64) -> Result<LoanOffer, ContractErr
         .persistent()
         .get(&DataKey::Offer(offer_id))
         .ok_or(ContractError::OfferNotFound)
+}
+
+fn store_offer(env: &Env, offer_id: u64, offer: &LoanOffer) {
+    let key = DataKey::Offer(offer_id);
+    env.storage().persistent().set(&key, offer);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, TTL_THRESHOLD, TTL_EXTEND_TO);
+    bump_instance(env);
+}
+
+fn require_admin(env: &Env) -> Result<Address, ContractError> {
+    let admin: Address = env
+        .storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .ok_or(ContractError::NotInitialized)?;
+    admin.require_auth();
+    Ok(admin)
+}
+
+fn bump_instance(env: &Env) {
+    env.storage()
+        .instance()
+        .extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
 }
 
 fn next_offer_id(env: &Env) -> u64 {

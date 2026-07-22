@@ -2,6 +2,7 @@ import { Address, nativeToScVal } from '@stellar/stellar-sdk';
 import { CONTRACTS, resolveAssetContractId } from './config';
 import { buildAndSubmitTx } from './transaction';
 import type { TxStage } from './transaction';
+import { decimalToScaledBigInt } from './amounts';
 
 export const oracleContract = {
   async updateOraclePriceTx(
@@ -14,7 +15,7 @@ export const oracleContract = {
     wallet: string,
     onStage?: (stage: TxStage) => void
   ) {
-    const scPrice = BigInt(Math.round(price * Math.pow(10, decimals)));
+    const scPrice = decimalToScaledBigInt(price, decimals);
     const args = [
       Address.fromString(resolveAssetContractId(baseAsset)).toScVal(),
       Address.fromString(resolveAssetContractId(quoteAsset)).toScVal(),

@@ -1,351 +1,120 @@
-# 07 — State Machine
+# 07 - State Machine
 
-> Complete state machine definitions for Loan Offers and Loans, including transition triggers, guards, and code-level implementation.
+This document describes the current state machines implemented by the Soroban contracts, backend Prisma schema, and frontend domain types.
 
----
+## Offer State Machine
 
-## 1. Purpose
+Current offer states:
 
-This document formally defines the state machines for the two primary protocol entities: **Loan Offers** and **Loans**. It specifies every valid state, every valid transition, the trigger that causes each transition, and the guard conditions that must be met. For the business rules governing these transitions, see `01_BUSINESS_RULES.md`. For the functions that execute them, see `05_CONTRACT_SPECIFICATION.md`.
-
----
-
-## 2. Offer State Machine
-
-### 2.1 State Diagram
+| State | Meaning | Terminal |
+| --- | --- | --- |
+| `Draft` | Terms were created, but lender funds are not locked yet. | No |
+| `Funding` | Lender funds are locked in Vault, but the offer is not public yet. | No |
+| `Active` | Offer is listed and can be accepted by a borrower. | No |
+| `Matched` | Borrower accepted the offer and a pending loan was created. | Yes |
+| `Cancelled` | Lender cancelled the offer and locked funds were returned when needed. | Yes |
+| `Expired` | Offer was expired and locked funds were returned when needed. | Yes |
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Listed : create_offer()
-
-    Listed --> Accepted : accept_offer()
-    Listed --> Cancelled : cancel_offer()
-
-    Accepted --> [*]
+    [*] --> Draft : create_offer()
+    Draft --> Funding : fund_offer()
+    Funding --> Active : activate_offer()
+    Draft --> Cancelled : cancel_offer()
+    Funding --> Cancelled : cancel_offer()
+    Active --> Cancelled : cancel_offer()
+    Draft --> Expired : expire_offer()
+    Funding --> Expired : expire_offer()
+    Active --> Expired : expire_offer()
+    Active --> Matched : accept_offer()
+    Matched --> [*]
     Cancelled --> [*]
+    Expired --> [*]
 ```
 
-### 2.2 States
+Important guards:
 
-| State | Description | Terminal? | Escrow Holds |
-|-------|-------------|-----------|-------------|
-| `Listed` | Offer is active in the marketplace, available for borrowers to accept | No | Loan asset (deposited by lender) |
-| `Accepted` | A borrower accepted the offer and a loan was created | Yes | Loan asset transferred to borrower; collateral now in Vault under loan |
-| `Cancelled` | Lender cancelled the offer before acceptance | Yes | Loan asset returned to lender |
+- `create_offer()` requires positive amount, valid APR/duration, distinct loan and collateral assets, valid LTV/liquidation thresholds, and lender auth.
+- `fund_offer()` requires `Draft` status and lender auth, then calls Vault `lock_lender_funds`.
+- `activate_offer()` requires `Funding` status and sufficient locked Vault balance.
+- `accept_offer()` requires `Active` status, borrower auth, borrower not equal to lender, and positive collateral amount.
+- `cancel_offer()` and `expire_offer()` cannot operate after `Matched`, `Cancelled`, or `Expired`.
 
-### 2.3 Transitions
+Backend status names intentionally match the contract enum names: `Draft`, `Funding`, `Active`, `Matched`, `Cancelled`, `Expired`.
 
-| From | To | Trigger | Guard | Effect |
-|------|----|---------|-------|--------|
-| _(none)_ | `Listed` | `create_offer()` | `loan_amount > 0`, `max_ltv ≤ liq_threshold`, both > 0 | Loan asset deposited to Vault |
-| `Listed` | `Accepted` | `accept_offer()` | `collateral_amount > 0`, borrower auth | Loan created via Loan Manager |
-| `Listed` | `Cancelled` | `cancel_offer()` | Lender auth, `status == Listed` | Loan asset returned from Vault |
+## Loan State Machine
 
-### 2.4 Invalid Transitions
+Current loan states:
 
-| Attempted | Error |
-|-----------|-------|
-| `Accepted` → any | No function modifies accepted offers |
-| `Cancelled` → any | No function modifies cancelled offers |
-| `Accepted` → `Cancelled` | `"accepted offer cannot be cancelled"` |
-| `Cancelled` → `Cancelled` | `"offer already cancelled"` |
-
-### 2.5 Implementation
-
-The offer state machine is implemented entirely in the Marketplace contract:
-
-```rust
-// create_offer() → always starts as Listed
-offer.status = OfferStatus::Listed;
-
-// cancel_offer() → guard
-match offer.status {
-    OfferStatus::Listed => {},      // allowed
-    OfferStatus::Accepted => panic!("accepted offer cannot be cancelled"),
-    OfferStatus::Cancelled => panic!("offer already cancelled"),
-}
-offer.status = OfferStatus::Cancelled;
-
-// accept_offer() → guard
-if offer.status != OfferStatus::Listed {
-    panic!("offer is not listed");
-}
-offer.status = OfferStatus::Accepted;
-```
-
----
-
-## 3. Loan State Machine
-
-### 3.1 State Diagram
+| State | Meaning | Mutable | Liquidatable |
+| --- | --- | --- | --- |
+| `PendingCollateral` | Offer was accepted; borrower has not activated and locked collateral yet. | Limited | No |
+| `Active` | Healthy loan; HF is at or above the configured minimum. | Yes | No |
+| `Warning` | HF is below configured minimum but at or above liquidation threshold. | Yes | No |
+| `LiquidationPlanning` | HF is below liquidation threshold. | Yes | Yes |
+| `Expired` | Due time has passed but grace period has not ended. | Yes | Only if HF is also liquidatable |
+| `Defaulted` | Grace period has ended. | Yes | Yes |
+| `Repaid` | Debt was fully repaid and collateral released. | No | No |
+| `Liquidated` | Liquidation closed the remaining position. | No | No |
+| `Closed` | Administrative terminal state. | No | No |
 
 ```mermaid
 stateDiagram-v2
     [*] --> PendingCollateral : accept_offer()
-    PendingCollateral --> Active : activate_loan()<br/>HF ≥ min_hf
-    PendingCollateral --> Warning : activate_loan()<br/>12,000 ≤ HF < min_hf
+    PendingCollateral --> Active : activate_loan(), HF >= min_hf
+    PendingCollateral --> Warning : activate_loan(), liq_hf <= HF < min_hf
+    PendingCollateral --> LiquidationPlanning : activate_loan(), HF < liq_hf
 
-    Active --> Warning : HF drops below min_hf<br/>but ≥ 12,000
-    Active --> LiquidationPlanning : HF drops below 12,000
-    Active --> Repaid : full_repay() or<br/>partial_repay() zeroes debt
-    Active --> Expired : time > due_time
+    Active --> Warning : refresh / price move
+    Warning --> Active : add collateral / repay / price move
+    Warning --> LiquidationPlanning : refresh / price move
+    LiquidationPlanning --> Warning : add collateral / repay / price move
+    LiquidationPlanning --> Active : add collateral / repay / price move
 
-    Warning --> Active : HF restored ≥ min_hf<br/>(add_collateral / partial_repay)
-    Warning --> LiquidationPlanning : HF drops below 12,000
-    Warning --> Repaid : full_repay() or<br/>partial_repay() zeroes debt
-    Warning --> Expired : time > due_time
+    Active --> Expired : mark_expired()
+    Warning --> Expired : mark_expired()
+    LiquidationPlanning --> Expired : mark_expired()
+    Expired --> Defaulted : mark_defaulted()
 
-    LiquidationPlanning --> Warning : HF restored ≥ 12,000<br/>(add_collateral / partial_repay)
-    LiquidationPlanning --> Active : HF restored ≥ min_hf<br/>(add_collateral / partial_repay)
-    LiquidationPlanning --> Liquidated : liquidate() zeroes debt
-    LiquidationPlanning --> Repaid : full_repay() or<br/>partial_repay() zeroes debt
-    LiquidationPlanning --> Expired : time > due_time
+    Active --> Repaid : full_repay() or debt becomes zero
+    Warning --> Repaid : full_repay() or debt becomes zero
+    LiquidationPlanning --> Repaid : full_repay() or debt becomes zero
+    Expired --> Repaid : full_repay() or debt becomes zero
+    Defaulted --> Repaid : full_repay() or debt becomes zero
 
-    Expired --> Defaulted : time > due_time + grace_period
-    Expired --> Repaid : full_repay() or partial_repay() zeroes debt
-
-    Defaulted --> Liquidated : liquidate() zeroes debt
-    Defaulted --> Repaid : full_repay() or partial_repay() zeroes debt
+    LiquidationPlanning --> Liquidated : liquidate() closes debt
+    Defaulted --> Liquidated : liquidate() closes debt
 
     Repaid --> [*]
     Liquidated --> [*]
     Closed --> [*]
 ```
 
-### 3.2 States
+## Health Factor Mapping
 
-| State | Description | Mutable? | Liquidatable? |
-|-------|-------------|----------|---------------|
-| `PendingCollateral` | Loan created but collateral not yet locked and USDC not disbursed | ✅ Yes | ❌ No |
-| `Active` | Loan is healthy — HF ≥ `min_health_factor_bps` | ✅ Yes | ❌ No |
-| `Warning` | HF is declining — between 12,000 and `min_health_factor_bps` | ✅ Yes | ❌ No |
-| `LiquidationPlanning` | HF < 12,000 — collateral is unsafe | ✅ Yes | ✅ Yes |
-| `Expired` | Past due time but within grace period | ✅ Yes | ❌ No (unless HF also < 12,000) |
-| `Defaulted` | Past grace period — borrower failed to repay | ✅ Yes | ✅ Yes (regardless of HF) |
-| `Repaid` | Fully repaid — collateral returned | ❌ No | ❌ No |
-| `Liquidated` | Debt zeroed via liquidation | ❌ No | ❌ No |
-| `Closed` | Administrative closure | ❌ No | ❌ No |
+All contract risk math uses basis points:
 
-### 3.3 Transition Triggers
+| Health Factor BPS | Status |
+| --- | --- |
+| `HF >= min_health_factor_bps` | `Active` |
+| `12000 <= HF < min_health_factor_bps` | `Warning` |
+| `HF < 12000` | `LiquidationPlanning` |
 
-| # | From | To | Trigger Function | Condition |
-|---|------|----|-----------------|-----------|
-| T0 | _(none)_ | `PendingCollateral` | `accept_offer()` / `create_pending_loan_from_offer()` | Borrower accepts listed offer |
-| T1 | `PendingCollateral` | `Active` | `activate_loan()` | HF ≥ `min_hf`, LTV ≤ `max_ltv` |
-| T2 | `PendingCollateral` | `Warning` | `activate_loan()` | 12,000 ≤ HF < `min_hf` |
-| T3 | `Active` | `Warning` | `refresh_loan_state()` / `update_status()` | 12,000 ≤ HF < `min_hf` |
-| T4 | `Active` | `LiquidationPlanning` | `refresh_loan_state()` / `update_status()` | HF < 12,000 |
-| T5 | `Warning` | `Active` | `add_collateral()` / `partial_repay()` | HF restored ≥ `min_hf` |
-| T6 | `Warning` | `LiquidationPlanning` | `refresh_loan_state()` / `update_status()` | HF < 12,000 |
-| T7 | `LiquidationPlanning` | `Active` | `add_collateral()` / `partial_repay()` | HF restored ≥ `min_hf` |
-| T8 | `LiquidationPlanning` | `Warning` | `add_collateral()` / `partial_repay()` | 12,000 ≤ HF < `min_hf` |
-| T9 | Any mutable | `Repaid` | `full_repay()` / `partial_repay()` | `outstanding_debt` reaches 0 |
-| T10 | `LiquidationPlanning` / `Defaulted` | `Liquidated` | `liquidate()` | `outstanding_debt` reaches 0 via liquidation |
-| T11 | `Active` / `Warning` / `LiquidationPlanning` | `Expired` | `mark_expired()` / `update_status()` | `current_time > due_time` |
-| T12 | `Expired` | `Defaulted` | `mark_defaulted()` / `update_status()` | `current_time > due_time + grace_period` |
+The liquidation threshold is fixed at `12000` BPS in shared constants. Offer creation defaults `min_health_factor_bps` to `14000` when omitted or zero.
 
-### 3.4 HF-Based Status Recovery
+## Time-Based Priority
 
-Unlike terminal states, HF-based statuses are **bidirectional**. The loan can recover:
+Status refresh is ordered so terminal settlement wins first, then time, then HF:
 
-```
-LiquidationPlanning ←→ Warning ←→ Active
-```
+1. If debt is zero, keep/enter settlement terminal status.
+2. If now is past `due_time + grace_period_days`, status becomes `Defaulted`.
+3. If now is past `due_time`, status becomes `Expired`.
+4. Otherwise, status follows HF mapping.
 
-Recovery happens when:
-1. Borrower calls `add_collateral()` → increases collateral value → HF rises
-2. Borrower calls `partial_repay()` → decreases debt → HF rises
-3. Oracle price increases → collateral value rises → HF rises (detected on next `refresh_loan_state()`)
+`Defaulted` loans are liquidatable regardless of HF. `Expired` loans are still repayable during grace period and are liquidatable only if HF is also below the liquidation threshold.
 
-### 3.5 Time-Based Status Priority
+## Backend Synchronization
 
-The `update_status()` function checks conditions in strict priority order:
+The backend does not invent state transitions in API mode. Mutating routes verify a confirmed Soroban receipt, match the expected contract event/action, then read the authoritative on-chain offer or loan when needed. The database stores the resulting indexed state for fast UI queries.
 
-```
-Priority 1: outstanding_debt == 0 → skip (already settled)
-Priority 2: current_time > default_time → Defaulted
-Priority 3: current_time > due_time → Expired  
-Priority 4: HF-based → status_for_hf() (Active / Warning / LiquidationPlanning)
-```
-
-Time-based status **always overrides** HF-based status. A loan past its due date is `Expired` even if its HF is healthy.
-
----
-
-## 4. Mutable vs. Terminal States
-
-### 4.1 `require_mutable()` Guard
-
-This guard function is called before any borrower action (`add_collateral`, `partial_repay`, `full_repay`) and prevents modifications to closed loans:
-
-```rust
-fn require_mutable(loan: &Loan) {
-    match loan.status {
-        LoanStatus::Active
-        | LoanStatus::Warning
-        | LoanStatus::LiquidationPlanning
-        | LoanStatus::Expired
-        | LoanStatus::Defaulted => {},  // allowed
-        _ => panic!("loan is closed"),  // Repaid, Liquidated, Closed
-    }
-}
-```
-
-### 4.2 Allowed Operations Per State
-
-| State | add_collateral | partial_repay | full_repay | liquidate | mark_expired | mark_defaulted | refresh |
-|-------|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
-| `Active` | ✅ | ✅ | ✅ | ❌ | ✅* | ❌ | ✅ |
-| `Warning` | ✅ | ✅ | ✅ | ❌ | ✅* | ❌ | ✅ |
-| `LiquidationPlanning` | ✅ | ✅ | ✅ | ✅ | ✅* | ❌ | ✅ |
-| `Expired` | ✅ | ✅ | ✅ | ✅** | ❌ | ✅* | ✅ |
-| `Defaulted` | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ |
-| `Repaid` | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| `Liquidated` | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| `Closed` | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-
-\* Only if the time condition is met  
-\** Only if HF < 12,000 (time-expired alone doesn't enable liquidation unless also unhealthy)
-
----
-
-## 5. Status Determination Functions
-
-### 5.1 `status_for_hf(loan, hf_bps) → LoanStatus`
-
-Pure HF-based status mapping (no time checks):
-
-```rust
-fn status_for_hf(loan: &Loan, hf_bps: u32) -> LoanStatus {
-    if hf_bps >= loan.min_health_factor_bps {
-        LoanStatus::Active
-    } else if hf_bps >= LIQUIDATION_HEALTH_FACTOR_BPS {  // 12,000
-        LoanStatus::Warning
-    } else {
-        LoanStatus::LiquidationPlanning
-    }
-}
-```
-
-| HF (BPS) | min_hf = 14,000 | Result |
-|-----------|-----------------|--------|
-| 20,000 | ≥ 14,000 | `Active` |
-| 14,000 | ≥ 14,000 | `Active` |
-| 13,999 | < 14,000, ≥ 12,000 | `Warning` |
-| 12,000 | < 14,000, ≥ 12,000 | `Warning` |
-| 11,999 | < 12,000 | `LiquidationPlanning` |
-| 0 | < 12,000 | `LiquidationPlanning` |
-
-### 5.2 `update_status(env, loan)`
-
-Full status update with time checks (called after every mutation):
-
-```rust
-fn update_status(env: &Env, loan: &mut Loan) {
-    if loan.outstanding_debt == 0 {
-        return;  // Already settled, don't change status
-    }
-    let now = env.ledger().timestamp();
-    let default_time = loan.due_time + (loan.grace_period_days as u64) * 86_400;
-    if now > default_time {
-        loan.status = LoanStatus::Defaulted;
-        return;
-    }
-    if now > loan.due_time {
-        loan.status = LoanStatus::Expired;
-        return;
-    }
-    let hf = calculate_health_factor_for_loan(env, loan);
-    loan.status = status_for_hf(loan, hf);
-}
-```
-
-### 5.3 Liquidation Eligibility Check
-
-```rust
-// In liquidate()
-let hf = calculate_health_factor_for_loan(&env, &loan);
-if hf >= LIQUIDATION_HEALTH_FACTOR_BPS && loan.status != LoanStatus::Defaulted {
-    panic!("loan is not liquidatable");
-}
-```
-
-Liquidation is allowed when:
-- **HF < 12,000** (regardless of status), OR
-- **Status is `Defaulted`** (regardless of HF)
-
----
-
-## 6. State Transition Examples
-
-### 6.1 Happy Path
-
-```
-create_loan_from_offer() → Active (HF = 19,800)
-  ↓ time passes, borrower repays
-full_repay() → Repaid ■
-```
-
-### 6.2 Price Crash → Recovery
-
-```
-Active (HF = 16,000)
-  ↓ oracle price drops
-refresh_loan_state() → Warning (HF = 13,500)
-  ↓ borrower adds collateral
-add_collateral() → Active (HF = 15,200)
-```
-
-### 6.3 Price Crash → Liquidation
-
-```
-Active (HF = 16,000)
-  ↓ oracle price drops sharply
-refresh_loan_state() → LiquidationPlanning (HF = 10,500)
-  ↓ liquidator steps in
-liquidate() → LiquidationPlanning (HF = 11,800, debt partially repaid)
-  ↓ second liquidation
-liquidate() → Liquidated (debt fully repaid) ■
-```
-
-### 6.4 Expiration → Default → Liquidation
-
-```
-Active (HF = 15,000)
-  ↓ due date passes
-mark_expired() → Expired
-  ↓ grace period passes
-mark_defaulted() → Defaulted
-  ↓ liquidator liquidates (even if HF is fine)
-liquidate() → Liquidated ■
-```
-
-### 6.5 Expiration → Late Repayment
-
-```
-Active (HF = 15,000)
-  ↓ due date passes
-mark_expired() → Expired
-  ↓ borrower repays during grace period
-full_repay() → Repaid ■
-```
-
----
-
-## 7. State Machine Invariants
-
-| Invariant | Description |
-|-----------|-------------|
-| **SM-1** | Terminal states (`Repaid`, `Liquidated`, `Closed`) are final — no outbound transitions |
-| **SM-2** | `outstanding_debt == 0` always leads to a terminal state (`Repaid` or `Liquidated`) |
-| **SM-3** | `Defaulted` can only be reached from `Expired` (time must pass through due_time first) |
-| **SM-4** | HF-based transitions (`Active` ↔ `Warning` ↔ `LiquidationPlanning`) are bidirectional |
-| **SM-5** | Time-based transitions are unidirectional (`Active/Warning/LP` → `Expired` → `Defaulted`) |
-| **SM-6** | Time-based status overrides HF-based status in `update_status()` |
-| **SM-7** | Initial status upon offer acceptance is always `PendingCollateral` on-chain. |
-
-> **Note on `PendingCollateral`:** The smart contracts implement `PendingCollateral` as an on-chain state to separate offer acceptance from funding and collateral locking. The borrower accepts the offer via `accept_offer()`, which establishes the agreement on-chain in a `PendingCollateral` state. The borrower then deposits collateral and draws USDC principal by invoking `activate_loan()`.
-
----
-
-*Previous: `06_ESCROW_AND_FUNDING_FLOW.md` · Next: `08_DATA_MODEL.md`*
+The local frontend mock mode can still simulate state transitions in browser state for demos. API mode always requires live Soroban receipts.

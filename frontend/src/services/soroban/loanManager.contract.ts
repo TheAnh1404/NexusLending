@@ -2,6 +2,7 @@ import { Address, nativeToScVal } from '@stellar/stellar-sdk';
 import { CONTRACTS, STELLAR_DECIMALS } from './config';
 import { buildAndSubmitTx, readContractValue } from './transaction';
 import type { TxStage } from './transaction';
+import { decimalToScaledBigInt } from './amounts';
 
 /** Convert a JS number/bigint to a Soroban u64 ScVal. */
 const toU64 = (value: number | bigint | string): ReturnType<typeof nativeToScVal> =>
@@ -9,7 +10,7 @@ const toU64 = (value: number | bigint | string): ReturnType<typeof nativeToScVal
 
 /** Convert a human-readable token amount to raw contract units (i128 ScVal). */
 const toContractAmount = (amount: number, decimals: number = STELLAR_DECIMALS): ReturnType<typeof nativeToScVal> =>
-  nativeToScVal(BigInt(Math.round(amount * 10 ** decimals)), { type: 'i128' });
+  nativeToScVal(decimalToScaledBigInt(amount, decimals), { type: 'i128' });
 
 const enumVariantName = (value: unknown): string | null => {
   if (typeof value === 'string') return value;

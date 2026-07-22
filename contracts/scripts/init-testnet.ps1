@@ -48,7 +48,7 @@ if ($LASTEXITCODE -ne 0) { Write-Error "Failed to initialize Marketplace"; exit 
 
 # Step 4: Initialize Loan Manager
 Write-Host ">>> Initializing Loan Manager contract..." -ForegroundColor Cyan
-stellar contract invoke --id $loanManagerId --network testnet --source deployer -- initialize --admin $deployer --vault_contract $vaultId --oracle_contract $oracleId
+stellar contract invoke --id $loanManagerId --network testnet --source deployer -- initialize --admin $deployer --marketplace_contract $marketplaceId --vault_contract $vaultId --oracle_contract $oracleId
 if ($LASTEXITCODE -ne 0) { Write-Error "Failed to initialize Loan Manager"; exit 1 }
 
 # Step 5: Set Oracle price for XLM/USDC by asset contract pair

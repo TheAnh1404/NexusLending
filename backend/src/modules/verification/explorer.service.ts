@@ -1,17 +1,17 @@
-import { env } from '../../config/env';
+import { env, normalizeStellarNetworkName } from '../../config/env';
 
 export class ExplorerService {
-  constructor(private readonly network = env.stellarNetwork) {}
+  constructor(private readonly network: string = env.stellarNetwork) {}
 
   getTransactionUrl(txHash: string): string {
-    const explorerNetwork = this.network === 'mainnet' || this.network === 'public'
+    const explorerNetwork = normalizeStellarNetworkName(this.network) === 'public'
       ? 'public'
       : 'testnet';
     return `https://stellar.expert/explorer/${explorerNetwork}/tx/${txHash}`;
   }
 
   getContractUrl(contractId: string): string {
-    const explorerNetwork = this.network === 'mainnet' || this.network === 'public'
+    const explorerNetwork = normalizeStellarNetworkName(this.network) === 'public'
       ? 'public'
       : 'testnet';
     return `https://stellar.expert/explorer/${explorerNetwork}/contract/${contractId}`;
@@ -19,4 +19,3 @@ export class ExplorerService {
 }
 
 export const explorerService = new ExplorerService();
-

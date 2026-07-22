@@ -4,7 +4,9 @@ import {
   isConnected as freighterIsConnected,
   requestAccess,
   signTransaction as freighterSignTransaction,
+  WatchWalletChanges,
 } from '@stellar/freighter-api';
+import { NETWORK_DISPLAY_NAME, NETWORK_PASSPHRASE } from '../soroban/config';
 
 const TESTNET_NETWORK = 'TESTNET';
 const TESTNET_PASSPHRASE = 'Test SDF Network ; September 2015';
@@ -30,6 +32,7 @@ export interface FreighterConnection {
   publicKey: string;
   network: FreighterNetwork;
   isTestnet: boolean;
+  isExpectedNetwork: boolean;
 }
 
 export interface SignedTransaction {
@@ -73,6 +76,11 @@ const toFreighterNetwork = (response: Awaited<ReturnType<typeof getNetworkDetail
 export const isNetworkTestnet = (network: Pick<FreighterNetwork, 'network' | 'networkPassphrase'>): boolean =>
   network.network === TESTNET_NETWORK || network.networkPassphrase === TESTNET_PASSPHRASE;
 
+export const isNetworkExpected = (network: Pick<FreighterNetwork, 'networkPassphrase'>): boolean =>
+  network.networkPassphrase === NETWORK_PASSPHRASE;
+
+export const expectedNetworkLabel = NETWORK_DISPLAY_NAME;
+
 export const getShortAddress = (publicKey: string | null): string => {
   if (!publicKey) return '';
   if (publicKey.length <= 12) return publicKey;
@@ -112,6 +120,7 @@ export const freighterService = {
       publicKey: accessResponse.address,
       network,
       isTestnet: isNetworkTestnet(network),
+      isExpectedNetwork: isNetworkExpected(network),
     };
   },
 
@@ -142,12 +151,29 @@ export const freighterService = {
     return isNetworkTestnet(network);
   },
 
+  async isExpectedNetwork(): Promise<boolean> {
+    const network = await this.getNetwork();
+    return isNetworkExpected(network);
+  },
+
+  async requireExpectedNetwork(): Promise<FreighterNetwork> {
+    const network = await this.getNetwork();
+    if (!isNetworkExpected(network)) {
+      throw new Error(`Freighter is connected to ${network.network || 'an unknown network'}, but Nexus is configured for ${NETWORK_DISPLAY_NAME}.`);
+    }
+    return network;
+  },
+
   async signTransaction(
     transactionXdr: string,
     networkPassphrase?: string,
     signerAddress?: string
   ): Promise<SignedTransaction> {
     const passphrase = networkPassphrase ?? (await this.getNetwork()).networkPassphrase;
+    const walletNetwork = await this.getNetwork();
+    if (walletNetwork.networkPassphrase !== passphrase) {
+      throw new Error(`Freighter is connected to ${walletNetwork.network || 'an unknown network'}, but this transaction targets ${NETWORK_DISPLAY_NAME}.`);
+    }
     const signingOptions = signerAddress
       ? { networkPassphrase: passphrase, address: signerAddress }
       : { networkPassphrase: passphrase };
@@ -172,5 +198,36 @@ export const freighterService = {
 
   hasSavedConnection(): boolean {
     return localStorage.getItem(CONNECTED_STORAGE_KEY) === 'true';
+  },
+
+  watchWalletChanges(
+    callback: (connection: FreighterConnection | null, error?: Error) => void
+  ): { stop: () => void } {
+    const watcher = new WatchWalletChanges();
+    const response = watcher.watch(({ address, network, networkPassphrase, error }) => {
+      if (error) {
+        callback(null, normalizeError(error, 'Unable to watch Freighter wallet changes.'));
+        return;
+      }
+      if (!address) {
+        callback(null);
+        return;
+      }
+      const details: FreighterNetwork = {
+        network,
+        networkUrl: '',
+        networkPassphrase,
+      };
+      callback({
+        publicKey: address,
+        network: details,
+        isTestnet: isNetworkTestnet(details),
+        isExpectedNetwork: isNetworkExpected(details),
+      });
+    });
+    if (response.error) {
+      callback(null, normalizeError(response.error, 'Unable to watch Freighter wallet changes.'));
+    }
+    return { stop: () => watcher.stop() };
   },
 };

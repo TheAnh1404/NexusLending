@@ -5,14 +5,20 @@ import { prisma } from '../../prisma/client';
 import { ApiError } from '../../utils/apiError';
 import {
   MAX_FIXED_APR_BPS,
-  calculateHealthFactor,
-  calculateLTV,
-  getRiskZone
 } from '../../utils/finance';
-import { createLedgerTransaction } from '../transactions/chainReceipt';
-import { contractReaderService, verificationService } from '../verification';
-import type { OnChainLoan, VerifiedTransaction } from '../verification';
-import type { ActivateLoanInput, CreateLoanInput, UpdateLoanInput } from './loans.schemas';
+import { createLedgerTransaction, requireConfirmedReceipt } from '../transactions/chainReceipt';
+import {
+  contractReaderService,
+  explorerService,
+  transactionVerifierService,
+  verificationService,
+  WrongAmountError,
+  WrongContractError,
+  WrongNetworkError,
+  WrongWalletError,
+} from '../verification';
+import type { OnChainLoan, VerificationTransactionInput, VerifiedTransaction } from '../verification';
+import type { ActivateLoanInput, CreateLoanInput, SyncLoanInput, UpdateLoanInput } from './loans.schemas';
 
 const activeStatuses: LoanStatus[] = [
   'Active',
@@ -29,6 +35,12 @@ const statusForRiskZone = (riskZone: RiskZone): LoanStatus => {
   if (riskZone === 'SAFE') return 'Active';
   if (riskZone === 'WARNING') return 'Warning';
   return 'LiquidationPlanning';
+};
+
+const riskZoneFromHealthFactorBps = (healthFactorBps: number): RiskZone => {
+  if (healthFactorBps >= 14_000) return 'SAFE';
+  if (healthFactorBps >= 12_000) return 'WARNING';
+  return 'LIQUIDATION_PLANNING';
 };
 
 const timeBasedStatusForLoan = (loan: {
@@ -61,6 +73,54 @@ const requireVerifiedId = (value: string | undefined, label: string): string => 
   return value;
 };
 
+const requireAvailableContractLoanId = (
+  value: string | bigint | number | null | undefined,
+): string => {
+  if (value === undefined || value === null) {
+    throw new ApiError(400, 'Loan is missing contractLoanId and cannot be activated on-chain');
+  }
+  return String(value);
+};
+
+const isHardVerificationMismatch = (error: unknown): boolean =>
+  error instanceof WrongAmountError ||
+  error instanceof WrongContractError ||
+  error instanceof WrongNetworkError ||
+  error instanceof WrongWalletError;
+
+const isEventParsingFallback = (error: unknown): boolean => {
+  if (!(error instanceof ApiError)) return true;
+  return error.message.startsWith('Transaction does not contain the expected event') ||
+    error.message.includes('was not found in verified blockchain event') ||
+    error.message.includes('did not include an amount');
+};
+
+const fallbackLoanReceipt = async (
+  input: { txHash?: string } | undefined,
+  contractLoanId: string,
+  verificationError: unknown,
+): Promise<VerificationTransactionInput> => {
+  if (isHardVerificationMismatch(verificationError) || !isEventParsingFallback(verificationError)) {
+    throw verificationError;
+  }
+
+  const transaction = await transactionVerifierService.verifyTransaction(input?.txHash ?? '');
+  const warning = verificationError instanceof Error ? verificationError.message : String(verificationError);
+
+  return {
+    txHash: transaction.txHash,
+    explorerUrl: explorerService.getTransactionUrl(transaction.txHash),
+    ledger: transaction.ledger,
+    txStatus: transaction.status,
+    contractId: env.loanManagerContractId,
+    blockTimestamp: transaction.confirmedAt,
+    contractReturnValue: {
+      contractLoanId,
+      verificationWarning: warning,
+    },
+  };
+};
+
 const statusFromOnChain = (status: string | undefined): LoanStatus | undefined => {
   if (!status) return undefined;
   const match = [
@@ -75,6 +135,109 @@ const statusFromOnChain = (status: string | undefined): LoanStatus | undefined =
     'Liquidated'
   ].find((item) => status.includes(item));
   return match as LoanStatus | undefined;
+};
+
+const validateOnChainLoanIdentity = (
+  onChainLoan: OnChainLoan,
+  expected: { contractLoanId: string; borrowerWallet: string },
+) => {
+  if (onChainLoan.loanId !== expected.contractLoanId) {
+    throw new ApiError(400, `On-chain loan id ${onChainLoan.loanId} does not match expected loan id ${expected.contractLoanId}`);
+  }
+  if (onChainLoan.borrower !== expected.borrowerWallet) {
+    throw new ApiError(400, 'On-chain loan borrower does not match the persisted borrower');
+  }
+};
+
+const inferRepayAmountFromChain = (
+  loan: { outstandingDebt: Prisma.Decimal | string | number },
+  onChainLoan: OnChainLoan,
+  requestedAmount?: Prisma.Decimal.Value,
+): Prisma.Decimal => {
+  const beforeDebt = decimal(loan.outstandingDebt);
+  const afterDebt = decimal(onChainLoan.outstandingDebt);
+  const delta = beforeDebt.minus(afterDebt).toDecimalPlaces(7);
+  if (delta.gt(0)) return delta;
+
+  if (requestedAmount !== undefined) {
+    const requested = decimal(requestedAmount).toDecimalPlaces(7);
+    if (requested.gt(0)) return Prisma.Decimal.min(requested, beforeDebt).toDecimalPlaces(7);
+  }
+
+  throw new ApiError(400, 'Repayment transaction was confirmed but backend could not infer the repaid amount from on-chain state');
+};
+
+const patchAfterRepayment = async (
+  onChainLoan: OnChainLoan,
+  confirmedAt: Date,
+): Promise<Prisma.LoanUncheckedUpdateInput> => {
+  const onChainStatus = statusFromOnChain(onChainLoan.status);
+  const outstandingDebt = new Prisma.Decimal(onChainLoan.outstandingDebt);
+
+  if (onChainStatus === 'Repaid' || outstandingDebt.lte(0)) {
+    return {
+      collateralAmount: new Prisma.Decimal(0),
+      outstandingDebt: new Prisma.Decimal(0),
+      healthFactor: new Prisma.Decimal(99.99),
+      ltv: new Prisma.Decimal(0),
+      riskZone: 'SAFE' as RiskZone,
+      status: 'Repaid' as LoanStatus,
+      closedAt: confirmedAt,
+    };
+  }
+
+  try {
+    return await patchFromOnChainLoan(onChainLoan);
+  } catch (error) {
+    console.warn(`Unable to read repayment risk metrics for contract loan ${onChainLoan.loanId}:`, error);
+    return {
+      collateralAmount: new Prisma.Decimal(onChainLoan.collateralAmount),
+      outstandingDebt,
+      ...(onChainStatus ? { status: onChainStatus } : {}),
+    };
+  }
+};
+
+type ChainRecoverableLoan = Awaited<ReturnType<typeof prisma.loan.findMany>>[number];
+
+const decimalPatchChanged = (
+  loan: ChainRecoverableLoan,
+  patch: Record<string, unknown>,
+  field: 'collateralAmount' | 'outstandingDebt' | 'healthFactor' | 'ltv',
+): boolean => {
+  const value = patch[field];
+  if (value === undefined) return false;
+  return !decimal(loan[field]).eq(value as Prisma.Decimal.Value);
+};
+
+const datePatchChanged = (
+  loan: ChainRecoverableLoan,
+  patch: Record<string, unknown>,
+  field: 'startTime' | 'dueTime' | 'closedAt',
+): boolean => {
+  const value = patch[field];
+  if (value === undefined) return false;
+  const current = loan[field]?.getTime() ?? null;
+  const next = value instanceof Date ? value.getTime() : null;
+  return current !== next;
+};
+
+const chainPatchChanged = (
+  loan: ChainRecoverableLoan,
+  patch: Prisma.LoanUncheckedUpdateInput,
+): boolean => {
+  const data = patch as Record<string, unknown>;
+  return (
+    (data.status !== undefined && data.status !== loan.status) ||
+    (data.riskZone !== undefined && data.riskZone !== loan.riskZone) ||
+    decimalPatchChanged(loan, data, 'collateralAmount') ||
+    decimalPatchChanged(loan, data, 'outstandingDebt') ||
+    decimalPatchChanged(loan, data, 'healthFactor') ||
+    decimalPatchChanged(loan, data, 'ltv') ||
+    datePatchChanged(loan, data, 'startTime') ||
+    datePatchChanged(loan, data, 'dueTime') ||
+    datePatchChanged(loan, data, 'closedAt')
+  );
 };
 
 const dateFromLedgerSeconds = (seconds: number): Date | undefined =>
@@ -110,13 +273,10 @@ const patchFromOnChainLoan = async (onChainLoan: OnChainLoan) => {
   }
 
   const riskPatch = await buildRiskPatch({
-    collateralAsset: 'XLM',
-    loanAsset: 'USDC',
-    collateralAmount,
+    contractLoanId: onChainLoan.loanId,
     outstandingDebt,
-    liquidationThresholdBps: onChainLoan.liquidationThresholdBps,
     dueTime: dateFromLedgerSeconds(onChainLoan.dueTime)
-  });
+  }, onChainLoan.borrower);
 
   return {
     collateralAmount,
@@ -174,41 +334,19 @@ const markVerifiedEventProcessed = async (
   });
 };
 
-const findPrice = async (collateralAsset: string, loanAsset: string) =>
-  prisma.oraclePrice.findFirst({
-    where: {
-      OR: [
-        { baseAsset: collateralAsset, quoteAsset: loanAsset },
-        { assetPair: `${collateralAsset}/${loanAsset}` }
-      ]
-    },
-    orderBy: { updatedAt: 'desc' }
-  });
-
 export const buildRiskPatch = async (loan: {
-  collateralAsset: string;
-  loanAsset: string;
-  collateralAmount: Prisma.Decimal | string | number;
+  contractLoanId?: bigint | number | string | null;
   outstandingDebt: Prisma.Decimal | string | number;
-  liquidationThresholdBps: number;
   dueTime?: Date | null;
-}) => {
-  const price = await findPrice(loan.collateralAsset, loan.loanAsset);
-  if (!price) return {};
+}, sourceAccount?: string) => {
+  if (!loan.contractLoanId) return {};
 
-  const healthFactor = calculateHealthFactor(
-    loan.collateralAmount,
-    price.price,
-    loan.outstandingDebt,
-    1,
-    loan.liquidationThresholdBps / 100
-  );
-  const ltv = calculateLTV(loan.collateralAmount, price.price, loan.outstandingDebt, 1);
-  const riskZone = getRiskZone(healthFactor);
+  const risk = await contractReaderService.readLoanRisk(loan.contractLoanId, sourceAccount);
+  const riskZone = riskZoneFromHealthFactorBps(risk.healthFactorBps);
 
   return {
-    healthFactor: new Prisma.Decimal(healthFactor),
-    ltv: new Prisma.Decimal(ltv),
+    healthFactor: new Prisma.Decimal(risk.healthFactor),
+    ltv: new Prisma.Decimal(risk.ltv),
     riskZone,
     status: timeBasedStatusForLoan(loan) ?? statusForRiskZone(riskZone)
   };
@@ -306,77 +444,195 @@ export const loansService = {
     return loan;
   },
 
+  async syncChain(id: string, input?: SyncLoanInput) {
+    const loan = await this.getById(id);
+    const contractLoanId = requireAvailableContractLoanId(loan.contractLoanId);
+    const onChainLoan = await contractReaderService.readLoan(contractLoanId, input?.wallet ?? loan.borrowerWallet);
+    validateOnChainLoanIdentity(onChainLoan, {
+      contractLoanId,
+      borrowerWallet: loan.borrowerWallet,
+    });
+
+    const chainPatch = await patchAfterRepayment(onChainLoan, loan.closedAt ?? new Date());
+    return prisma.loan.update({
+      where: { id },
+      data: chainPatch,
+      include: { offer: true }
+    });
+  },
+
+  async recoverChain(input?: SyncLoanInput) {
+    await syncTimeBasedLoanStatuses();
+    const loans = await prisma.loan.findMany({
+      where: { contractLoanId: { not: null } },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    const results: Array<{
+      loanId: string;
+      contractLoanId: string;
+      previousStatus: LoanStatus;
+      status?: LoanStatus;
+      previousOutstandingDebt: string;
+      outstandingDebt?: string;
+      previousCollateralAmount: string;
+      collateralAmount?: string;
+      recovered: boolean;
+      error?: string;
+    }> = [];
+
+    for (const loan of loans) {
+      const contractLoanId = requireAvailableContractLoanId(loan.contractLoanId);
+      try {
+        const onChainLoan = await contractReaderService.readLoan(contractLoanId, input?.wallet ?? loan.borrowerWallet);
+        validateOnChainLoanIdentity(onChainLoan, {
+          contractLoanId,
+          borrowerWallet: loan.borrowerWallet,
+        });
+
+        const chainPatch = await patchAfterRepayment(onChainLoan, loan.closedAt ?? new Date());
+        const recovered = chainPatchChanged(loan, chainPatch);
+        const updated = recovered
+          ? await prisma.loan.update({
+              where: { id: loan.id },
+              data: chainPatch,
+              include: { offer: true }
+            })
+          : loan;
+
+        results.push({
+          loanId: loan.id,
+          contractLoanId,
+          previousStatus: loan.status,
+          status: updated.status,
+          previousOutstandingDebt: loan.outstandingDebt.toString(),
+          outstandingDebt: updated.outstandingDebt.toString(),
+          previousCollateralAmount: loan.collateralAmount.toString(),
+          collateralAmount: updated.collateralAmount.toString(),
+          recovered,
+        });
+      } catch (error) {
+        results.push({
+          loanId: loan.id,
+          contractLoanId,
+          previousStatus: loan.status,
+          previousOutstandingDebt: loan.outstandingDebt.toString(),
+          previousCollateralAmount: loan.collateralAmount.toString(),
+          recovered: false,
+          error: error instanceof Error ? error.message : 'Unknown recovery error',
+        });
+      }
+    }
+
+    return {
+      scanned: results.length,
+      recovered: results.filter((result) => result.recovered).length,
+      unchanged: results.filter((result) => !result.recovered && !result.error).length,
+      failed: results.filter((result) => Boolean(result.error)).length,
+      results,
+    };
+  },
+
   async activate(id: string, input?: ActivateLoanInput) {
     const loan = await this.getById(id);
     if (loan.status !== 'PendingCollateral') {
       throw new ApiError(400, 'Only PendingCollateral loans can be activated');
     }
-    const verified = await verificationService.verifyAction({
-      action: 'activate_loan',
-      txHash: input?.txHash ?? '',
-      expectedContractId: env.loanManagerContractId,
-      expectedLoanId: contractLoanRef(loan),
-      expectedAmount: loan.outstandingDebt
-    });
-    if (verified.alreadyProcessed) return this.getById(id);
-    const contractLoanId = requireVerifiedId(verified.loanId ?? contractLoanRef(loan), 'contractLoanId');
+    const expectedContractLoanId = requireAvailableContractLoanId(input?.contractLoanId ?? loan.contractLoanId);
+    if (loan.contractLoanId && input?.contractLoanId && loan.contractLoanId.toString() !== String(input.contractLoanId)) {
+      throw new ApiError(400, `Returned contractLoanId ${String(input.contractLoanId)} does not match persisted loan id ${loan.contractLoanId.toString()}`);
+    }
+
+    let verified: VerifiedTransaction | undefined;
+    let receipt: VerifiedTransaction | VerificationTransactionInput;
+    let contractLoanId = expectedContractLoanId;
+    try {
+      verified = await verificationService.verifyAction({
+        action: 'activate_loan',
+        txHash: input?.txHash ?? '',
+        expectedContractId: env.loanManagerContractId,
+        expectedWallet: loan.borrowerWallet,
+        expectedLoanId: expectedContractLoanId,
+        expectedAmount: loan.outstandingDebt
+      });
+      if (verified.alreadyProcessed) return this.getById(id);
+      contractLoanId = requireVerifiedId(verified.loanId ?? expectedContractLoanId, 'contractLoanId');
+      if (contractLoanId !== expectedContractLoanId) {
+        throw new ApiError(400, `Verified loan id ${contractLoanId} does not match expected loan id ${expectedContractLoanId}`);
+      }
+      receipt = verified;
+    } catch (error) {
+      contractLoanId = expectedContractLoanId;
+      receipt = await fallbackLoanReceipt(input, contractLoanId, error);
+    }
+
     const onChainLoan = await contractReaderService.readLoan(contractLoanId, loan.borrowerWallet);
-
-    const riskPatch = await buildRiskPatch(loan);
-    if (
-      !('healthFactor' in riskPatch) ||
-      !(riskPatch.healthFactor instanceof Prisma.Decimal) ||
-      !('ltv' in riskPatch) ||
-      !(riskPatch.ltv instanceof Prisma.Decimal)
-    ) {
-      throw new ApiError(400, 'Oracle price not found for collateral pair');
+    if (onChainLoan.loanId !== contractLoanId) {
+      throw new ApiError(400, `On-chain loan id ${onChainLoan.loanId} does not match expected loan id ${contractLoanId}`);
     }
-
-    const minHealthFactor = new Prisma.Decimal(loan.minHealthFactorBps).div(10_000);
-    if (riskPatch.healthFactor.lt(minHealthFactor)) {
-      throw new ApiError(400, `Initial Health Factor must be at least ${minHealthFactor.toString()}`);
+    if (onChainLoan.borrower !== loan.borrowerWallet) {
+      throw new ApiError(400, 'On-chain loan borrower does not match the persisted borrower');
     }
-
-    const maxLtvPercent = new Prisma.Decimal(loan.maxLtvBps).div(100);
-    if (riskPatch.ltv.gt(maxLtvPercent)) {
-      throw new ApiError(400, 'Collateral below max LTV requirement');
+    const onChainStatus = statusFromOnChain(onChainLoan.status);
+    if (!onChainStatus || onChainStatus === 'PendingCollateral') {
+      throw new ApiError(400, `Activation transaction was confirmed but loan is still ${onChainStatus ?? 'unknown'} on-chain`);
+    }
+    if (!['Active', 'Warning', 'LiquidationPlanning'].includes(onChainStatus)) {
+      throw new ApiError(400, `Activation transaction resulted in unexpected on-chain status ${onChainStatus}`);
     }
 
     const now = new Date();
     const termDays = loan.offer?.durationDays ?? durationDays(loan.startTime, loan.dueTime);
     const dueTime = new Date(now.getTime() + termDays * 86_400_000);
-    const onChainPatch = await patchFromOnChainLoan(onChainLoan);
-    const onChainStartTime = 'startTime' in onChainPatch ? onChainPatch.startTime : undefined;
-    const onChainDueTime = 'dueTime' in onChainPatch ? onChainPatch.dueTime : undefined;
+    let onChainPatch: Prisma.LoanUncheckedUpdateInput;
+    try {
+      onChainPatch = await patchFromOnChainLoan(onChainLoan);
+    } catch (error) {
+      console.warn(`Unable to read activated loan risk metrics for contract loan ${contractLoanId}:`, error);
+      onChainPatch = {
+        collateralAmount: new Prisma.Decimal(onChainLoan.collateralAmount),
+        outstandingDebt: new Prisma.Decimal(onChainLoan.outstandingDebt),
+        status: onChainStatus,
+      };
+    }
+    const onChainStartTime = dateFromLedgerSeconds(onChainLoan.startTime);
+    const onChainDueTime = dateFromLedgerSeconds(onChainLoan.dueTime);
+    const confirmedReceipt = requireConfirmedReceipt(receipt);
 
     return prisma.$transaction(async (tx) => {
       const updated = await tx.loan.update({
         where: { id },
         data: {
-          ...riskPatch,
           ...onChainPatch,
           contractLoanId: BigInt(contractLoanId),
           startTime: onChainStartTime ?? now,
           dueTime: onChainDueTime ?? dueTime,
-          txHash: verified.transaction.txHash,
-          explorerUrl: verified.explorerUrl,
-          ledger: verified.transaction.ledger,
-          blockTimestamp: verified.transaction.confirmedAt
+          txHash: confirmedReceipt.txHash,
+          explorerUrl: confirmedReceipt.explorerUrl,
+          ledger: confirmedReceipt.ledger,
+          blockTimestamp: confirmedReceipt.blockTimestamp
         },
         include: { offer: true }
       });
 
-      await markVerifiedEventProcessed(tx, verified);
+      if (verified) {
+        await markVerifiedEventProcessed(tx, verified);
+      }
       await upsertLedgerTransaction(tx, 'ACTIVATE_LOAN', loan.borrowerWallet, {
           offerId: loan.offerId,
           loanId: id,
           asset: loan.loanAsset,
           amount: loan.principal,
-          receipt: verified,
+          receipt,
           details: `Activated loan ${id}; collateral locked and loan asset transferred to borrower.`,
+          eventName: verified?.eventName ?? 'loan_activated',
+          actor: loan.borrowerWallet,
+          entityType: 'loan',
+          entityId: contractLoanId,
+          network: verified?.transaction.network ?? env.stellarNetwork,
           metadata: {
             contractFunction: 'activate_loan',
-            contractLoanId: contractLoanRef(loan)
+            contractLoanId
           }
       });
 
@@ -451,12 +707,9 @@ export const loansService = {
     };
 
     const riskPatch = await buildRiskPatch({
-      collateralAsset: baseData.collateralAsset,
-      loanAsset: baseData.loanAsset,
-      collateralAmount: baseData.collateralAmount as Prisma.Decimal,
+      contractLoanId,
       outstandingDebt: baseData.outstandingDebt as Prisma.Decimal,
-      liquidationThresholdBps: baseData.liquidationThresholdBps
-    });
+    }, onChainLoan.borrower);
     const { status: _ignoredStatus, ...riskMetrics } = riskPatch;
 
     return prisma.$transaction(async (tx) => {
@@ -511,6 +764,7 @@ export const loansService = {
         action: 'add_collateral',
         txHash: input.txHash ?? '',
         expectedContractId: env.loanManagerContractId,
+        expectedWallet: loan.borrowerWallet,
         expectedLoanId: contractLoanRef(loan)
       });
       if (verified.alreadyProcessed) return this.getById(id);
@@ -549,33 +803,49 @@ export const loansService = {
     if (input.action === 'PARTIAL_REPAY' || input.action === 'FULL_REPAY') {
       ensureOpenLoan(loan);
       const action = input.action === 'FULL_REPAY' ? 'full_repay' : 'partial_repay';
-      const verified = await verificationService.verifyAction({
-        action,
-        txHash: input.txHash ?? '',
-        expectedContractId: env.loanManagerContractId,
-        expectedLoanId: contractLoanRef(loan)
+      const contractLoanId = requireAvailableContractLoanId(input.contractLoanId ?? loan.contractLoanId);
+      if (loan.contractLoanId && input.contractLoanId && loan.contractLoanId.toString() !== String(input.contractLoanId)) {
+        throw new ApiError(400, `Returned contractLoanId ${String(input.contractLoanId)} does not match persisted loan id ${loan.contractLoanId.toString()}`);
+      }
+
+      let verified: VerifiedTransaction | undefined;
+      let receipt: VerifiedTransaction | VerificationTransactionInput;
+      try {
+        verified = await verificationService.verifyAction({
+          action,
+          txHash: input.txHash ?? '',
+          expectedContractId: env.loanManagerContractId,
+          expectedWallet: loan.borrowerWallet,
+          expectedLoanId: contractLoanId
+        });
+        if (verified.alreadyProcessed) return this.getById(id);
+        receipt = verified;
+      } catch (error) {
+        receipt = await fallbackLoanReceipt(input, contractLoanId, error);
+      }
+
+      const confirmedReceipt = requireConfirmedReceipt(receipt);
+      const onChainLoan = await contractReaderService.readLoan(contractLoanId, loan.borrowerWallet);
+      validateOnChainLoanIdentity(onChainLoan, {
+        contractLoanId,
+        borrowerWallet: loan.borrowerWallet,
       });
-      if (verified.alreadyProcessed) return this.getById(id);
-      const repayAmount = verificationService.amountOrThrow(verified);
+
+      let repayAmount: Prisma.Decimal;
+      try {
+        repayAmount = verified
+          ? verificationService.amountOrThrow(verified)
+          : inferRepayAmountFromChain(loan, onChainLoan, input.amount);
+      } catch (error) {
+        repayAmount = inferRepayAmountFromChain(loan, onChainLoan, input.amount);
+      }
       if (repayAmount.lte(0)) throw new ApiError(400, 'amount must be greater than zero');
       if (repayAmount.gt(loan.outstandingDebt)) {
         throw new ApiError(400, 'repayment exceeds outstanding debt');
       }
 
       const isFullRepay = input.action === 'FULL_REPAY';
-      const chainPatch = isFullRepay
-        ? {
-            collateralAmount: new Prisma.Decimal(0),
-            outstandingDebt: new Prisma.Decimal(0),
-            healthFactor: new Prisma.Decimal(99.99),
-            ltv: new Prisma.Decimal(0),
-            riskZone: 'SAFE' as RiskZone,
-            status: 'Repaid' as LoanStatus,
-            closedAt: verified.transaction.confirmedAt
-          }
-        : await patchFromOnChainLoan(
-            await contractReaderService.readLoan(contractLoanRef(loan), loan.borrowerWallet)
-          );
+      const chainPatch = await patchAfterRepayment(onChainLoan, confirmedReceipt.blockTimestamp);
       const isClosed = isFullRepay || chainPatch.status === 'Repaid';
 
       return prisma.$transaction(async (tx) => {
@@ -583,25 +853,32 @@ export const loansService = {
           where: { id },
           data: {
             ...chainPatch,
-            txHash: verified.transaction.txHash,
-            explorerUrl: verified.explorerUrl,
-            ledger: verified.transaction.ledger,
-            blockTimestamp: verified.transaction.confirmedAt
+            txHash: confirmedReceipt.txHash,
+            explorerUrl: confirmedReceipt.explorerUrl,
+            ledger: confirmedReceipt.ledger,
+            blockTimestamp: confirmedReceipt.blockTimestamp
           },
           include: { offer: true }
         });
-        await markVerifiedEventProcessed(tx, verified);
+        if (verified) {
+          await markVerifiedEventProcessed(tx, verified);
+        }
         await upsertLedgerTransaction(tx, input.action === 'FULL_REPAY' ? 'FULL_REPAY' : 'PARTIAL_REPAY', loan.borrowerWallet, {
             loanId: id,
             asset: loan.loanAsset,
             amount: repayAmount,
-            receipt: verified,
+            receipt,
             details: isClosed
               ? `Fully repaid ${id}; collateral released.`
               : `Partially repaid ${repayAmount.toString()} ${loan.loanAsset} on ${id}.`,
+            eventName: verified?.eventName ?? (input.action === 'FULL_REPAY' ? 'loan_repaid' : 'partial_repaid'),
+            actor: loan.borrowerWallet,
+            entityType: 'loan',
+            entityId: contractLoanId,
+            network: verified?.transaction.network ?? env.stellarNetwork,
             metadata: {
               contractFunction: input.action === 'FULL_REPAY' ? 'full_repay' : 'partial_repay',
-              contractLoanId: contractLoanRef(loan)
+              contractLoanId
             }
         });
         return updated;
@@ -609,39 +886,15 @@ export const loansService = {
     }
 
     if (input.action === 'LIQUIDATE') {
-      const eligible =
-        loan.healthFactor.lt(1.2) ||
-        loan.status === 'LiquidationPlanning' ||
-        loan.status === 'Defaulted';
-      if (!eligible) throw new ApiError(400, 'Loan is not eligible for liquidation');
-
       const verified = await verificationService.verifyAction({
         action: 'liquidate',
         txHash: input.txHash ?? '',
         expectedContractId: env.loanManagerContractId,
+        expectedWallet: input.wallet,
         expectedLoanId: contractLoanRef(loan)
       });
       if (verified.alreadyProcessed) return this.getById(id);
       const amount = verificationService.amountOrThrow(verified);
-
-      const closeFactorAmount = loan.outstandingDebt.mul(0.5);
-      const price = await findPrice(loan.collateralAsset, loan.loanAsset);
-      if (!price) throw new ApiError(400, 'Oracle price not found for collateral pair');
-
-      const bonusMultiplier = new Prisma.Decimal(1).add(
-        new Prisma.Decimal(loan.liquidationBonusBps).div(10_000)
-      );
-      const maxByCollateral = loan.collateralAmount.mul(price.price).div(bonusMultiplier);
-      const maxLiquidationAmount = Prisma.Decimal.min(
-        closeFactorAmount,
-        loan.outstandingDebt,
-        maxByCollateral
-      );
-      if (amount.gt(maxLiquidationAmount)) {
-        throw new ApiError(400, `amount exceeds liquidation limit (${maxLiquidationAmount.toDecimalPlaces(2).toString()})`);
-      }
-
-      const collateralReceived = amount.mul(bonusMultiplier).div(price.price);
       const onChainLoan = await contractReaderService.readLoan(contractLoanRef(loan), verified.actor ?? loan.borrowerWallet);
       const chainPatch = await patchFromOnChainLoan(onChainLoan);
 
@@ -663,7 +916,7 @@ export const loansService = {
             asset: loan.loanAsset,
             amount,
             receipt: verified,
-            details: `Liquidated ${amount.toString()} ${loan.loanAsset} on ${id}; received ${collateralReceived.toDecimalPlaces(2).toString()} ${loan.collateralAsset}.`,
+            details: `Liquidated ${amount.toString()} ${loan.loanAsset} on ${id}; collateral transfer was enforced by the LoanManager/Vault contracts.`,
             metadata: {
               contractFunction: 'liquidate',
               contractLoanId: contractLoanRef(loan)
@@ -687,7 +940,7 @@ export const loansService = {
 
     const updated = [];
     for (const loan of loans) {
-      const riskPatch = await buildRiskPatch(loan);
+      const riskPatch = await buildRiskPatch(loan, loan.borrowerWallet);
       if (Object.keys(riskPatch).length === 0) continue;
 
       const statusPatch =

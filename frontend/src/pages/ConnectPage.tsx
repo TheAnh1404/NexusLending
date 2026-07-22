@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAppContext } from '../app/AppContext';
 import { useWallet } from '../hooks/useWallet';
 import { freighterService } from '../services/wallet/freighter.service';
+import { NETWORK_DISPLAY_NAME } from '../services/soroban/config';
 import { Alert, App, Button, Card, Space, Tag, Typography, Row, Col } from 'antd';
 import { 
   ArrowLeft, 
@@ -27,7 +28,7 @@ export const ConnectPage: React.FC = () => {
     publicKey,
     shortAddress,
     network,
-    isTestnet,
+    isExpectedNetwork,
     isLoading,
     error,
     refreshWallet,
@@ -49,23 +50,23 @@ export const ConnectPage: React.FC = () => {
 
   // Automatic redirect if already connected
   useEffect(() => {
-    if (isConnected && publicKey && isTestnet) {
+    if (isConnected && publicKey && isExpectedNetwork) {
       connectDemoWallet(publicKey);
       navigate('/app');
     }
-  }, [isConnected, isTestnet, publicKey, connectDemoWallet, navigate]);
+  }, [isConnected, isExpectedNetwork, publicKey, connectDemoWallet, navigate]);
 
   const handleConnect = async () => {
     try {
       const connection = await connect();
 
-      if (!connection.isTestnet) {
-        message.warning('Freighter is connected, but the selected network is not Stellar Testnet.');
+      if (!connection.isExpectedNetwork) {
+        message.warning(`Freighter is connected, but the selected network is not ${NETWORK_DISPLAY_NAME}.`);
         return;
       }
 
       connectDemoWallet(connection.publicKey);
-      message.success('Freighter wallet connected on Stellar Testnet.');
+      message.success(`Freighter wallet connected on ${NETWORK_DISPLAY_NAME}.`);
       navigate('/app');
     } catch (connectError) {
       message.error(connectError instanceof Error ? connectError.message : 'Unable to connect Freighter wallet.');
@@ -77,8 +78,8 @@ export const ConnectPage: React.FC = () => {
   };
 
   const handleLaunch = () => {
-    if (!isTestnet) {
-      message.warning('Switch Freighter to Stellar Testnet before entering the dashboard.');
+    if (!isExpectedNetwork) {
+      message.warning(`Switch Freighter to ${NETWORK_DISPLAY_NAME} before entering the dashboard.`);
       return;
     }
     if (publicKey) {
@@ -288,7 +289,7 @@ export const ConnectPage: React.FC = () => {
                   Connect Wallet
                 </Title>
                 <Paragraph type="secondary" style={{ fontSize: '13px', marginTop: '6px', color: 'var(--text-muted)' }}>
-                  Freighter on Stellar Testnet is required for every protocol action.
+                  Freighter on {NETWORK_DISPLAY_NAME} is required for every protocol action.
                 </Paragraph>
               </div>
 
@@ -310,7 +311,7 @@ export const ConnectPage: React.FC = () => {
                 )}
 
                 {/* Freighter Wrong Network Alert & Guidance */}
-                {isConnected && !isTestnet && (
+                {isConnected && !isExpectedNetwork && (
                   <Alert
                     type="warning"
                     showIcon
@@ -318,7 +319,7 @@ export const ConnectPage: React.FC = () => {
                     description={
                       <div style={{ fontSize: '13px', marginTop: 4 }}>
                         <div style={{ marginBottom: 8 }}>
-                          Your Freighter extension is connected to <Text strong>{network ?? 'Unknown Network'}</Text>, but Nexus runs on <Text strong>Stellar Testnet</Text>.
+                          Your Freighter extension is connected to <Text strong>{network ?? 'Unknown Network'}</Text>, but Nexus runs on <Text strong>{NETWORK_DISPLAY_NAME}</Text>.
                         </div>
                         <div style={{ 
                           padding: '10px 12px', 
@@ -329,12 +330,12 @@ export const ConnectPage: React.FC = () => {
                           flexDirection: 'column',
                           gap: 6
                         }}>
-                          <Text strong style={{ fontSize: '12px' }}>How to switch to Testnet:</Text>
+                          <Text strong style={{ fontSize: '12px' }}>How to switch network:</Text>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: '12px' }}>
                             <div>1. Open the <b>Freighter extension</b> popup.</div>
                             <div>2. Click the <b>Settings cog icon</b> in the top right.</div>
                             <div>3. Choose <b>Network</b> or <b>Preferences</b>.</div>
-                            <div>4. Select <b>TESTNET</b> from the active list.</div>
+                            <div>4. Select <b>{NETWORK_DISPLAY_NAME}</b> from the active list.</div>
                           </div>
                         </div>
                       </div>
@@ -343,7 +344,7 @@ export const ConnectPage: React.FC = () => {
                 )}
 
                 {/* Other Connection Errors */}
-                {error && (!isConnected || isTestnet) && (
+                {error && (!isConnected || isExpectedNetwork) && (
                   <Alert
                     type="error"
                     showIcon
@@ -352,7 +353,7 @@ export const ConnectPage: React.FC = () => {
                   />
                 )}
 
-                {isConnected && isTestnet && (
+                {isConnected && isExpectedNetwork && (
                   <Alert
                     type="success"
                     showIcon
@@ -381,8 +382,8 @@ export const ConnectPage: React.FC = () => {
                       {isConnected ? 'Freighter Wallet' : 'No wallet connected'}
                     </Text>
                   </div>
-                  <Tag color={isConnected ? (isTestnet ? 'success' : 'warning') : 'default'} style={{ border: 'none', margin: 0, fontWeight: 700 }}>
-                    {isConnected ? (isTestnet ? 'Testnet Active' : 'Wrong Net') : 'Disconnected'}
+                  <Tag color={isConnected ? (isExpectedNetwork ? 'success' : 'warning') : 'default'} style={{ border: 'none', margin: 0, fontWeight: 700 }}>
+                    {isConnected ? (isExpectedNetwork ? 'Network Active' : 'Wrong Net') : 'Disconnected'}
                   </Tag>
                 </div>
 
@@ -413,7 +414,7 @@ export const ConnectPage: React.FC = () => {
                     icon={<Wallet size={16} />}
                     onClick={isConnected ? handleLaunch : handleConnect}
                     loading={isLoading}
-                    disabled={isAvailable === false || (isConnected && !isTestnet)}
+                    disabled={isAvailable === false || (isConnected && !isExpectedNetwork)}
                     style={{ width: '100%', height: '48px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
                   >
                     {isConnected ? 'Enter Lending Dashboard' : 'Connect Wallet'}

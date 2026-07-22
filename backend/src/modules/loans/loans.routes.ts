@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { validateBody } from '../../middlewares/validate';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { serialize } from '../../utils/serialize';
-import { activateLoanSchema, createLoanSchema, updateLoanSchema } from './loans.schemas';
+import { activateLoanSchema, createLoanSchema, syncLoanSchema, updateLoanSchema } from './loans.schemas';
 import { loansService } from './loans.service';
 
 export const loansRouter = Router();
@@ -30,10 +30,28 @@ loansRouter.get(
 );
 
 loansRouter.post(
+  '/recover-chain',
+  validateBody(syncLoanSchema),
+  asyncHandler(async (req, res) => {
+    const report = await loansService.recoverChain(req.body);
+    res.json({ data: serialize(report) });
+  })
+);
+
+loansRouter.post(
   '/:id/activate',
   validateBody(activateLoanSchema),
   asyncHandler(async (req, res) => {
     const loan = await loansService.activate(req.params.id as string, req.body);
+    res.json({ data: serialize(loan) });
+  })
+);
+
+loansRouter.post(
+  '/:id/sync-chain',
+  validateBody(syncLoanSchema),
+  asyncHandler(async (req, res) => {
+    const loan = await loansService.syncChain(req.params.id as string, req.body);
     res.json({ data: serialize(loan) });
   })
 );

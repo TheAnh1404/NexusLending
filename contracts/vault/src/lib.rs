@@ -8,6 +8,10 @@ use soroban_sdk::{
 #[cfg(test)]
 mod test;
 
+const LEDGERS_PER_DAY: u32 = 17_280;
+const TTL_THRESHOLD: u32 = 7 * LEDGERS_PER_DAY;
+const TTL_EXTEND_TO: u32 = 365 * LEDGERS_PER_DAY;
+
 #[derive(Clone)]
 #[contracttype]
 enum DataKey {
@@ -40,6 +44,7 @@ impl VaultContract {
         env.storage()
             .instance()
             .set(&DataKey::LoanManager, &loan_manager_contract);
+        bump_instance(&env);
     }
 
     pub fn lock_lender_funds(
@@ -344,9 +349,7 @@ fn transfer_from_vault(env: &Env, asset: &Address, to: &Address, amount: i128) {
 fn increase_offer_locked(env: &Env, offer_id: u64, amount: i128) {
     let key = DataKey::OfferLocked(offer_id);
     let current = env.storage().persistent().get(&key).unwrap_or(0_i128);
-    env.storage()
-        .persistent()
-        .set(&key, &checked_i128_add(current, amount));
+    set_or_remove_i128(env, key, checked_i128_add(current, amount));
 }
 
 fn decrease_offer_locked(env: &Env, offer_id: u64, amount: i128) {
@@ -355,25 +358,17 @@ fn decrease_offer_locked(env: &Env, offer_id: u64, amount: i128) {
     if current < amount {
         panic!("insufficient locked lender funds");
     }
-    env.storage().persistent().set(&key, &(current - amount));
+    set_or_remove_i128(env, key, current - amount);
 }
 
 fn increase_loan_collateral(env: &Env, loan_id: u64, asset: &Address, amount: i128) {
     let loan_key = DataKey::LoanCollateral(loan_id);
     let current = env.storage().persistent().get(&loan_key).unwrap_or(0_i128);
-    env.storage()
-        .persistent()
-        .set(&loan_key, &checked_i128_add(current, amount));
+    set_or_remove_i128(env, loan_key, checked_i128_add(current, amount));
 
     let asset_key = DataKey::Locked(loan_id, asset.clone());
-    let asset_current = env
-        .storage()
-        .persistent()
-        .get(&asset_key)
-        .unwrap_or(0_i128);
-    env.storage()
-        .persistent()
-        .set(&asset_key, &checked_i128_add(asset_current, amount));
+    let asset_current = env.storage().persistent().get(&asset_key).unwrap_or(0_i128);
+    set_or_remove_i128(env, asset_key, checked_i128_add(asset_current, amount));
 }
 
 fn decrease_loan_collateral(env: &Env, loan_id: u64, asset: &Address, amount: i128) {
@@ -382,23 +377,35 @@ fn decrease_loan_collateral(env: &Env, loan_id: u64, asset: &Address, amount: i1
     if current < amount {
         panic!("insufficient locked collateral");
     }
-    env.storage().persistent().set(&loan_key, &(current - amount));
+    set_or_remove_i128(env, loan_key, current - amount);
 
     let asset_key = DataKey::Locked(loan_id, asset.clone());
-    let asset_current = env
-        .storage()
-        .persistent()
-        .get(&asset_key)
-        .unwrap_or(0_i128);
+    let asset_current = env.storage().persistent().get(&asset_key).unwrap_or(0_i128);
     if asset_current < amount {
         panic!("insufficient locked collateral");
     }
-    env.storage()
-        .persistent()
-        .set(&asset_key, &(asset_current - amount));
+    set_or_remove_i128(env, asset_key, asset_current - amount);
 }
 
 fn checked_i128_add(a: i128, b: i128) -> i128 {
     a.checked_add(b)
         .unwrap_or_else(|| panic!("addition overflow"))
+}
+
+fn set_or_remove_i128(env: &Env, key: DataKey, value: i128) {
+    if value == 0 {
+        env.storage().persistent().remove(&key);
+    } else {
+        env.storage().persistent().set(&key, &value);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, TTL_THRESHOLD, TTL_EXTEND_TO);
+    }
+    bump_instance(env);
+}
+
+fn bump_instance(env: &Env) {
+    env.storage()
+        .instance()
+        .extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
 }

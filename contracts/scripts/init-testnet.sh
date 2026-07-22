@@ -36,7 +36,7 @@ echo ">>> Initializing Marketplace contract..."
 stellar contract invoke --id "$MARKETPLACE_ID" --network testnet --source deployer -- initialize --admin "$DEPLOYER" --vault_contract "$VAULT_ID" --loan_manager_contract "$LOAN_MANAGER_ID"
 
 echo ">>> Initializing Loan Manager contract..."
-stellar contract invoke --id "$LOAN_MANAGER_ID" --network testnet --source deployer -- initialize --admin "$DEPLOYER" --vault_contract "$VAULT_ID" --oracle_contract "$ORACLE_ID"
+stellar contract invoke --id "$LOAN_MANAGER_ID" --network testnet --source deployer -- initialize --admin "$DEPLOYER" --marketplace_contract "$MARKETPLACE_ID" --vault_contract "$VAULT_ID" --oracle_contract "$ORACLE_ID"
 
 echo ">>> Setting initial oracle price for XLM/USDC (0.125)..."
 stellar contract invoke --id "$ORACLE_ID" --network testnet --source deployer -- set_price_for_assets --base_asset "$XLM_CONTRACT_ID" --quote_asset "$USDC_CONTRACT_ID" --asset_pair "XLM/USDC" --price 1250000 --decimals 7 --source "Nexus Oracle"

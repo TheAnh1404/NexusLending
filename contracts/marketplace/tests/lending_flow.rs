@@ -55,7 +55,7 @@ fn setup() -> Fixture<'static> {
 
     oracle.initialize(&admin);
     vault.initialize(&admin, &marketplace_id, &loan_manager_id);
-    loan_manager.initialize(&admin, &vault_id, &oracle_id);
+    loan_manager.initialize(&admin, &marketplace_id, &vault_id, &oracle_id);
     marketplace.initialize(&admin, &vault_id, &loan_manager_id);
     oracle.set_price_for_assets(
         &collateral_asset,

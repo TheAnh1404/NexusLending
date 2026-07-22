@@ -39,6 +39,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import type { Transaction } from '../types';
+import { NETWORK_DISPLAY_NAME } from '../services/soroban/config';
 
 const { Header, Content, Sider } = AntLayout;
 const { Text, Paragraph } = Typography;
@@ -67,7 +68,7 @@ export const AppLayout: React.FC = () => {
     publicKey,
     shortAddress,
     network,
-    isTestnet,
+    isExpectedNetwork,
     disconnect,
   } = useWallet();
   const navigate = useNavigate();
@@ -132,6 +133,11 @@ export const AppLayout: React.FC = () => {
           label: 'Oracle Monitor',
         },
         {
+          key: '/app/transactions',
+          icon: <Activity size={16} />,
+          label: 'Transactions',
+        },
+        {
           key: '/app/settings',
           icon: <SettingsIcon size={16} />,
           label: 'System Status',
@@ -157,6 +163,11 @@ export const AppLayout: React.FC = () => {
           key: '/app/my-loans',
           icon: <FileText size={16} />,
           label: 'My Loans',
+        },
+        {
+          key: '/app/transactions',
+          icon: <Activity size={16} />,
+          label: 'Transactions',
         },
         {
           key: '/app/borrower',
@@ -481,9 +492,9 @@ export const AppLayout: React.FC = () => {
               style={{ fontSize: '13px', fontWeight: 500 }}
             />
             
-            <Tag color={isTestnet ? 'geekblue' : 'warning'} style={{ display: 'inline-flex', alignItems: 'center', border: 'none', padding: '3px 10px', fontSize: '11px', margin: 0 }}>
-              <span style={{ display: 'inline-block', width: '5px', height: '5px', backgroundColor: isTestnet ? '#4F46E5' : '#F59E0B', borderRadius: '50%', marginRight: '6px' }}></span>
-              {isTestnet ? 'Testnet' : network ?? 'Unknown Network'}
+            <Tag color={isExpectedNetwork ? 'geekblue' : 'warning'} style={{ display: 'inline-flex', alignItems: 'center', border: 'none', padding: '3px 10px', fontSize: '11px', margin: 0 }}>
+              <span style={{ display: 'inline-block', width: '5px', height: '5px', backgroundColor: isExpectedNetwork ? '#4F46E5' : '#F59E0B', borderRadius: '50%', marginRight: '6px' }}></span>
+              {isExpectedNetwork ? NETWORK_DISPLAY_NAME : network ?? 'Unknown Network'}
             </Tag>
             {isAdmin && (
               <Tag color="purple" style={{ display: 'inline-flex', alignItems: 'center', border: 'none', padding: '3px 10px', fontSize: '11px', margin: 0 }}>
@@ -550,12 +561,12 @@ export const AppLayout: React.FC = () => {
 
         {/* Dashboard Content Container */}
         <Content className="app-content" style={{ padding: '32px 40px', minHeight: 'calc(100vh - 70px)', overflowY: 'auto' }}>
-          {!isTestnet && publicKey && (
+          {!isExpectedNetwork && publicKey && (
             <Alert
               type="warning"
               showIcon
               message="Freighter connection issue"
-              description="Freighter must be configured for Stellar Testnet to interact with contracts."
+              description={`Freighter must be configured for ${NETWORK_DISPLAY_NAME} to interact with contracts.`}
               style={{ marginBottom: 24 }}
             />
           )}

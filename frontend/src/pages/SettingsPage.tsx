@@ -7,15 +7,23 @@ import { formatCurrency } from '../utils/finance';
 import { App, Card, Row, Col, Descriptions, Button, Switch, List, Typography, Tag, Space, Divider } from 'antd';
 import { Wallet, ShieldCheck, Bell, Activity, Globe, LogOut, ExternalLink } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { CONTRACTS, ASSET_CONTRACTS, RPC_URL, NETWORK, HORIZON_URL } from '../services/soroban/config';
-import { CHAIN_MODE } from '../services/api/client';
+import {
+  ASSET_CONTRACTS,
+  CONTRACTS,
+  EXPLORER_NETWORK,
+  HORIZON_URL,
+  NETWORK,
+  NETWORK_DISPLAY_NAME,
+  RPC_URL,
+} from '../services/soroban/config';
+import { CHAIN_MODE, CHAIN_MODE_NOTE } from '../services/api/client';
 
 const { Title, Paragraph, Text } = Typography;
 const NOTIFICATION_SETTINGS_KEY = 'nexus_notification_settings';
 
 export const SettingsPage: React.FC = () => {
   const { wallet, activities, loanOffers, loans, disconnectWallet } = useAppContext();
-  const { publicKey, isTestnet, disconnect } = useWallet();
+  const { publicKey, isExpectedNetwork, disconnect } = useWallet();
   const { message } = App.useApp();
   const navigate = useNavigate();
   const [emailAlerts, setEmailAlerts] = useState(true);
@@ -158,7 +166,7 @@ export const SettingsPage: React.FC = () => {
                     {
                       key: 'network',
                       label: 'Selected Network',
-                      children: <Tag color={isTestnet ? 'purple' : 'warning'}>{NETWORK.toUpperCase()}</Tag>,
+                      children: <Tag color={isExpectedNetwork ? 'purple' : 'warning'}>{NETWORK_DISPLAY_NAME} ({NETWORK.toUpperCase()})</Tag>,
                     },
                     {
                       key: 'horizonRpc',
@@ -173,14 +181,19 @@ export const SettingsPage: React.FC = () => {
                     {
                       key: 'nodeStatus',
                       label: 'Node Status',
-                      children: <Tag color={CHAIN_MODE === 'mock' ? 'gold' : 'success'}>{CHAIN_MODE === 'mock' ? 'MOCK CHAIN MODE' : 'ONLINE & ACTIVE'}</Tag>,
+                      children: <Tag color={CHAIN_MODE === 'mock' ? 'gold' : 'success'}>{CHAIN_MODE === 'mock' ? 'LOCAL MOCK DATA' : 'ONLINE & ACTIVE'}</Tag>,
                     },
                     {
                       key: 'chainMode',
                       label: 'Contract Execution',
                       children: CHAIN_MODE === 'mock'
-                        ? <Text>Backend state is updated with mock chain receipts; Soroban RPC is not called.</Text>
-                        : <Text>Live Soroban calls require Freighter signatures and configured contracts.</Text>,
+                        ? <Text>Local mock mode uses browser state only; no backend verification or Soroban RPC call is submitted.</Text>
+                        : (
+                            <Space direction="vertical" size={2}>
+                              <Text>Live Soroban calls require Freighter signatures and configured contracts.</Text>
+                              {CHAIN_MODE_NOTE && <Text type="warning">{CHAIN_MODE_NOTE}</Text>}
+                            </Space>
+                          ),
                     },
                     {
                       key: 'coreVersion',
@@ -253,7 +266,7 @@ export const SettingsPage: React.FC = () => {
                     <Text copyable={{ text: CONTRACTS.marketplace }} style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
                       {CONTRACTS.marketplace.slice(0, 6)}...{CONTRACTS.marketplace.slice(-6)}
                     </Text>
-                    <a href={`https://stellar.expert/explorer/${NETWORK}/contract/${CONTRACTS.marketplace}`} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: '2px', fontSize: '12px' }}>
+                    <a href={`https://stellar.expert/explorer/${EXPLORER_NETWORK}/contract/${CONTRACTS.marketplace}`} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: '2px', fontSize: '12px' }}>
                       Stellar Expert <ExternalLink size={12} />
                     </a>
                   </div>
@@ -267,7 +280,7 @@ export const SettingsPage: React.FC = () => {
                     <Text copyable={{ text: CONTRACTS.loanManager }} style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
                       {CONTRACTS.loanManager.slice(0, 6)}...{CONTRACTS.loanManager.slice(-6)}
                     </Text>
-                    <a href={`https://stellar.expert/explorer/${NETWORK}/contract/${CONTRACTS.loanManager}`} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: '2px', fontSize: '12px' }}>
+                    <a href={`https://stellar.expert/explorer/${EXPLORER_NETWORK}/contract/${CONTRACTS.loanManager}`} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: '2px', fontSize: '12px' }}>
                       Stellar Expert <ExternalLink size={12} />
                     </a>
                   </div>
@@ -281,7 +294,7 @@ export const SettingsPage: React.FC = () => {
                     <Text copyable={{ text: CONTRACTS.vault }} style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
                       {CONTRACTS.vault.slice(0, 6)}...{CONTRACTS.vault.slice(-6)}
                     </Text>
-                    <a href={`https://stellar.expert/explorer/${NETWORK}/contract/${CONTRACTS.vault}`} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: '2px', fontSize: '12px' }}>
+                    <a href={`https://stellar.expert/explorer/${EXPLORER_NETWORK}/contract/${CONTRACTS.vault}`} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: '2px', fontSize: '12px' }}>
                       Stellar Expert <ExternalLink size={12} />
                     </a>
                   </div>
@@ -295,7 +308,7 @@ export const SettingsPage: React.FC = () => {
                     <Text copyable={{ text: CONTRACTS.oracle }} style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
                       {CONTRACTS.oracle.slice(0, 6)}...{CONTRACTS.oracle.slice(-6)}
                     </Text>
-                    <a href={`https://stellar.expert/explorer/${NETWORK}/contract/${CONTRACTS.oracle}`} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: '2px', fontSize: '12px' }}>
+                    <a href={`https://stellar.expert/explorer/${EXPLORER_NETWORK}/contract/${CONTRACTS.oracle}`} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: '2px', fontSize: '12px' }}>
                       Stellar Expert <ExternalLink size={12} />
                     </a>
                   </div>

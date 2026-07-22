@@ -1,7 +1,9 @@
 import React, { createContext, useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  expectedNetworkLabel,
   freighterService,
   getShortAddress,
+  isNetworkExpected,
   isNetworkTestnet,
   type FreighterConnection,
 } from '../services/wallet/freighter.service';
@@ -12,6 +14,7 @@ interface WalletContextState {
   shortAddress: string;
   network: string | null;
   isTestnet: boolean;
+  isExpectedNetwork: boolean;
   isLoading: boolean;
   error: string | null;
 }
@@ -28,6 +31,7 @@ const initialState: WalletContextState = {
   shortAddress: '',
   network: null,
   isTestnet: false,
+  isExpectedNetwork: false,
   isLoading: true,
   error: null,
 };
@@ -49,8 +53,9 @@ const stateFromConnection = (connection: FreighterConnection): WalletContextStat
   shortAddress: getShortAddress(connection.publicKey),
   network: networkLabel(connection.network.network),
   isTestnet: connection.isTestnet,
+  isExpectedNetwork: connection.isExpectedNetwork,
   isLoading: false,
-  error: connection.isTestnet ? null : 'Freighter is connected to a non-Testnet network. Switch to Stellar Testnet.',
+  error: connection.isExpectedNetwork ? null : `Freighter is connected to ${networkLabel(connection.network.network)}, but Nexus is configured for ${expectedNetworkLabel}.`,
 });
 
 export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -74,12 +79,14 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const publicKey = await freighterService.getPublicKey();
       const network = await freighterService.getNetwork();
       const isTestnet = isNetworkTestnet(network);
+      const isExpectedNetwork = isNetworkExpected(network);
 
       setWallet(
         stateFromConnection({
           publicKey,
           network,
           isTestnet,
+          isExpectedNetwork,
         })
       );
     } catch (error) {
@@ -104,6 +111,21 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setWallet((prev) => ({ ...prev, isLoading: false }));
   }, [refreshWallet]);
 
+  useEffect(() => {
+    if (!wallet.isConnected && !freighterService.hasSavedConnection()) return;
+
+    const watcher = freighterService.watchWalletChanges((connection, watchError) => {
+      if (watchError) {
+        setWallet((prev) => ({ ...prev, error: errorMessage(watchError), isLoading: false }));
+        return;
+      }
+      if (!connection) return;
+      setWallet(stateFromConnection(connection));
+    });
+
+    return () => watcher.stop();
+  }, [wallet.isConnected]);
+
   const connect = useCallback(async () => {
     setWallet((prev) => ({ ...prev, isLoading: true, error: null }));
 
@@ -120,6 +142,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         shortAddress: '',
         network: null,
         isTestnet: false,
+        isExpectedNetwork: false,
         isLoading: false,
         error: message,
       }));

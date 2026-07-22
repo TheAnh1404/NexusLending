@@ -4,13 +4,14 @@ import { buildAndSubmitTx, readContractValue } from './transaction';
 import type { TxStage } from './transaction';
 import type { CreateOfferInput } from '../offers/offers.service';
 import { MAX_FIXED_APR_PERCENT } from '../../utils/finance';
+import { decimalToScaledBigInt } from './amounts';
 
 /**
  * Convert a human-readable token amount to raw contract units (i128 ScVal).
  * Stellar classic assets use 7 decimals by default.
  */
 const toContractAmount = (amount: number, decimals: number = STELLAR_DECIMALS): xdr.ScVal =>
-  nativeToScVal(BigInt(Math.round(amount * 10 ** decimals)), { type: 'i128' });
+  nativeToScVal(decimalToScaledBigInt(amount, decimals), { type: 'i128' });
 
 /**
  * Convert a JS number to a Soroban u32 ScVal.

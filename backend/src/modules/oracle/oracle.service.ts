@@ -16,7 +16,8 @@ export const oracleService = {
     const verified = await verificationService.verifyAction({
       action: 'oracle_update',
       txHash: input.txHash,
-      expectedContractId: env.oracleContractId
+      expectedContractId: env.oracleContractId,
+      expectedWallet: input.wallet
     });
     const priceValue = verified.amount ?? new Prisma.Decimal(input.price);
 

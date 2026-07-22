@@ -11,11 +11,15 @@ use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, IntoVal, S
 mod test;
 
 const SECONDS_PER_DAY: u64 = 86_400;
+const LEDGERS_PER_DAY: u32 = 17_280;
+const TTL_THRESHOLD: u32 = 7 * LEDGERS_PER_DAY;
+const TTL_EXTEND_TO: u32 = 365 * LEDGERS_PER_DAY;
 
 #[derive(Clone)]
 #[contracttype]
 enum DataKey {
     Admin,
+    Marketplace,
     Vault,
     Oracle,
     LoanCount,
@@ -27,11 +31,20 @@ pub struct LoanManagerContract;
 
 #[contractimpl]
 impl LoanManagerContract {
-    pub fn initialize(env: Env, admin: Address, vault_contract: Address, oracle_contract: Address) {
+    pub fn initialize(
+        env: Env,
+        admin: Address,
+        marketplace_contract: Address,
+        vault_contract: Address,
+        oracle_contract: Address,
+    ) {
         if env.storage().instance().has(&DataKey::Admin) {
             panic!("loan manager already initialized");
         }
         env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::Marketplace, &marketplace_contract);
         env.storage()
             .instance()
             .set(&DataKey::Vault, &vault_contract);
@@ -39,6 +52,7 @@ impl LoanManagerContract {
             .instance()
             .set(&DataKey::Oracle, &oracle_contract);
         env.storage().instance().set(&DataKey::LoanCount, &0_u64);
+        bump_instance(&env);
     }
 
     pub fn create_pending_loan_from_offer(
@@ -47,6 +61,7 @@ impl LoanManagerContract {
         borrower: Address,
         collateral_amount: i128,
     ) -> u64 {
+        require_marketplace(&env);
         require_positive(collateral_amount);
         if offer.status != OfferStatus::Active {
             panic!("offer is not active");
@@ -84,11 +99,13 @@ impl LoanManagerContract {
             status: LoanStatus::PendingCollateral,
         };
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::Loan(loan_id), &loan);
+        store_loan(&env, loan_id, &loan);
         env.events().publish(
-            (Symbol::new(&env, "loan_created"), loan_id),
+            (
+                Symbol::new(&env, "loan_created"),
+                loan_id,
+                loan.borrower.clone(),
+            ),
             loan.outstanding_debt,
         );
         loan_id
@@ -133,11 +150,13 @@ impl LoanManagerContract {
             checked_u64_mul(loan.duration_days as u64, SECONDS_PER_DAY),
         );
         loan.status = status_for_hf(&loan, hf);
-        env.storage()
-            .persistent()
-            .set(&DataKey::Loan(loan_id), &loan);
+        store_loan(&env, loan_id, &loan);
         env.events().publish(
-            (Symbol::new(&env, "loan_activated"), loan_id),
+            (
+                Symbol::new(&env, "loan_activated"),
+                loan_id,
+                loan.borrower.clone(),
+            ),
             loan.outstanding_debt,
         );
     }
@@ -166,9 +185,7 @@ impl LoanManagerContract {
     pub fn refresh_loan_state(env: Env, loan_id: u64) -> LoanStatus {
         let mut loan = get_loan_or_panic(&env, loan_id);
         update_status(&env, &mut loan);
-        env.storage()
-            .persistent()
-            .set(&DataKey::Loan(loan_id), &loan);
+        store_loan(&env, loan_id, &loan);
         env.events().publish(
             (Symbol::new(&env, "loan_state_updated"), loan_id),
             loan.status.clone(),
@@ -190,11 +207,15 @@ impl LoanManagerContract {
         );
         loan.collateral_amount = checked_i128_add(loan.collateral_amount, amount);
         update_status(&env, &mut loan);
-        env.storage()
-            .persistent()
-            .set(&DataKey::Loan(loan_id), &loan);
-        env.events()
-            .publish((Symbol::new(&env, "collateral_added"), loan_id), amount);
+        store_loan(&env, loan_id, &loan);
+        env.events().publish(
+            (
+                Symbol::new(&env, "collateral_added"),
+                loan_id,
+                loan.borrower.clone(),
+            ),
+            amount,
+        );
     }
 
     pub fn partial_repay(env: Env, loan_id: u64, amount: i128) {
@@ -218,11 +239,15 @@ impl LoanManagerContract {
         } else {
             update_status(&env, &mut loan);
         }
-        env.storage()
-            .persistent()
-            .set(&DataKey::Loan(loan_id), &loan);
-        env.events()
-            .publish((Symbol::new(&env, "partial_repaid"), loan_id), repay_amount);
+        store_loan(&env, loan_id, &loan);
+        env.events().publish(
+            (
+                Symbol::new(&env, "partial_repaid"),
+                loan_id,
+                loan.borrower.clone(),
+            ),
+            repay_amount,
+        );
     }
 
     pub fn full_repay(env: Env, loan_id: u64) {
@@ -243,11 +268,15 @@ impl LoanManagerContract {
         loan.outstanding_debt = 0;
         release_all_collateral(&env, &mut loan);
         loan.status = LoanStatus::Repaid;
-        env.storage()
-            .persistent()
-            .set(&DataKey::Loan(loan_id), &loan);
-        env.events()
-            .publish((Symbol::new(&env, "loan_repaid"), loan_id), repay_amount);
+        store_loan(&env, loan_id, &loan);
+        env.events().publish(
+            (
+                Symbol::new(&env, "loan_repaid"),
+                loan_id,
+                loan.borrower.clone(),
+            ),
+            repay_amount,
+        );
     }
 
     pub fn mark_expired(env: Env, loan_id: u64) {
@@ -257,9 +286,7 @@ impl LoanManagerContract {
             panic!("loan not expired");
         }
         loan.status = LoanStatus::Expired;
-        env.storage()
-            .persistent()
-            .set(&DataKey::Loan(loan_id), &loan);
+        store_loan(&env, loan_id, &loan);
         env.events()
             .publish((Symbol::new(&env, "loan_expired"), loan_id), loan.status);
     }
@@ -275,9 +302,7 @@ impl LoanManagerContract {
             panic!("loan still in grace period");
         }
         loan.status = LoanStatus::Defaulted;
-        env.storage()
-            .persistent()
-            .set(&DataKey::Loan(loan_id), &loan);
+        store_loan(&env, loan_id, &loan);
         env.events()
             .publish((Symbol::new(&env, "loan_defaulted"), loan_id), loan.status);
     }
@@ -331,13 +356,28 @@ impl LoanManagerContract {
         } else {
             update_status(&env, &mut loan);
         }
-        env.storage()
-            .persistent()
-            .set(&DataKey::Loan(loan_id), &loan);
+        store_loan(&env, loan_id, &loan);
         env.events().publish(
             (Symbol::new(&env, "loan_liquidated"), loan_id, liquidator),
             repay,
         );
+    }
+
+    pub fn cleanup_loan(env: Env, loan_id: u64) {
+        require_admin(&env);
+        let loan = get_loan_or_panic(&env, loan_id);
+        if !matches!(
+            loan.status,
+            LoanStatus::Repaid | LoanStatus::Liquidated | LoanStatus::Closed
+        ) {
+            panic!("loan is not terminal");
+        }
+        if loan.collateral_amount > 0 || loan.outstanding_debt > 0 {
+            panic!("loan still has balances");
+        }
+        env.storage().persistent().remove(&DataKey::Loan(loan_id));
+        env.events()
+            .publish((Symbol::new(&env, "loan_cleaned"), loan_id), 0_i128);
     }
 }
 
@@ -346,6 +386,41 @@ fn get_loan_or_panic(env: &Env, loan_id: u64) -> Loan {
         .persistent()
         .get(&DataKey::Loan(loan_id))
         .unwrap_or_else(|| panic!("loan not found"))
+}
+
+fn store_loan(env: &Env, loan_id: u64, loan: &Loan) {
+    let key = DataKey::Loan(loan_id);
+    env.storage().persistent().set(&key, loan);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, TTL_THRESHOLD, TTL_EXTEND_TO);
+    bump_instance(env);
+}
+
+fn require_admin(env: &Env) -> Address {
+    let admin: Address = env
+        .storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .unwrap_or_else(|| panic!("loan manager not initialized"));
+    admin.require_auth();
+    admin
+}
+
+fn require_marketplace(env: &Env) -> Address {
+    let trusted: Address = env
+        .storage()
+        .instance()
+        .get(&DataKey::Marketplace)
+        .unwrap_or_else(|| panic!("marketplace not configured"));
+    trusted.require_auth();
+    trusted
+}
+
+fn bump_instance(env: &Env) {
+    env.storage()
+        .instance()
+        .extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
 }
 
 fn next_loan_id(env: &Env) -> u64 {
@@ -464,7 +539,7 @@ fn get_oracle_price(env: &Env, collateral_asset: &Address, loan_asset: &Address)
         .unwrap_or_else(|| panic!("oracle not configured"));
     env.invoke_contract(
         &oracle,
-        &Symbol::new(env, "get_price_for_assets"),
+        &Symbol::new(env, "get_fresh_price_for_assets"),
         vec2(
             env,
             (

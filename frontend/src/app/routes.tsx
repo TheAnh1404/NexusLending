@@ -21,6 +21,7 @@ import { LiquidationCenterPage } from '../pages/LiquidationCenterPage';
 import { LiquidationDetailPage } from '../pages/LiquidationDetailPage';
 import { OracleMonitorPage } from '../pages/OracleMonitorPage';
 import { MyLoansPage } from '../pages/MyLoansPage';
+import { TransactionsPage } from '../pages/TransactionsPage';
 import { SettingsPage } from '../pages/SettingsPage';
 import { AdminPage } from '../pages/AdminPage';
 
@@ -47,6 +48,7 @@ export const AppRoutes: React.FC = () => {
           <Route path="liquidation/:id" element={<LiquidationDetailPage />} />
           <Route path="oracle" element={<AdminRoute><OracleMonitorPage /></AdminRoute>} />
           <Route path="my-loans" element={<MyLoansPage />} />
+          <Route path="transactions" element={<TransactionsPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="admin" element={<AdminRoute><AdminPage /></AdminRoute>} />
         </Route>

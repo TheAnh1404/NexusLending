@@ -185,13 +185,13 @@ sequenceDiagram
 
 | Element | Description |
 |---------|-------------|
-| Offer list | Cards/table of LISTED offers |
+| Offer list | Cards/table of `Active` offers |
 | Filters | Asset pair, APR range, duration, amount |
 | Sort | By APR, amount, duration, creation date |
 | Offer card | Amount, APR, duration, collateral requirements, "Borrow" button |
 
 **API Calls:**
-- `GET /api/offers?status=LISTED`
+- `GET /api/offers?status=Active&marketplaceOnly=true`
 
 **User Actions:**
 - Click offer → navigate to `/app/borrow/:id`

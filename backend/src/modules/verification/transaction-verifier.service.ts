@@ -1,7 +1,12 @@
 import { rpc, scValToNative } from '@stellar/stellar-sdk';
 import { Prisma } from '@prisma/client';
 
-import { env } from '../../config/env';
+import {
+  env,
+  normalizeStellarNetworkName,
+  passphraseForNetwork,
+  type StellarNetworkName,
+} from '../../config/env';
 import { explorerService, ExplorerService } from './explorer.service';
 import {
   TransactionNotFoundError,
@@ -13,11 +18,18 @@ import type { EntityType, NormalizedEvent, RpcTransaction } from './verification
 interface RpcClient {
   getLatestLedger(): Promise<{ sequence: number }>;
   getTransaction(txHash: string): Promise<unknown>;
-  getEvents(input: unknown): Promise<{ events?: unknown[] }>;
+  getEvents(input: unknown): Promise<{ events?: unknown[]; cursor?: string }>;
+  getNetwork?(): Promise<{ passphrase?: string; networkPassphrase?: string }>;
 }
 
 const txHashPattern = /^[a-fA-F0-9]{64}$/;
 const CONTRACT_DECIMALS = 7;
+const EVENT_PAGE_LIMIT = 100;
+
+const networkFromPassphrase = (passphrase: string): StellarNetworkName | undefined => {
+  const knownNetworks: StellarNetworkName[] = ['testnet', 'public', 'futurenet', 'standalone'];
+  return knownNetworks.find((network) => passphraseForNetwork(network) === passphrase);
+};
 
 const toDecimal = (value: unknown): Prisma.Decimal | undefined => {
   if (value === undefined || value === null) return undefined;
@@ -140,6 +152,7 @@ const normalizeOfferEvent = (
   }
   return {
     offerId,
+    actor: toStringId(topicValues[2]),
     amount: toDecimal(value),
     entityId: offerId,
   };
@@ -151,9 +164,13 @@ const normalizeLoanEvent = (
   value: unknown
 ): Pick<NormalizedEvent, 'actor' | 'loanId' | 'amount' | 'entityId'> => {
   const loanId = toStringId(topicValues[1]);
+  const actor = ['loan_created', 'loan_activated', 'collateral_added', 'partial_repaid', 'loan_repaid', 'loan_liquidated']
+    .includes(eventName)
+    ? toStringId(topicValues[2])
+    : undefined;
   return {
     loanId,
-    actor: eventName === 'loan_liquidated' ? toStringId(topicValues[2]) : undefined,
+    actor,
     amount: ['loan_created', 'loan_activated', 'collateral_added', 'partial_repaid', 'loan_repaid', 'loan_liquidated']
       .includes(eventName)
       ? toDecimal(value)
@@ -167,9 +184,12 @@ const normalizeOracleEvent = (
   value: unknown
 ): Pick<NormalizedEvent, 'actor' | 'amount' | 'asset' | 'entityId'> => {
   const assetPairOrBase = toStringId(topicValues[1]);
-  const quote = toStringId(topicValues[2]);
+  const isStringPair = Boolean(assetPairOrBase?.includes('/'));
+  const quote = isStringPair ? undefined : toStringId(topicValues[2]);
+  const actor = isStringPair ? toStringId(topicValues[2]) : toStringId(topicValues[3]);
   const entityId = quote ? `${assetPairOrBase}/${quote}` : assetPairOrBase;
   return {
+    actor,
     amount: toDecimal(value),
     asset: entityId,
     entityId,
@@ -182,7 +202,7 @@ export class TransactionVerifierService {
   constructor(
     rpcClient?: RpcClient,
     private readonly explorer: ExplorerService = explorerService,
-    private readonly network = env.stellarNetwork,
+    private readonly network: string = env.stellarNetwork,
   ) {
     this.rpcClient = rpcClient ?? new rpc.Server(env.stellarRpcUrl || 'https://soroban-testnet.stellar.org:443') as unknown as RpcClient;
   }
@@ -207,10 +227,21 @@ export class TransactionVerifierService {
       throw new TransactionNotSuccessfulError(txHash, 'SUCCESS_WITHOUT_LEDGER');
     }
 
-    const actualNetwork = this.network === 'mainnet' || this.network === 'public' ? 'mainnet' : 'testnet';
-    const expectedNetwork = env.stellarNetwork === 'mainnet' || env.stellarNetwork === 'public' ? 'mainnet' : 'testnet';
-    if (actualNetwork !== expectedNetwork) {
-      throw new WrongNetworkError(expectedNetwork, actualNetwork);
+    const configuredNetwork = normalizeStellarNetworkName(this.network);
+    const expectedNetwork = normalizeStellarNetworkName(env.stellarNetwork);
+    if (configuredNetwork !== expectedNetwork) {
+      throw new WrongNetworkError(expectedNetwork, configuredNetwork);
+    }
+
+    if (this.rpcClient.getNetwork) {
+      const rpcNetwork = await this.rpcClient.getNetwork();
+      const actualPassphrase = String(rpcNetwork.passphrase ?? rpcNetwork.networkPassphrase ?? '');
+      if (actualPassphrase && actualPassphrase !== env.stellarNetworkPassphrase) {
+        throw new WrongNetworkError(
+          expectedNetwork,
+          networkFromPassphrase(actualPassphrase) ?? actualPassphrase
+        );
+      }
     }
 
     return {
@@ -224,13 +255,24 @@ export class TransactionVerifierService {
   }
 
   async getTransactionEvents(transaction: RpcTransaction): Promise<NormalizedEvent[]> {
-    const response = await this.rpcClient.getEvents({
-      startLedger: transaction.ledger,
-      filters: [{ type: 'contract' }],
-      limit: 100,
-    }) as { events?: unknown[] };
+    const events: unknown[] = [];
+    let cursor: string | undefined;
 
-    const events = response.events ?? [];
+    do {
+      const response = await this.rpcClient.getEvents({
+        startLedger: transaction.ledger,
+        endLedger: transaction.ledger,
+        filters: [{ type: 'contract' }],
+        limit: EVENT_PAGE_LIMIT,
+        ...(cursor ? { cursor } : {}),
+      });
+
+      events.push(...(response.events ?? []));
+      const nextCursor = response.cursor || undefined;
+      if (!nextCursor || nextCursor === cursor) break;
+      cursor = nextCursor;
+    } while (cursor);
+
     return events
       .map((event, index) => this.normalizeEvent(event, transaction, index))
       .filter((event): event is NormalizedEvent => Boolean(event))

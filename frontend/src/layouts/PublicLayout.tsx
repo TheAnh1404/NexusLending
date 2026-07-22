@@ -7,7 +7,7 @@ import { Button, Layout, Space, Tag } from 'antd';
 const { Header, Content, Footer } = Layout;
 
 export const PublicLayout: React.FC = () => {
-  const { isConnected, shortAddress, isTestnet, network } = useWallet();
+  const { isConnected, shortAddress, isExpectedNetwork, network } = useWallet();
   const navigate = useNavigate();
 
   return (
@@ -66,8 +66,8 @@ export const PublicLayout: React.FC = () => {
         <div className="public-header-actions" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           {isConnected ? (
             <Space size="middle">
-              <Tag color={isTestnet ? 'blue' : 'warning'} style={{ display: 'flex', alignItems: 'center', gap: '4px', border: 'none', padding: '4px 12px' }}>
-                {isTestnet ? 'Stellar Testnet' : network ?? 'Wrong Network'}
+              <Tag color={isExpectedNetwork ? 'blue' : 'warning'} style={{ display: 'flex', alignItems: 'center', gap: '4px', border: 'none', padding: '4px 12px' }}>
+                {isExpectedNetwork ? network ?? 'Stellar Network' : network ?? 'Wrong Network'}
               </Tag>
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: '1.2' }}>
                 <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Freighter connected</span>
@@ -75,7 +75,7 @@ export const PublicLayout: React.FC = () => {
                   {shortAddress}
                 </span>
               </div>
-              <Button type="primary" onClick={() => navigate('/app')}>
+              <Button type="primary" onClick={() => navigate(isExpectedNetwork ? '/app' : '/connect')}>
                 Launch Dashboard <ArrowRight size={14} style={{ marginLeft: 6 }} />
               </Button>
             </Space>

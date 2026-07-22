@@ -10,7 +10,7 @@ import { eventSyncService, EventSyncService } from './event-sync.service';
 
 interface RpcClient {
   getLatestLedger(): Promise<{ sequence: number }>;
-  getEvents(input: unknown): Promise<{ events?: unknown[] }>;
+  getEvents(input: unknown): Promise<{ events?: unknown[]; cursor?: string }>;
 }
 
 export interface IndexerStatus {
@@ -24,6 +24,8 @@ export interface IndexerStatus {
   failedEvents: number;
   lastError?: string | null;
 }
+
+const EVENT_PAGE_LIMIT = 100;
 
 export class IndexerService {
   private isRunning = false;
@@ -110,13 +112,23 @@ export class IndexerService {
       env.vaultContractId,
     ].filter(Boolean);
 
-    const response = await this.rpcClient.getEvents({
-      startLedger,
-      filters: [{ type: 'contract', contractIds }],
-      limit: 100,
-    }) as { events?: unknown[] };
+    const rawEvents: unknown[] = [];
+    let cursor: string | undefined;
 
-    const rawEvents = response.events ?? [];
+    do {
+      const response = await this.rpcClient.getEvents({
+        startLedger,
+        endLedger: latestLedger,
+        filters: [{ type: 'contract', contractIds }],
+        limit: EVENT_PAGE_LIMIT,
+        ...(cursor ? { cursor } : {}),
+      });
+      rawEvents.push(...(response.events ?? []));
+      const nextCursor = response.cursor || undefined;
+      if (!nextCursor || nextCursor === cursor) break;
+      cursor = nextCursor;
+    } while (cursor);
+
     let processedEvents = 0;
     let failedEvents = 0;
 
@@ -130,7 +142,7 @@ export class IndexerService {
         txHash,
         ledger,
         status: 'SUCCESS',
-        network: env.stellarNetwork === 'mainnet' || env.stellarNetwork === 'public' ? 'mainnet' : 'testnet',
+        network: env.stellarNetwork,
         confirmedAt: new Date(),
         raw,
       };

@@ -151,7 +151,7 @@ If any value is missing, the UI must show "Not indexed yet" or "No confirmed tra
 12. Success state: Metrics reflect indexed backend data.
 13. Actions allowed: Navigate to marketplace, create offer, transaction detail.
 14. Actions forbidden: Mutating loan or offer state directly from dashboard.
-15. Current frontend issues: TVL history is mock-derived, activity table does not expose tx links, `CLAIM_REPAYMENT` appears as a transaction type.
+15. Current frontend issues: TVL history is mock-derived; legacy `CLAIM_REPAYMENT` remains in shared enums for compatibility but must not appear as a live action.
 16. Required redesign: Make telemetry verifiable, label indexed data age, and make every transaction inspectable.
 
 ## Marketplace

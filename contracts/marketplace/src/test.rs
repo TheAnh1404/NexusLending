@@ -45,7 +45,7 @@ fn setup() -> Fixture<'static> {
     let marketplace = MarketplaceContractClient::new(env, &marketplace_id);
 
     vault.initialize(&admin, &marketplace_id, &loan_manager_id);
-    loan_manager.initialize(&admin, &vault_id, &oracle_id);
+    loan_manager.initialize(&admin, &marketplace_id, &vault_id, &oracle_id);
     marketplace.initialize(&admin, &vault_id, &loan_manager_id);
 
     Fixture {
@@ -145,6 +145,17 @@ fn cannot_accept_non_active_offer() {
     let offer_id = create_offer_record(&f);
 
     let result = f.marketplace.try_accept_offer(&offer_id, &f.borrower, &20);
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn cannot_accept_own_offer() {
+    let f = setup();
+    let offer_id = create_offer_record(&f);
+    fund_and_activate(&f, offer_id);
+
+    let result = f.marketplace.try_accept_offer(&offer_id, &f.lender, &20);
 
     assert!(result.is_err());
 }
@@ -299,6 +310,57 @@ fn create_offer_invalid_ltv_exceeds_threshold() {
         &14_000_u32,
     );
     assert!(result.is_err());
+}
+
+#[test]
+fn create_offer_rejects_same_loan_and_collateral_asset() {
+    let f = setup();
+    let result = f.marketplace.try_create_offer(
+        &f.lender,
+        &f.loan_asset,
+        &1_000_i128,
+        &500_u32,
+        &30_u32,
+        &f.loan_asset,
+        &6_000_u32,
+        &8_000_u32,
+        &500_u32,
+        &3_u32,
+        &14_000_u32,
+    );
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn create_offer_rejects_threshold_above_one_hundred_percent() {
+    let f = setup();
+    let result = f.marketplace.try_create_offer(
+        &f.lender,
+        &f.loan_asset,
+        &1_000_i128,
+        &500_u32,
+        &30_u32,
+        &f.collateral_asset,
+        &6_000_u32,
+        &10_001_u32,
+        &500_u32,
+        &3_u32,
+        &14_000_u32,
+    );
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn cleanup_cancelled_offer_removes_storage() {
+    let f = setup();
+    let offer_id = create_offer_record(&f);
+
+    f.marketplace.cancel_offer(&offer_id);
+    f.marketplace.cleanup_offer(&offer_id);
+
+    assert!(f.marketplace.try_get_offer(&offer_id).is_err());
 }
 
 #[test]

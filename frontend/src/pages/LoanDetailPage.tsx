@@ -227,9 +227,19 @@ export const LoanDetailPage: React.FC = () => {
     }
   };
 
-  // Filter transactions for this specific contract
+  // Filter transactions for this specific offer/loan pair.
+  const relatedOfferId = offer?.id ?? activeLoan?.offerId ?? id;
+  const relatedLoanId = activeLoan?.id ?? offer?.acceptedLoanId;
+  const transactionQuery = new URLSearchParams();
+  if (relatedLoanId) transactionQuery.set('loanId', relatedLoanId);
+  if (relatedOfferId) transactionQuery.set('offerId', relatedOfferId);
+  const transactionHistoryPath = `/app/transactions${transactionQuery.toString() ? `?${transactionQuery.toString()}` : ''}`;
   const matchesTxs = transactions.filter(
-    (tx) => tx.loanId === id || tx.offerId === id || (activeLoan && tx.loanId === activeLoan.id)
+    (tx) =>
+      tx.loanId === id
+      || tx.offerId === id
+      || (!!relatedLoanId && tx.loanId === relatedLoanId)
+      || (!!relatedOfferId && tx.offerId === relatedOfferId)
   );
 
   const creationTx = matchesTxs.find(
@@ -314,6 +324,25 @@ export const LoanDetailPage: React.FC = () => {
                   <a href={creationTx.explorerUrl} target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: 'var(--primary-color)' }}>
                     View on Stellar Expert <ExternalLink size={12} />
                   </a>
+                </>
+              )}
+              {matchesTxs.length > 0 && (
+                <>
+                  <span>|</span>
+                  <button
+                    type="button"
+                    onClick={() => navigate(transactionHistoryPath)}
+                    style={{
+                      border: 0,
+                      background: 'transparent',
+                      padding: 0,
+                      color: 'var(--primary-color)',
+                      cursor: 'pointer',
+                      font: 'inherit',
+                    }}
+                  >
+                    All receipts
+                  </button>
                 </>
               )}
             </div>
@@ -705,8 +734,17 @@ export const LoanDetailPage: React.FC = () => {
       </Row>
 
       {/* Transaction History ledger */}
-      <Card title="Full Contract Transaction Ledger" style={{ border: '1px solid var(--border-color)' }} styles={{ body: { padding: 0 } }}>
-        <Table columns={activityColumns} dataSource={matchesTxs.map((item, idx) => ({ ...item, key: idx }))} pagination={false} />
+      <Card
+        title="Full Contract Transaction Ledger"
+        extra={matchesTxs.length > 0 ? (
+          <Button type="link" onClick={() => navigate(transactionHistoryPath)} style={{ paddingInline: 0 }}>
+            Open transaction history
+          </Button>
+        ) : null}
+        style={{ border: '1px solid var(--border-color)' }}
+        styles={{ body: { padding: 0 } }}
+      >
+        <Table columns={activityColumns} dataSource={matchesTxs.map((item, idx) => ({ ...item, key: idx }))} pagination={{ pageSize: 6 }} />
       </Card>
 
       {/* Modals */}

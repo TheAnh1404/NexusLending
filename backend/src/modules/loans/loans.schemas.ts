@@ -60,6 +60,11 @@ export const activateLoanSchema = z.object({
   contractLoanId: z.coerce.bigint().optional()
 }).merge(confirmedChainReceiptSchema);
 
+export const syncLoanSchema = z.object({
+  wallet: z.string().min(1).optional()
+});
+
 export type CreateLoanInput = z.infer<typeof createLoanSchema>;
 export type UpdateLoanInput = z.infer<typeof updateLoanSchema>;
 export type ActivateLoanInput = z.infer<typeof activateLoanSchema>;
+export type SyncLoanInput = z.infer<typeof syncLoanSchema>;

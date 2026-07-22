@@ -16,7 +16,11 @@ const normalizedStoredMode = storedDataMode === 'api' || storedDataMode === 'moc
   : null;
 export const DATA_MODE = normalizedEnvMode || normalizedStoredMode || 'mock';
 
-export const CHAIN_MODE = import.meta.env.VITE_CHAIN_MODE === 'mock' ? 'mock' : 'live';
+const requestedChainMode = import.meta.env.VITE_CHAIN_MODE === 'mock' ? 'mock' : 'live';
+export const CHAIN_MODE = DATA_MODE === 'api' ? 'live' : requestedChainMode;
+export const CHAIN_MODE_NOTE = DATA_MODE === 'api' && requestedChainMode === 'mock'
+  ? 'API mode always requires live Soroban receipts; VITE_CHAIN_MODE=mock is ignored.'
+  : null;
 
 export const apiUnavailableMessage = (): string =>
   `Cannot connect to backend API at ${API_URL}. Start the backend server on port 5000.`;

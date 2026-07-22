@@ -27,6 +27,8 @@ pub enum ContractError {
     OfferAlreadyExpired = 25,
     OfferMatched = 26,
     InsufficientLockedFunds = 27,
+    BorrowerIsLender = 28,
+    InvalidAssetPair = 29,
     VaultNotConfigured = 30,
     LoanManagerNotConfigured = 31,
     MarketplaceNotConfigured = 32,
