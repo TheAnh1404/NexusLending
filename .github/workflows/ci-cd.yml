@@ -42,7 +42,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       - name: Run lint
         run: npm run lint
@@ -97,7 +97,7 @@ jobs:
           cache-dependency-path: backend/package-lock.json
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       - name: Generate Prisma client
         run: npm run prisma:generate
@@ -156,15 +156,7 @@ jobs:
         run: cargo test --workspace --locked
 
       - name: Build contract WASM artifacts
-        run: >
-          cargo build
-          --package nexus-oracle-contract
-          --package nexus-vault-contract
-          --package nexus-marketplace-contract
-          --package nexus-loan-manager-contract
-          --target wasm32v1-none
-          --release
-          --locked
+        run: cargo build --workspace --target wasm32v1-none --release --locked
 
       - name: Upload contract WASM artifacts
         uses: actions/upload-artifact@v4

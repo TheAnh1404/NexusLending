@@ -3,10 +3,6 @@
   "version": "1.0.0",
   "private": true,
   "description": "Secure Decentralized P2P Fixed-Rate Isolated Lending Marketplace on Stellar Soroban",
-  "workspaces": [
-    "frontend",
-    "backend"
-  ],
   "scripts": {
     "dev:frontend": "npm --prefix frontend run dev",
     "dev:backend": "npm --prefix backend run dev",
