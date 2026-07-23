@@ -897,6 +897,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "88904434abc2901f197fe8cc55f0445e7ded921dba5911dad2e2b39b48e663c4"
 
 [[package]]
+name = "nexus-contracts"
+version = "0.1.0"
+dependencies = [
+ "nexus-contracts-shared",
+ "nexus-loan-manager-contract",
+ "nexus-marketplace-contract",
+ "nexus-oracle-contract",
+ "nexus-vault-contract",
+]
+
+[[package]]
 name = "nexus-contracts-shared"
 version = "0.1.0"
 dependencies = [

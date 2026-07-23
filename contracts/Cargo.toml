@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  ".",
   "shared",
   "oracle",
   "vault",
@@ -7,6 +8,20 @@ members = [
   "marketplace",
 ]
 resolver = "2"
+
+[package]
+name = "nexus-contracts"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[dependencies]
+nexus-contracts-shared = { path = "shared" }
+nexus-loan-manager-contract = { path = "loan-manager" }
+nexus-marketplace-contract = { path = "marketplace" }
+nexus-oracle-contract = { path = "oracle" }
+nexus-vault-contract = { path = "vault" }
 
 [workspace.package]
 edition = "2021"
@@ -23,4 +38,3 @@ overflow-checks = true
 lto = true
 codegen-units = 1
 panic = "abort"
-
