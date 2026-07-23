@@ -612,6 +612,20 @@ Contains common ABI types, errors, and constants:
 *   `LoanOffer` & `Loan`: Core entity definitions.
 *   Constants: `BPS_DENOMINATOR = 10,000`, `SAFE_HEALTH_FACTOR_BPS = 14,000` (1.40), `LIQUIDATION_HEALTH_FACTOR_BPS = 12,000` (1.20).
 
+### Contract Interactions & Frontend Function Matching Matrix
+
+| Smart Contract | Rust Function Signature (`lib.rs`) | Frontend Integration Wrapper (`@stellar/stellar-sdk`) | User Auth Required |
+| :--- | :--- | :--- | :--- |
+| **Marketplace** | `create_offer(e, lender, terms)` | `createOffer(terms)` | Lender Signs |
+| **Marketplace** | `fund_offer(e, offer_id, funder)` | `fundOffer(offerId, funder)` | Lender Signs |
+| **Marketplace** | `activate_offer(e, offer_id)` | `activateOffer(offerId)` | Lender Signs |
+| **Marketplace** | `accept_offer(e, offer_id, borrower, collateral)` | `acceptOffer(offerId, borrower, collateral)` | Borrower Signs |
+| **Loan Manager**| `activate_loan(e, loan_id)` | `activateLoan(loanId)` | Borrower Signs |
+| **Loan Manager**| `full_repay(e, loan_id)` | `fullRepay(loanId)` | Borrower Signs |
+| **Loan Manager**| `partial_repay(e, loan_id, amount)` | `partialRepay(loanId, amount)` | Borrower Signs |
+| **Loan Manager**| `liquidate(e, loan_id, liquidator, repay_amount)` | `liquidateLoan(loanId, liquidator, repay_amount)` | Liquidator Signs |
+| **Oracle** | `set_price(e, asset, price, timestamp)` | `setPrice(asset, price, timestamp)` | Admin Signs |
+
 ### Contract Interactions Matrix
 
 | Caller | Target Contract | Method | Purpose |

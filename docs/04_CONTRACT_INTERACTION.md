@@ -50,7 +50,23 @@ graph LR
 
 ---
 
-## 3. Authorization Matrix
+## 3. Authorization & Function Matching Matrix
+
+| # | Smart Contract | Rust Contract Function | Frontend Integration Function | `@stellar/stellar-sdk` Type | User Auth Required |
+|---|----------------|-----------------------|--------------------------------|-----------------------------|--------------------|
+| 1 | Marketplace | `create_offer` | `createOffer(terms)` | `Contract.call('create_offer')` | Lender Signs |
+| 2 | Marketplace | `fund_offer` | `fundOffer(offerId)` | `Contract.call('fund_offer')` | Lender Signs |
+| 3 | Marketplace | `activate_offer` | `activateOffer(offerId)` | `Contract.call('activate_offer')` | Lender Signs |
+| 4 | Marketplace | `accept_offer` | `acceptOffer(offerId)` | `Contract.call('accept_offer')` | Borrower Signs |
+| 5 | Loan Manager | `activate_loan` | `activateLoan(loanId)` | `Contract.call('activate_loan')` | Borrower Signs |
+| 6 | Loan Manager | `full_repay` | `fullRepay(loanId)` | `Contract.call('full_repay')` | Borrower Signs |
+| 7 | Loan Manager | `partial_repay` | `partialRepay(loanId, amount)` | `Contract.call('partial_repay')` | Borrower Signs |
+| 8 | Loan Manager | `liquidate` | `liquidateLoan(loanId, amount)` | `Contract.call('liquidate')` | Liquidator Signs |
+| 9 | Oracle | `set_price` | `setPrice(asset, price, ts)` | `Contract.call('set_price')` | Admin Signs |
+
+---
+
+## 3.1 Authorization Matrix
 
 | # | Cross-Contract Call | Caller | Vault Check | User Auth Required |
 |---|---------------------|--------|-------------|-------------------|
