@@ -77,4 +77,15 @@ export const transactionsApi = {
     });
     return mapBackendTransaction(transaction);
   },
+
+  async delete(id: string, wallet?: string): Promise<void> {
+    const params = new URLSearchParams();
+    if (wallet) params.set('wallet', wallet);
+    const path = params.size > 0 ? `/api/transactions/${id}?${params.toString()}` : `/api/transactions/${id}`;
+    await apiClient.delete(path);
+  },
+
+  async deleteAll(wallet: string): Promise<void> {
+    await apiClient.delete(`/api/transactions?wallet=${encodeURIComponent(wallet)}`);
+  },
 };

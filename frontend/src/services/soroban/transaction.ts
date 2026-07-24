@@ -253,11 +253,12 @@ const normalizeSorobanSimulationError = (rawError: string, functionName?: string
 
   if (lowerRawError.includes('unreachablecodereached')) {
     if (functionName === 'accept_offer') {
-      return 'Offer cannot be accepted on-chain. It may already be matched, cancelled, expired, or the marketplace data is stale. Refresh the marketplace and choose an active on-chain offer.';
+      return 'Offer cannot be accepted on-chain. Common causes: (1) Cross-contract auth check, (2) The offer is not in Active status on-chain, (3) Borrower is the same wallet as Lender, or (4) Oracle price feed is uninitialized. Refresh marketplace or verify offer status.';
     }
     if (functionName === 'activate_loan') {
-      return 'Loan cannot be activated on-chain. It may no longer be PendingCollateral, or the wallet/vault state is stale. Refresh loan details and retry.';
+      return 'Loan cannot be activated on-chain. Common causes: (1) Loan is not PendingCollateral, (2) Borrower balance is below required XLM collateral, or (3) Missing USDC trustline.';
     }
+    return 'Soroban VM simulation trapped (UnreachableCodeReached). Please verify smart contract parameters and status.';
   }
 
   return rawError;

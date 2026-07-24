@@ -78,6 +78,12 @@ export const getGracePeriodDaysRemaining = (
   return Math.max(0, Math.ceil((defaultTime - Date.now()) / (24 * 60 * 60 * 1000)));
 };
 
+export const getDaysRemaining = (dueDate: string): number => {
+  const dueTime = new Date(dueDate).getTime();
+  if (!Number.isFinite(dueTime)) return 0;
+  return Math.max(0, Math.ceil((dueTime - Date.now()) / (24 * 60 * 60 * 1000)));
+};
+
 export const getTimeBasedLoanStatus = (
   dueDate: string,
   gracePeriodDays = DEFAULT_GRACE_PERIOD_DAYS,

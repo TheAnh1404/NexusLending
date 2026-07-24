@@ -1,73 +1,67 @@
 import React, { useEffect, useState } from 'react';
+import { Typography, Row, Col, Card, Button, Switch, Table, Tag, Space, Divider, InputNumber, App } from 'antd';
+import { LogOut, ExternalLink, RefreshCw, Check, Copy } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useAppContext } from '../app/AppContext';
 import { useWallet } from '../hooks/useWallet';
-import { isAdminWallet } from '../config/admin';
-import { filterWalletActivities } from '../utils/activity';
-import { formatCurrency } from '../utils/finance';
-import { App, Card, Row, Col, Descriptions, Button, Switch, List, Typography, Tag, Space, Divider } from 'antd';
-import { Wallet, ShieldCheck, Bell, Activity, Globe, LogOut, ExternalLink } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { formatAddress } from '../utils/finance';
 import {
   ASSET_CONTRACTS,
   CONTRACTS,
   EXPLORER_NETWORK,
-  HORIZON_URL,
-  NETWORK,
   NETWORK_DISPLAY_NAME,
-  RPC_URL,
 } from '../services/soroban/config';
-import { CHAIN_MODE, CHAIN_MODE_NOTE } from '../services/api/client';
 
 const { Title, Paragraph, Text } = Typography;
 const NOTIFICATION_SETTINGS_KEY = 'nexus_notification_settings';
 
 export const SettingsPage: React.FC = () => {
-  const { wallet, activities, loanOffers, loans, disconnectWallet } = useAppContext();
-  const { publicKey, isExpectedNetwork, disconnect } = useWallet();
+  const { wallet, transactions, oraclePrices, updateOraclePrice, disconnectWallet, refreshData } = useAppContext();
+  const { publicKey, disconnect } = useWallet();
   const { message } = App.useApp();
   const navigate = useNavigate();
+
   const [emailAlerts, setEmailAlerts] = useState(true);
   const [telegramAlerts, setTelegramAlerts] = useState(false);
   const [liqAlerts, setLiqAlerts] = useState(true);
-  const isAdmin = isAdminWallet(publicKey ?? wallet.address);
-  const notificationSettingsKey = React.useMemo(
-    () => wallet.address ? `${NOTIFICATION_SETTINGS_KEY}_${wallet.address}` : NOTIFICATION_SETTINGS_KEY,
-    [wallet.address]
+
+  const [newXlmPrice, setNewXlmPrice] = useState<number>(
+    oraclePrices.find((p) => p.asset === 'XLM')?.price || 0.125
   );
-  const walletActivities = React.useMemo(
-    () => filterWalletActivities(activities, wallet.address, loans, loanOffers),
-    [activities, loanOffers, loans, wallet.address]
+
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const notificationSettingsKey = React.useMemo(
+    () => (wallet.address ? `${NOTIFICATION_SETTINGS_KEY}_${wallet.address}` : NOTIFICATION_SETTINGS_KEY),
+    [wallet.address]
   );
 
   useEffect(() => {
     try {
       const stored = localStorage.getItem(notificationSettingsKey);
-      if (!stored) {
-        setEmailAlerts(true);
-        setTelegramAlerts(false);
-        setLiqAlerts(true);
-        return;
-      }
-      const parsed = JSON.parse(stored) as Partial<{
-        emailAlerts: boolean;
-        telegramAlerts: boolean;
-        liqAlerts: boolean;
-      }>;
+      if (!stored) return;
+      const parsed = JSON.parse(stored);
       setEmailAlerts(parsed.emailAlerts ?? true);
       setTelegramAlerts(parsed.telegramAlerts ?? false);
       setLiqAlerts(parsed.liqAlerts ?? true);
     } catch {
-      message.warning('Unable to load notification settings.');
+      // Ignored
     }
-  }, [message, notificationSettingsKey]);
+  }, [notificationSettingsKey]);
 
   useEffect(() => {
-    localStorage.setItem(notificationSettingsKey, JSON.stringify({
-      emailAlerts,
-      telegramAlerts,
-      liqAlerts,
-    }));
+    localStorage.setItem(
+      notificationSettingsKey,
+      JSON.stringify({ emailAlerts, telegramAlerts, liqAlerts })
+    );
   }, [emailAlerts, liqAlerts, notificationSettingsKey, telegramAlerts]);
+
+  const handleCopy = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 1500);
+    message.success('Copied to clipboard');
+  };
 
   const handleDisconnect = () => {
     disconnect();
@@ -75,317 +69,211 @@ export const SettingsPage: React.FC = () => {
     navigate('/connect');
   };
 
-  const handleToggle = (setting: string, _val: boolean) => {
-    message.success(`${setting} updated successfully.`);
+  const handleUpdateOraclePrice = async () => {
+    try {
+      await updateOraclePrice(newXlmPrice);
+      message.success(`Oracle price updated to $${newXlmPrice}`);
+    } catch {
+      message.error('Failed to update oracle price.');
+    }
   };
 
+  // Transaction history table columns
+  const txColumns = [
+    {
+      title: 'Type',
+      dataIndex: 'type',
+      key: 'type',
+      render: (text: string) => (
+        <Tag color="blue" style={{ borderRadius: 4, fontWeight: 600 }}>
+          {text.replace(/_/g, ' ')}
+        </Tag>
+      ),
+    },
+    {
+      title: 'Details',
+      dataIndex: 'details',
+      key: 'details',
+      render: (text: string) => <Text style={{ fontSize: 13 }}>{text}</Text>,
+    },
+    {
+      title: 'Timestamp',
+      dataIndex: 'timestamp',
+      key: 'timestamp',
+      render: (text: string) => <Text type="secondary" style={{ fontSize: 12 }}>{new Date(text).toLocaleString()}</Text>,
+    },
+    {
+      title: 'Explorer',
+      dataIndex: 'txHash',
+      key: 'txHash',
+      render: (txHash?: string) =>
+        txHash ? (
+          <a
+            href={`https://stellar.expert/explorer/${EXPLORER_NETWORK}/tx/${txHash}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: 'var(--primary-color)', display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12 }}
+          >
+            <span>View</span>
+            <ExternalLink size={12} />
+          </a>
+        ) : (
+          '-'
+        ),
+    },
+  ];
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
-      {/* Page Header */}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      {/* Header */}
       <div>
-        <Title level={2} style={{ margin: 0, fontFamily: 'var(--font-heading)', fontWeight: 700 }}>
-          {isAdmin ? 'System Status' : 'Profile & Settings'}
+        <Title level={2} style={{ margin: 0, fontWeight: 800 }}>
+          Settings & Preferences
         </Title>
-        <Paragraph type="secondary" style={{ margin: 0 }}>
-          {isAdmin
-            ? 'Admin runtime status, contract references, and notification preferences.'
-            : 'Manage your connected Stellar wallet details and notifications.'}
+        <Paragraph type="secondary" style={{ margin: '4px 0 0 0', fontSize: 14 }}>
+          Manage your connected wallet, notification settings, contract references, and developer options.
         </Paragraph>
       </div>
 
       <Row gutter={[24, 24]}>
-        {/* Left side: Wallet & Node Info */}
-        <Col xs={24} lg={14}>
-          <Space orientation="vertical" size="large" style={{ width: '100%' }}>
-            {/* Wallet details */}
-            <Card
-              title={
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Wallet size={16} style={{ color: 'var(--primary-color)' }} />
-                  <span>Wallet Specifications</span>
-                </div>
-              }
-              styles={{ body: { padding: '24px' } }}
-            >
-              <Descriptions
-                bordered
-                column={1}
-                size="small"
-                styles={{ label: { fontWeight: 600, width: '180px' } }}
-                items={[
-                  {
-                    key: 'publicKey',
-                    label: 'Stellar Public Key',
-                    children: <Text style={{ fontFamily: 'var(--font-mono)' }}>{publicKey ?? wallet.address}</Text>,
-                  },
-                  {
-                    key: 'accountType',
-                    label: 'Account Type',
-                    children: <Tag color="blue">Multi-role Account</Tag>,
-                  },
-                  {
-                    key: 'usdcBalance',
-                    label: 'USDC Balance',
-                    children: <Text strong>{formatCurrency(wallet.balanceUSDC, 'USDC')}</Text>,
-                  },
-                  {
-                    key: 'xlmBalance',
-                    label: 'XLM Balance',
-                    children: <Text strong>{formatCurrency(wallet.balanceXLM, 'XLM')}</Text>,
-                  },
-                ]}
-              />
-
-              <Button
-                type="primary"
-                danger
-                onClick={handleDisconnect}
-                icon={<LogOut size={16} />}
-                style={{ marginTop: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}
-              >
-                Disconnect Wallet
-              </Button>
-            </Card>
-
-            {isAdmin && (
-              <Card
-                title={
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <Globe size={16} style={{ color: 'var(--primary-color)' }} />
-                    <span>Stellar Network & Node Status</span>
-                  </div>
-                }
-                styles={{ body: { padding: '24px' } }}
-              >
-                <Descriptions
-                  bordered
-                  column={1}
-                  size="small"
-                  styles={{ label: { fontWeight: 600, width: '180px' } }}
-                  items={[
-                    {
-                      key: 'network',
-                      label: 'Selected Network',
-                      children: <Tag color={isExpectedNetwork ? 'purple' : 'warning'}>{NETWORK_DISPLAY_NAME} ({NETWORK.toUpperCase()})</Tag>,
-                    },
-                    {
-                      key: 'horizonRpc',
-                      label: 'Horizon RPC Endpoint',
-                      children: <Text style={{ fontFamily: 'var(--font-mono)' }}>{HORIZON_URL}</Text>,
-                    },
-                    {
-                      key: 'sorobanRpc',
-                      label: 'Soroban RPC URL',
-                      children: <Text style={{ fontFamily: 'var(--font-mono)' }}>{RPC_URL}</Text>,
-                    },
-                    {
-                      key: 'nodeStatus',
-                      label: 'Node Status',
-                      children: <Tag color={CHAIN_MODE === 'mock' ? 'gold' : 'success'}>{CHAIN_MODE === 'mock' ? 'LOCAL MOCK DATA' : 'ONLINE & ACTIVE'}</Tag>,
-                    },
-                    {
-                      key: 'chainMode',
-                      label: 'Contract Execution',
-                      children: CHAIN_MODE === 'mock'
-                        ? <Text>Local mock mode uses browser state only; no backend verification or Soroban RPC call is submitted.</Text>
-                        : (
-                            <Space direction="vertical" size={2}>
-                              <Text>Live Soroban calls require Freighter signatures and configured contracts.</Text>
-                              {CHAIN_MODE_NOTE && <Text type="warning">{CHAIN_MODE_NOTE}</Text>}
-                            </Space>
-                          ),
-                    },
-                    {
-                      key: 'coreVersion',
-                      label: 'Stellar Core Version',
-                      children: <Text>v21.1.0-rc1</Text>,
-                    },
-                  ]}
-                />
-              </Card>
-            )}
-          </Space>
-        </Col>
-
-        {/* Right side: Alerts & History */}
-        <Col xs={24} lg={10}>
-          <Space orientation="vertical" size="large" style={{ width: '100%' }}>
-            {/* Notification settings */}
-            <Card
-              title={
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Bell size={16} style={{ color: 'var(--primary-color)' }} />
-                  <span>Risk Alerts & Notifications</span>
-                </div>
-              }
-              styles={{ body: { padding: '24px' } }}
-            >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        {/* Left Column: Wallet & Notifications */}
+        <Col xs={24} lg={12}>
+          <Space direction="vertical" size="large" style={{ width: '100%' }}>
+            {/* Section 1: Wallet Connection */}
+            <Card className="card-premium" title={<Text strong style={{ fontSize: 16 }}>Connected Wallet</Text>}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <Text strong style={{ display: 'block' }}>Email Risk Alerts</Text>
-                    <Text type="secondary" style={{ fontSize: '12px' }}>Receive alerts when Health Factor &lt; 1.4.</Text>
-                  </div>
-                  <Switch checked={emailAlerts} onChange={(val) => { setEmailAlerts(val); handleToggle('Email alerts', val); }} />
+                  <Text type="secondary">Wallet Address</Text>
+                  <Space size={6}>
+                    <Text strong style={{ fontFamily: 'monospace' }}>
+                      {formatAddress(publicKey || wallet.address || '')}
+                    </Text>
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={copiedId === 'wallet' ? <Check size={14} style={{ color: 'var(--success-color)' }} /> : <Copy size={14} />}
+                      onClick={() => handleCopy(publicKey || wallet.address || '', 'wallet')}
+                    />
+                  </Space>
                 </div>
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <Text strong style={{ display: 'block' }}>Telegram Instant Bot Notifications</Text>
-                    <Text type="secondary" style={{ fontSize: '12px' }}>Direct message on margin warning thresholds.</Text>
-                  </div>
-                  <Switch checked={telegramAlerts} onChange={(val) => { setTelegramAlerts(val); handleToggle('Telegram alerts', val); }} />
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <Text strong style={{ display: 'block' }}>Liquidation Warnings</Text>
-                    <Text type="secondary" style={{ fontSize: '12px' }}>Immediate notification if a position drops below 1.2 HF.</Text>
-                  </div>
-                  <Switch checked={liqAlerts} onChange={(val) => { setLiqAlerts(val); handleToggle('Liquidation alerts', val); }} />
-                </div>
-              </div>
-            </Card>
-
-            {isAdmin && (
-            <Card
-              title={
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <ShieldCheck size={16} style={{ color: 'var(--primary-color)' }} />
-                  <span>Soroban Smart Contract Addresses</span>
-                </div>
-              }
-              styles={{ body: { padding: '24px' } }}
-            >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', fontSize: '13px' }}>
-                <div>
-                  <Text type="secondary" style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>
-                    Marketplace Contract
-                  </Text>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '4px' }}>
-                    <Text copyable={{ text: CONTRACTS.marketplace }} style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
-                      {CONTRACTS.marketplace.slice(0, 6)}...{CONTRACTS.marketplace.slice(-6)}
-                    </Text>
-                    <a href={`https://stellar.expert/explorer/${EXPLORER_NETWORK}/contract/${CONTRACTS.marketplace}`} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: '2px', fontSize: '12px' }}>
-                      Stellar Expert <ExternalLink size={12} />
-                    </a>
-                  </div>
-                </div>
-
-                <div>
-                  <Text type="secondary" style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>
-                    Loan Manager Contract
-                  </Text>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '4px' }}>
-                    <Text copyable={{ text: CONTRACTS.loanManager }} style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
-                      {CONTRACTS.loanManager.slice(0, 6)}...{CONTRACTS.loanManager.slice(-6)}
-                    </Text>
-                    <a href={`https://stellar.expert/explorer/${EXPLORER_NETWORK}/contract/${CONTRACTS.loanManager}`} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: '2px', fontSize: '12px' }}>
-                      Stellar Expert <ExternalLink size={12} />
-                    </a>
-                  </div>
-                </div>
-
-                <div>
-                  <Text type="secondary" style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>
-                    Vault / Escrow Contract
-                  </Text>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '4px' }}>
-                    <Text copyable={{ text: CONTRACTS.vault }} style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
-                      {CONTRACTS.vault.slice(0, 6)}...{CONTRACTS.vault.slice(-6)}
-                    </Text>
-                    <a href={`https://stellar.expert/explorer/${EXPLORER_NETWORK}/contract/${CONTRACTS.vault}`} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: '2px', fontSize: '12px' }}>
-                      Stellar Expert <ExternalLink size={12} />
-                    </a>
-                  </div>
-                </div>
-
-                <div>
-                  <Text type="secondary" style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>
-                    Oracle Contract
-                  </Text>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '4px' }}>
-                    <Text copyable={{ text: CONTRACTS.oracle }} style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
-                      {CONTRACTS.oracle.slice(0, 6)}...{CONTRACTS.oracle.slice(-6)}
-                    </Text>
-                    <a href={`https://stellar.expert/explorer/${EXPLORER_NETWORK}/contract/${CONTRACTS.oracle}`} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: '2px', fontSize: '12px' }}>
-                      Stellar Expert <ExternalLink size={12} />
-                    </a>
-                  </div>
+                  <Text type="secondary">Stellar Network</Text>
+                  <Tag color="blue" style={{ borderRadius: 4, fontWeight: 600, margin: 0 }}>
+                    {NETWORK_DISPLAY_NAME}
+                  </Tag>
                 </div>
 
                 <Divider style={{ margin: '8px 0' }} />
 
-                <div>
-                  <Text type="secondary" style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>
-                    XLM Collateral Token (Native)
-                  </Text>
-                  <Text copyable={{ text: ASSET_CONTRACTS.XLM }} style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
-                    {ASSET_CONTRACTS.XLM.slice(0, 6)}...{ASSET_CONTRACTS.XLM.slice(-6)}
-                  </Text>
-                </div>
-
-                <div>
-                  <Text type="secondary" style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>
-                    USDC Token Contract
-                  </Text>
-                  {ASSET_CONTRACTS.USDC ? (
-                    <Text copyable={{ text: ASSET_CONTRACTS.USDC }} style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
-                      {ASSET_CONTRACTS.USDC.slice(0, 6)}...{ASSET_CONTRACTS.USDC.slice(-6)}
-                    </Text>
-                  ) : (
-                    <Text type="warning">Not Configured (Native issuer path)</Text>
-                  )}
+                <div style={{ display: 'flex', gap: 12 }}>
+                  <Button icon={<RefreshCw size={14} />} onClick={() => refreshData()} style={{ borderRadius: 8 }}>
+                    Refresh Balances
+                  </Button>
+                  <Button danger icon={<LogOut size={14} />} onClick={handleDisconnect} style={{ borderRadius: 8 }}>
+                    Disconnect Wallet
+                  </Button>
                 </div>
               </div>
             </Card>
-            )}
+
+            {/* Section 2: Notifications */}
+            <Card className="card-premium" title={<Text strong style={{ fontSize: 16 }}>Notifications</Text>}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <Text strong>Liquidation Risk Alerts</Text>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                      Receive alerts when loan Health Factor drops below 1.2
+                    </div>
+                  </div>
+                  <Switch checked={liqAlerts} onChange={setLiqAlerts} />
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <Text strong>Email Notifications</Text>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                      Receive loan repayment due reminders via email
+                    </div>
+                  </div>
+                  <Switch checked={emailAlerts} onChange={setEmailAlerts} />
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <Text strong>Telegram Notifications</Text>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                      Instant updates via Nexus Telegram Bot
+                    </div>
+                  </div>
+                  <Switch checked={telegramAlerts} onChange={setTelegramAlerts} />
+                </div>
+              </div>
+            </Card>
+          </Space>
+        </Col>
+
+        {/* Right Column: Contracts & Developer Admin */}
+        <Col xs={24} lg={12}>
+          <Space direction="vertical" size="large" style={{ width: '100%' }}>
+            {/* Section 3: Soroban Contract Addresses */}
+            <Card className="card-premium" title={<Text strong style={{ fontSize: 16 }}>Smart Contract References</Text>}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, fontSize: 13 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <Text type="secondary">Marketplace Contract</Text>
+                  <Text strong style={{ fontFamily: 'monospace' }}>{formatAddress(CONTRACTS.marketplace)}</Text>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <Text type="secondary">Loan Manager Contract</Text>
+                  <Text strong style={{ fontFamily: 'monospace' }}>{formatAddress(CONTRACTS.loanManager)}</Text>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <Text type="secondary">Oracle Contract</Text>
+                  <Text strong style={{ fontFamily: 'monospace' }}>{formatAddress(CONTRACTS.oracle)}</Text>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <Text type="secondary">USDC SAC Token</Text>
+                  <Text strong style={{ fontFamily: 'monospace' }}>{formatAddress(ASSET_CONTRACTS.USDC)}</Text>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <Text type="secondary">XLM SAC Token</Text>
+                  <Text strong style={{ fontFamily: 'monospace' }}>{formatAddress(ASSET_CONTRACTS.XLM)}</Text>
+                </div>
+              </div>
+            </Card>
+
+            {/* Section 4: Oracle Price Admin Update */}
+            <Card className="card-premium" title={<Text strong style={{ fontSize: 16 }}>Oracle Price Control (Dev/Admin)</Text>}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <Text type="secondary" style={{ fontSize: 13 }}>
+                  Update XLM/USD oracle asset price on Soroban oracle contract to simulate price movements.
+                </Text>
+                <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                  <InputNumber
+                    style={{ flex: 1, borderRadius: 8 }}
+                    size="large"
+                    min={0.01}
+                    max={10.0}
+                    step={0.01}
+                    value={newXlmPrice}
+                    onChange={(val) => setNewXlmPrice(val || 0.125)}
+                    addonBefore="XLM / USD"
+                  />
+                  <Button type="primary" size="large" onClick={handleUpdateOraclePrice} style={{ borderRadius: 8 }}>
+                    Update Price
+                  </Button>
+                </div>
+              </div>
+            </Card>
           </Space>
         </Col>
       </Row>
 
-      {/* Transaction ledger history */}
-      <Card
-        title={
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Activity size={16} style={{ color: 'var(--primary-color)' }} />
-            <span>Transaction Ledger History</span>
-          </div>
-        }
-        styles={{ body: { padding: '0px' } }}
-      >
-        <List
-          itemLayout="horizontal"
-          dataSource={walletActivities}
-          renderItem={(item) => (
-            <List.Item style={{ padding: '16px 24px' }}>
-              <List.Item.Meta
-                title={
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Text strong>{item.type.replace('_', ' ')}</Text>
-                    <Text type="secondary" style={{ fontSize: '12px' }}>
-                      {new Date(item.timestamp).toLocaleString()}
-                    </Text>
-                  </div>
-                }
-                description={
-                  <div>
-                    <Paragraph style={{ margin: '4px 0 0 0', color: 'var(--text-muted)' }}>
-                      {item.details}
-                    </Paragraph>
-                    <div style={{ display: 'flex', gap: '8px', marginTop: '6px', fontSize: '11px' }}>
-                      <span>Hash: <span style={{ fontFamily: 'var(--font-mono)' }}>{item.txHash ?? 'Not recorded'}</span></span>
-                      <span>-</span>
-                      <span>Fee: <span style={{ fontFamily: 'var(--font-mono)' }}>0.01 XLM</span></span>
-                    </div>
-                  </div>
-                }
-              />
-            </List.Item>
-          )}
-        />
+      {/* Transaction History Section */}
+      <Card className="card-premium" title={<Text strong style={{ fontSize: 16 }}>Transaction History</Text>}>
+        <Table columns={txColumns} dataSource={transactions} pagination={{ pageSize: 5 }} />
       </Card>
     </div>
   );
 };
-

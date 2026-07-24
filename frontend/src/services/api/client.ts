@@ -14,7 +14,7 @@ const normalizedEnvMode = envDataMode === 'api' || envDataMode === 'mock'
 const normalizedStoredMode = storedDataMode === 'api' || storedDataMode === 'mock'
   ? storedDataMode
   : null;
-export const DATA_MODE = normalizedEnvMode || normalizedStoredMode || 'mock';
+export const DATA_MODE = normalizedEnvMode || normalizedStoredMode || 'api';
 
 const requestedChainMode = import.meta.env.VITE_CHAIN_MODE === 'mock' ? 'mock' : 'live';
 export const CHAIN_MODE = DATA_MODE === 'api' ? 'live' : requestedChainMode;
@@ -118,6 +118,12 @@ export const apiClient = {
     return this.request<T>(path, {
       method: 'PATCH',
       body: JSON.stringify(body ?? {}),
+    });
+  },
+
+  delete<T>(path: string): Promise<T> {
+    return this.request<T>(path, {
+      method: 'DELETE',
     });
   },
 };

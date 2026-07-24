@@ -21,6 +21,9 @@ import type { SwapDirection, TxResult, TxStage } from '../services/soroban/trans
 import { ADMIN_WALLET_ADDRESS, isAdminWallet } from '../config/admin';
 import {
   STORAGE_KEY,
+  addDismissedTxId,
+  addDismissedTxIds,
+  getDismissedTxIds,
   buildOracleImpacts,
   disconnectedWallet,
   getInitialSnapshot,
@@ -71,6 +74,8 @@ interface LendingContextValue {
   recalculateAllHealthFactors: () => Promise<OracleImpact[]>;
   liquidateLoan: (loanId: string, repayAmount: number) => Promise<void>;
   addTransaction: (transaction: Transaction) => void;
+  dismissActivity: (id: string) => void;
+  clearAllActivities: () => void;
   swapTokens: (direction: SwapDirection, receiveAmount: number, maxSendAmount: number) => Promise<boolean>;
   refreshData: () => Promise<void>;
 }
@@ -162,6 +167,8 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const refreshFromApi = useCallback(async (): Promise<LendingSnapshot> => {
     const currentWallet = walletRef.current;
     const nextSnapshot = await loadLendingSnapshotFromApi(currentWallet);
+    const dismissedIds = getDismissedTxIds();
+    const filteredTransactions = nextSnapshot.transactions.filter((tx) => !dismissedIds.has(tx.id));
 
     setSnapshot((prev) => {
       const nextWallet = nextSnapshot.wallet.address && prev.wallet.address === nextSnapshot.wallet.address
@@ -174,7 +181,7 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         offers: nextSnapshot.offers,
         loans: nextSnapshot.loans,
         oraclePrices: nextSnapshot.oraclePrices,
-        transactions: nextSnapshot.transactions,
+        transactions: filteredTransactions,
       };
     });
 
@@ -666,10 +673,9 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const acceptOffer = useCallback(async (offerId: string, collateralAmount: number) => {
     const { wallet, oraclePrices } = snapshot;
-    const failAccept = (details: string): null => {
+    const failAccept = (details: string): never => {
       message.error(details);
-      if (isApiMode) throw new Error(details);
-      return null;
+      throw new Error(details);
     };
 
     if (!wallet.connected || !wallet.address) {
@@ -785,10 +791,9 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const activateLoan = useCallback(async (loanId: string) => {
     const walletAddress = snapshot.wallet.address;
-    const failActivation = (details: string): null => {
+    const failActivation = (details: string): never => {
       message.error(details);
-      if (isApiMode) throw new Error(details);
-      return null;
+      throw new Error(details);
     };
 
     const loan = await getLatestLoanForAction(loanId);
@@ -919,16 +924,24 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const walletAddress = snapshot.wallet.address;
     const loan = snapshot.loans.find((item) => item.id === loanId);
     if (!loan) {
-      message.error('Loan not found.');
-      return;
+      const err = 'Loan not found.';
+      message.error(err);
+      throw new Error(err);
     }
     if (!walletAddress || walletAddress !== loan.borrower) {
-      message.error('Only the borrower can add collateral.');
-      return;
+      const err = 'Only the borrower can add collateral.';
+      message.error(err);
+      throw new Error(err);
     }
-    if (amount <= 0 || amount > snapshot.wallet.balanceXLM) {
-      message.error('Invalid collateral amount.');
-      return;
+    if (amount <= 0) {
+      const err = 'Collateral amount must be greater than zero.';
+      message.error(err);
+      throw new Error(err);
+    }
+    if (amount > snapshot.wallet.balanceXLM) {
+      const err = `Insufficient XLM balance. Required ${amount.toLocaleString()} XLM, available ${snapshot.wallet.balanceXLM.toLocaleString()} XLM.`;
+      message.error(err);
+      throw new Error(err);
     }
 
     if (isApiMode) {
@@ -977,12 +990,14 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const walletAddress = snapshot.wallet.address;
     let loan = snapshot.loans.find((item) => item.id === loanId);
     if (!loan) {
-      message.error('Loan not found.');
-      return null;
+      const err = 'Loan not found.';
+      message.error(err);
+      throw new Error(err);
     }
     if (!walletAddress || walletAddress !== loan.borrower) {
-      message.error('Only the borrower can repay this loan.');
-      return null;
+      const err = 'Only the borrower can repay this loan.';
+      message.error(err);
+      throw new Error(err);
     }
 
     if (isApiMode && loan.contractLoanId !== undefined) {
@@ -1008,13 +1023,20 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
 
     const repayAmount = isFullRepay ? loan.outstandingDebt : amount;
-    if (repayAmount <= 0 || repayAmount > loan.outstandingDebt + 0.01) {
-      message.error('Invalid repayment amount.');
-      return null;
+    if (repayAmount <= 0) {
+      const err = 'Repayment amount must be greater than zero.';
+      message.error(err);
+      throw new Error(err);
+    }
+    if (repayAmount > loan.outstandingDebt + 0.01) {
+      const err = 'Repayment amount cannot exceed total outstanding debt.';
+      message.error(err);
+      throw new Error(err);
     }
     if (snapshot.wallet.balanceUSDC < repayAmount) {
-      message.error('Insufficient USDC balance.');
-      return null;
+      const err = `Insufficient USDC balance in wallet. Required ${repayAmount.toLocaleString()} USDC, available ${snapshot.wallet.balanceUSDC.toLocaleString()} USDC.`;
+      message.error(err);
+      throw new Error(err);
     }
 
     if (isApiMode) {
@@ -1377,6 +1399,36 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
 
 
+  const dismissActivity = useCallback((id: string) => {
+    addDismissedTxId(id);
+    setSnapshot((prev) => ({
+      ...prev,
+      transactions: prev.transactions.filter((tx) => tx.id !== id),
+    }));
+    if (isApiMode) {
+      const userAddr = walletRef.current.address ?? undefined;
+      void transactionsApi.delete(id, userAddr).catch((err) => {
+        console.error('Failed to sync notification deletion with backend:', err);
+      });
+    }
+  }, [isApiMode]);
+
+  const clearAllActivities = useCallback(() => {
+    setSnapshot((prev) => {
+      const allIds = prev.transactions.map((tx) => tx.id);
+      addDismissedTxIds(allIds);
+      return {
+        ...prev,
+        transactions: [],
+      };
+    });
+    if (isApiMode && walletRef.current.address) {
+      void transactionsApi.deleteAll(walletRef.current.address).catch((err) => {
+        console.error('Failed to sync clear all notifications with backend:', err);
+      });
+    }
+  }, [isApiMode]);
+
   const value = useMemo<LendingContextValue>(
     () => ({
       wallet: snapshot.wallet,
@@ -1413,6 +1465,8 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       recalculateAllHealthFactors,
       liquidateLoan,
       addTransaction: pushTransaction,
+      dismissActivity,
+      clearAllActivities,
       swapTokens,
       refreshData,
     }),
@@ -1434,6 +1488,8 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       snapshot,
       updateOraclePrice,
       swapTokens,
+      dismissActivity,
+      clearAllActivities,
     ]
   );
 

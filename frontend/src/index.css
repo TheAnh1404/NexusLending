@@ -657,3 +657,103 @@ h1, h2, h3, h4, h5, h6 {
   border-radius: 4px;
 }
 
+@media (min-width: 768px) {
+  .mobile-bottom-nav {
+    display: none !important;
+  }
+  .desktop-nav {
+    display: none !important;
+  }
+  .mobile-header-only {
+    display: none !important;
+  }
+  .app-main-wrapper {
+    margin-left: 240px !important;
+  }
+}
+
+@media (max-width: 767px) {
+  .desktop-sidebar {
+    display: none !important;
+  }
+  .desktop-only {
+    display: none !important;
+  }
+  .app-main-wrapper {
+    margin-left: 0 !important;
+  }
+  .app-main-content {
+    padding-bottom: 72px !important;
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+  }
+}
+
+/* Marketplace Hero Banner Animations */
+@keyframes pulse {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 8px rgba(16, 185, 129, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+  }
+}
+
+@keyframes orbFloat1 {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(-15px, 20px) scale(1.1);
+  }
+}
+
+@keyframes orbFloat2 {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(20px, -15px) scale(1.15);
+  }
+}
+
+@keyframes floatCard {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+.ambient-orb-1 {
+  animation: orbFloat1 8s ease-in-out infinite;
+}
+
+.ambient-orb-2 {
+  animation: orbFloat2 10s ease-in-out infinite;
+}
+
+.banner-float-card {
+  animation: floatCard 4s ease-in-out infinite;
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.banner-float-card:hover {
+  transform: translateY(-8px) scale(1.02) !important;
+  border-color: rgba(99, 102, 241, 0.4) !important;
+}
+
+.banner-float-card.delay-1 {
+  animation-delay: 1.3s;
+}
+
+.banner-float-card.delay-2 {
+  animation-delay: 2.6s;
+}

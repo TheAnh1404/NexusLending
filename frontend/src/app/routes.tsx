@@ -5,52 +5,44 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { PublicLayout } from '../layouts/PublicLayout';
 import { AppLayout } from '../layouts/AppLayout';
 import { ProtectedRoute } from '../components/common/ProtectedRoute';
-import { AdminRoute } from '../components/common/AdminRoute';
 
-// Pages
+// 4 Main Pages
 import { LandingPage } from '../pages/LandingPage';
 import { ConnectPage } from '../pages/ConnectPage';
-import { DashboardPage } from '../pages/DashboardPage';
 import { MarketplacePage } from '../pages/MarketplacePage';
-import { CreateLoanPage } from '../pages/CreateLoanPage';
-import { LoanDetailPage } from '../pages/LoanDetailPage';
-import { BorrowLoanPage } from '../pages/BorrowLoanPage';
-import { BorrowerDashboardPage } from '../pages/BorrowerDashboardPage';
-import { LenderDashboardPage } from '../pages/LenderDashboardPage';
-import { LiquidationCenterPage } from '../pages/LiquidationCenterPage';
-import { LiquidationDetailPage } from '../pages/LiquidationDetailPage';
-import { OracleMonitorPage } from '../pages/OracleMonitorPage';
 import { MyLoansPage } from '../pages/MyLoansPage';
-import { TransactionsPage } from '../pages/TransactionsPage';
+import { PortfolioPage } from '../pages/PortfolioPage';
 import { SettingsPage } from '../pages/SettingsPage';
-import { AdminPage } from '../pages/AdminPage';
 
 export const AppRoutes: React.FC = () => {
   return (
     <Routes>
-      {/* Public Pages */}
+      {/* Public Landing & Connect */}
       <Route element={<PublicLayout />}>
         <Route path="/" element={<LandingPage />} />
         <Route path="/connect" element={<ConnectPage />} />
       </Route>
 
-      {/* Dashboard App Pages */}
+      {/* Main 4 Protected Application Pages */}
       <Route element={<ProtectedRoute />}>
         <Route path="/app" element={<AppLayout />}>
-          <Route index element={<DashboardPage />} />
+          <Route index element={<Navigate to="/app/marketplace" replace />} />
           <Route path="marketplace" element={<MarketplacePage />} />
-          <Route path="create-loan" element={<CreateLoanPage />} />
-          <Route path="loans/:id" element={<LoanDetailPage />} />
-          <Route path="borrow/:id" element={<BorrowLoanPage />} />
-          <Route path="borrower" element={<BorrowerDashboardPage />} />
-          <Route path="lender" element={<LenderDashboardPage />} />
-          <Route path="liquidation" element={<LiquidationCenterPage />} />
-          <Route path="liquidation/:id" element={<LiquidationDetailPage />} />
-          <Route path="oracle" element={<AdminRoute><OracleMonitorPage /></AdminRoute>} />
           <Route path="my-loans" element={<MyLoansPage />} />
-          <Route path="transactions" element={<TransactionsPage />} />
+          <Route path="portfolio" element={<PortfolioPage />} />
           <Route path="settings" element={<SettingsPage />} />
-          <Route path="admin" element={<AdminRoute><AdminPage /></AdminRoute>} />
+
+          {/* Backward compatibility redirects for legacy routes */}
+          <Route path="create-loan" element={<Navigate to="/app/marketplace" replace />} />
+          <Route path="borrow/:id" element={<Navigate to="/app/marketplace" replace />} />
+          <Route path="loans/:id" element={<Navigate to="/app/my-loans" replace />} />
+          <Route path="borrower" element={<Navigate to="/app/my-loans" replace />} />
+          <Route path="lender" element={<Navigate to="/app/my-loans" replace />} />
+          <Route path="liquidation" element={<Navigate to="/app/my-loans" replace />} />
+          <Route path="liquidation/:id" element={<Navigate to="/app/my-loans" replace />} />
+          <Route path="oracle" element={<Navigate to="/app/settings" replace />} />
+          <Route path="transactions" element={<Navigate to="/app/settings" replace />} />
+          <Route path="admin" element={<Navigate to="/app/settings" replace />} />
         </Route>
       </Route>
 

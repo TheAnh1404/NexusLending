@@ -1,501 +1,700 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
+import { Typography, Tabs, Input, Select, Button, Table, Tag, Space, Card, Badge } from 'antd';
+import {
+  Search,
+  Clock,
+  ArrowRight,
+  User,
+  PlusCircle,
+  ShieldCheck,
+  AlertTriangle,
+  XCircle,
+  CheckCircle2,
+  Hourglass,
+} from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAppContext } from '../app/AppContext';
-import { formatCurrency, formatAddress, getRiskZone, isOpenLoanStatus } from '../utils/finance';
-import { LoanStatusBadge } from '../components/common/LoanStatusBadge';
-import { RiskBadge } from '../components/common/RiskBadge';
+import {
+  calculateRepaymentAmount,
+  formatAddress,
+  formatCurrency,
+  getDaysRemaining,
+  isOpenLoanStatus,
+} from '../utils/finance';
 import { EmptyState } from '../components/common/CommonStates';
-import { motion } from 'framer-motion';
-import { 
-  Card, 
-  Table, 
-  Tabs, 
-  Input, 
-  Button, 
-  Typography, 
-  Tag, 
-  Select, 
-  Space, 
-  Divider, 
-  Badge, 
-  Progress, 
-  message, 
-  Row, 
-  Col 
-} from 'antd';
-import { 
-  Search, 
-  ArrowRight, 
-  Copy, 
-  Check, 
-  RefreshCw, 
-  Wallet, 
-  Coins, 
-  ShieldCheck, 
-  Briefcase, 
-  Info
-} from 'lucide-react';
+import { HealthStatus } from '../components/common/HealthStatus';
+import { ManageLoanDrawer } from '../components/common/ManageLoanDrawer';
+import { CreateOfferWizardDrawer } from '../components/common/CreateOfferWizardDrawer';
+import type { Loan } from '../types';
 
 const { Title, Paragraph, Text } = Typography;
 
-export const MyLoansPage: React.FC = () => {
-  const { wallet, loans, oraclePrices, refreshData } = useAppContext();
-  const navigate = useNavigate();
-  
-  const [search, setSearch] = useState('');
-  const [riskFilter, setRiskFilter] = useState<'ALL' | 'SAFE' | 'WARNING' | 'LIQUIDATION_PLANNING'>('ALL');
-  const [copiedId, setCopiedId] = useState<string | null>(null);
+// ── Category definitions ────────────────────────────────────────────────
 
+interface LoanCategory {
+  key: string;
+  label: string;
+  icon: React.ReactNode;
+  color: string;
+  badgeColor: string;
+  match: (loan: Loan) => boolean;
+  /** sort order – lower number renders first */
+  order: number;
+}
+
+const BORROW_CATEGORIES: LoanCategory[] = [
+  {
+    key: 'pending',
+    label: 'Pending Collateral',
+    icon: <Hourglass size={16} />,
+    color: '#faad14',
+    badgeColor: 'orange',
+    match: (l) => l.status === 'PendingCollateral',
+    order: 0,
+  },
+  {
+    key: 'active',
+    label: 'Active Loans',
+    icon: <ShieldCheck size={16} />,
+    color: '#1677ff',
+    badgeColor: 'blue',
+    match: (l) => l.status === 'Active' && l.healthFactor >= 1.2,
+    order: 1,
+  },
+  {
+    key: 'at_risk',
+    label: 'At Risk',
+    icon: <AlertTriangle size={16} />,
+    color: '#fa8c16',
+    badgeColor: 'orange',
+    match: (l) => (l.status === 'Active' || l.status === 'Warning' || l.status === 'LiquidationPlanning') && l.healthFactor < 1.2,
+    order: 2,
+  },
+  {
+    key: 'completed',
+    label: 'Completed',
+    icon: <CheckCircle2 size={16} />,
+    color: '#52c41a',
+    badgeColor: 'green',
+    match: (l) => l.status === 'Repaid' || l.status === 'Closed',
+    order: 3,
+  },
+  {
+    key: 'liquidated',
+    label: 'Liquidated / Defaulted',
+    icon: <XCircle size={16} />,
+    color: '#ff4d4f',
+    badgeColor: 'red',
+    match: (l) => l.status === 'Liquidated' || l.status === 'Defaulted' || l.status === 'Expired',
+    order: 4,
+  },
+];
+
+const LEND_LOAN_CATEGORIES: LoanCategory[] = [
+  {
+    key: 'active_lent',
+    label: 'Active Lent Loans',
+    icon: <ShieldCheck size={16} />,
+    color: '#1677ff',
+    badgeColor: 'blue',
+    match: (l) => isOpenLoanStatus(l.status),
+    order: 0,
+  },
+  {
+    key: 'completed_lent',
+    label: 'Completed',
+    icon: <CheckCircle2 size={16} />,
+    color: '#52c41a',
+    badgeColor: 'green',
+    match: (l) => l.status === 'Repaid' || l.status === 'Closed',
+    order: 1,
+  },
+  {
+    key: 'liquidated_lent',
+    label: 'Liquidated / Defaulted',
+    icon: <XCircle size={16} />,
+    color: '#ff4d4f',
+    badgeColor: 'red',
+    match: (l) => l.status === 'Liquidated' || l.status === 'Defaulted' || l.status === 'Expired',
+    order: 2,
+  },
+];
+
+// ── Helpers ─────────────────────────────────────────────────────────────
+
+/** Sort loans newest‑first based on borrowTime. */
+const sortNewestFirst = (a: Loan, b: Loan): number =>
+  new Date(b.borrowTime).getTime() - new Date(a.borrowTime).getTime();
+
+/**
+ * Group an array of loans into categories. Each loan is placed in the
+ * first matching category. Only categories with at least 1 loan are returned.
+ */
+function groupLoans(
+  loans: Loan[],
+  categories: LoanCategory[],
+): { category: LoanCategory; loans: Loan[] }[] {
+  const buckets = new Map<string, Loan[]>();
+  for (const cat of categories) buckets.set(cat.key, []);
+
+  for (const loan of loans) {
+    for (const cat of categories) {
+      if (cat.match(loan)) {
+        buckets.get(cat.key)!.push(loan);
+        break;
+      }
+    }
+  }
+
+  return categories
+    .filter((cat) => (buckets.get(cat.key)?.length ?? 0) > 0)
+    .map((cat) => ({
+      category: cat,
+      loans: buckets.get(cat.key)!.sort(sortNewestFirst),
+    }));
+}
+
+// ── Component ───────────────────────────────────────────────────────────
+
+export const MyLoansPage: React.FC = () => {
+  const { wallet, loans, loanOffers, oraclePrices, refreshData } = useAppContext();
+  const navigate = useNavigate();
+
+  const [activeMainTab, setActiveMainTab] = useState<'borrowing' | 'lending'>('borrowing');
+  const [lendingSubTab, setLendingSubTab] = useState<'all' | 'borrowed' | 'pending'>('all');
+  const [search, setSearch] = useState('');
+
+  const [selectedLoan, setSelectedLoan] = useState<Loan | null>(null);
+  const [manageDrawerOpen, setManageDrawerOpen] = useState(false);
+  const [createOfferOpen, setCreateOfferOpen] = useState(false);
+
+  const userAddress = wallet.address || '';
   const xlmPrice = oraclePrices.find((p) => p.asset === 'XLM')?.price || 0.125;
 
-  // 1. Segment loan data
-  const borrowedActive = loans.filter(
-    (l) => l.borrower === wallet.address && isOpenLoanStatus(l.status)
-  );
-  const lentActive = loans.filter(
-    (l) => l.lender === wallet.address && isOpenLoanStatus(l.status)
-  );
-  const closedLoans = loans.filter(
-    (l) => (l.borrower === wallet.address || l.lender === wallet.address) && (l.status === 'Repaid' || l.status === 'Closed')
-  );
-  const liquidatedLoans = loans.filter(
-    (l) => (l.borrower === wallet.address || l.lender === wallet.address) && l.status === 'Liquidated'
+  // ── Filtered source data ──────────────────────────────────────────────
+
+  const myBorrowedLoans = useMemo(
+    () =>
+      loans
+        .filter((l) => l.borrower === userAddress)
+        .filter(
+          (l) =>
+            l.id.toLowerCase().includes(search.toLowerCase()) ||
+            l.lender.toLowerCase().includes(search.toLowerCase()),
+        ),
+    [loans, userAddress, search],
   );
 
-  // Statistics Calculations
-  const totalBorrowedDebt = borrowedActive.reduce((sum, l) => sum + l.outstandingDebt, 0);
-  const totalLentPrincipal = lentActive.reduce((sum, l) => sum + l.amount, 0);
-  
-  // Total collateral locked under user active agreements
-  const totalLockedCollateral = loans
-    .filter((l) => (l.borrower === wallet.address || l.lender === wallet.address) && isOpenLoanStatus(l.status))
-    .reduce((sum, l) => sum + (l.collateralAmount * xlmPrice), 0);
+  const myLentLoans = useMemo(
+    () =>
+      loans
+        .filter((l) => l.lender === userAddress)
+        .filter(
+          (l) =>
+            l.id.toLowerCase().includes(search.toLowerCase()) ||
+            l.borrower.toLowerCase().includes(search.toLowerCase()),
+        ),
+    [loans, userAddress, search],
+  );
 
-  const totalSettledCount = closedLoans.length;
+  const myPendingOffers = useMemo(
+    () =>
+      loanOffers
+        .filter((o) => o.lender === userAddress && o.status === 'Active')
+        .filter((o) => o.id.toLowerCase().includes(search.toLowerCase()))
+        .sort((a, b) => new Date(b.createTime).getTime() - new Date(a.createTime).getTime()),
+    [loanOffers, userAddress, search],
+  );
 
-  const handleCopyText = (text: string, idStr: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedId(idStr);
-    setTimeout(() => setCopiedId(null), 1500);
-    message.success('Copied to clipboard');
+  // ── Grouped buckets ──────────────────────────────────────────────────
+
+  const borrowGroups = useMemo(() => groupLoans(myBorrowedLoans, BORROW_CATEGORIES), [myBorrowedLoans]);
+  const lendGroups = useMemo(() => groupLoans(myLentLoans, LEND_LOAN_CATEGORIES), [myLentLoans]);
+
+  const handleManageLoan = (loan: Loan) => {
+    setSelectedLoan(loan);
+    setManageDrawerOpen(true);
   };
 
-  const filterBySearch = (list: typeof loans) => {
-    return list.filter(
-      (l) =>
-        l.id.toLowerCase().includes(search.toLowerCase()) ||
-        l.borrower.toLowerCase().includes(search.toLowerCase()) ||
-        l.lender.toLowerCase().includes(search.toLowerCase())
-    ).filter((l) => riskFilter === 'ALL' || (isOpenLoanStatus(l.status) && getRiskZone(l.healthFactor) === riskFilter));
-  };
+  // ── Table column builders ─────────────────────────────────────────────
 
-  // 2. Table Column Configurations
-  const columns = [
+  const borrowedColumns = [
     {
-      title: 'Contract / Loan ID',
-      dataIndex: 'id',
-      key: 'id',
-      render: (text: string) => (
-        <Space size={4}>
-          <Text strong style={{ fontFamily: 'var(--font-mono)', letterSpacing: '-0.02em' }}>{formatAddress(text)}</Text>
-          <Button
-            type="text"
-            size="small"
-            icon={copiedId === text ? <Check size={12} style={{ color: 'var(--success-color)' }} /> : <Copy size={12} />}
-            onClick={() => handleCopyText(text, text)}
-            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-          />
-        </Space>
-      ),
-    },
-    {
-      title: 'Principal Debt',
-      dataIndex: 'amount',
-      key: 'amount',
-      render: (amount: number, record: any) => (
+      title: 'Borrow Principal & Debt',
+      key: 'principal',
+      render: (_: unknown, record: Loan) => (
         <div>
-          <Text strong style={{ fontSize: '14px' }}>{formatCurrency(amount, record.asset)}</Text>
-          <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>USDC Escrow Locked</div>
+          <Text strong style={{ fontSize: 15, color: 'var(--text-main)' }}>
+            {formatCurrency(record.amount, record.asset)}
+          </Text>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            Debt: <Text strong style={{ color: 'var(--primary-color)' }}>{formatCurrency(record.outstandingDebt, record.asset)}</Text>
+          </div>
         </div>
       ),
     },
     {
-      title: 'Counterparty Role',
-      key: 'counterparty',
-      render: (_: any, record: any) => {
-        const isBorrower = record.borrower === wallet.address;
-        const counterpart = isBorrower ? record.lender : record.borrower;
-        const role = isBorrower ? 'LENDER' : 'BORROWER';
+      title: 'Collateral Locked',
+      key: 'collateral',
+      render: (_: unknown, record: Loan) => (
+        <div>
+          <Text strong>{record.collateralAmount.toLocaleString()} {record.collateralAsset}</Text>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+            ${(record.collateralAmount * xlmPrice).toFixed(2)} USD
+          </div>
+        </div>
+      ),
+    },
+    {
+      title: 'Fixed APR & Due Date',
+      key: 'aprDuration',
+      render: (_: unknown, record: Loan) => {
+        const daysLeft = getDaysRemaining(record.dueDate);
         return (
           <div>
-            <Space size={4} align="center">
-              <Text style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{formatAddress(counterpart)}</Text>
-              <Button
-                type="text"
-                size="small"
-                icon={copiedId === counterpart ? <Check size={12} style={{ color: 'var(--success-color)' }} /> : <Copy size={12} />}
-                onClick={() => handleCopyText(counterpart, counterpart)}
-                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '16px', height: '16px' }}
-              />
-            </Space>
-            <div style={{ marginTop: '2px' }}>
-              <Tag color={role === 'LENDER' ? 'green' : 'blue'} style={{ fontSize: '10px', border: 'none', margin: 0, fontWeight: 600 }}>
-                {role === 'LENDER' ? 'Credited from Lender' : 'Debt from Borrower'}
-              </Tag>
+            <Tag color="purple" style={{ borderRadius: 4, fontWeight: 700, fontSize: 12 }}>
+              {record.apr}% APR
+            </Tag>
+            <div style={{ fontSize: 12, marginTop: 4, color: daysLeft <= 3 ? 'var(--warning-color)' : 'var(--text-muted)' }}>
+              {daysLeft > 0 ? `${daysLeft} Days left (${record.dueDate})` : 'Overdue'}
             </div>
           </div>
         );
       },
     },
     {
-      title: 'Fixed Terms',
-      key: 'aprDuration',
-      render: (_: any, record: any) => (
-        <Space direction="vertical" size={0}>
-          <Text strong style={{ color: 'var(--primary-color)' }}>{record.apr}% APR</Text>
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{record.duration} Days term</span>
-        </Space>
+      title: 'Health Status',
+      key: 'health',
+      render: (_: unknown, record: Loan) => (
+        <HealthStatus healthFactor={record.healthFactor} status={record.status} showExact />
       ),
     },
     {
-      title: 'Locked Collateral',
-      key: 'collateral',
-      render: (_: any, record: any) => (
-        <div>
-          <Text strong style={{ fontSize: '13px' }}>{record.collateralAmount.toLocaleString()} {record.collateralAsset}</Text>
-          <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-            Valued: ${ (record.collateralAmount * xlmPrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) } USD
-          </div>
-        </div>
-      ),
-    },
-    {
-      title: 'Risk Rating',
-      key: 'risk',
-      render: (_: any, record: any) => {
-        if (!isOpenLoanStatus(record.status)) return <Text type="secondary">—</Text>;
-        const hf = record.healthFactor;
-        
-        let strokeColor = "var(--success-color)";
-        if (hf < 1.2) {
-          strokeColor = "var(--danger-color)";
-        } else if (hf < 1.4) {
-          strokeColor = "var(--warning-color)";
-        }
-
-        const percentVal = Math.min((hf / 3) * 100, 100);
-
-        return (
-          <div style={{ minWidth: '110px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
-              <Text strong style={{ fontSize: '13px' }}>{hf.toFixed(2)}</Text>
-              <RiskBadge healthFactor={hf} />
-            </div>
-            <Progress 
-              percent={percentVal} 
-              showInfo={false} 
-              strokeColor={strokeColor} 
-              size="small"
-              style={{ margin: 0 }}
-            />
-          </div>
-        );
-      },
-    },
-    {
-      title: 'Status',
+      title: 'Loan Status',
       dataIndex: 'status',
       key: 'status',
-      render: (status: any) => <LoanStatusBadge status={status} />,
+      render: (status: string) => {
+        let color = 'blue';
+        if (status === 'Repaid' || status === 'Closed') color = 'green';
+        if (status === 'Liquidated') color = 'red';
+        if (status === 'PendingCollateral') color = 'orange';
+        if (status === 'Warning' || status === 'LiquidationPlanning') color = 'volcano';
+        return (
+          <Tag color={color} style={{ borderRadius: 4, fontWeight: 600 }}>
+            {status}
+          </Tag>
+        );
+      },
     },
     {
-      title: 'Action Ledger',
+      title: 'Action',
       key: 'action',
-      render: (_: any, record: any) => (
+      align: 'right' as const,
+      render: (_: unknown, record: Loan) => (
         <Button
           type="primary"
-          ghost
-          size="small"
-          onClick={() => navigate(`/app/loans/${record.id}`)}
-          style={{ display: 'flex', alignItems: 'center', gap: '4px', borderRadius: '6px' }}
+          onClick={() => handleManageLoan(record)}
+          style={{ borderRadius: 8, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}
         >
-          Details <ArrowRight size={12} />
+          <span>Manage Loan</span>
+          <ArrowRight size={14} />
         </Button>
       ),
     },
   ];
 
-  const renderTabPane = (dataList: typeof loans, typeText: string) => {
-    const list = filterBySearch(dataList);
-    if (list.length === 0) {
-      return (
-        <EmptyState
-          title={`No ${typeText} Contracts`}
-          description="Your wallet history does not contain any active or past contracts in this category."
-        />
-      );
-    }
-    return (
-      <Table
-        columns={columns}
-        dataSource={list.map((l) => ({ ...l, key: l.id }))}
-        pagination={{ pageSize: 5 }}
-        style={{ overflowX: 'auto' }}
-      />
-    );
-  };
-
-  const tabItems = [
+  const lendingLoanColumns = [
     {
-      key: 'borrowed',
-      label: (
-        <Badge count={filterBySearch(borrowedActive).length} offset={[10, -2]} size="small" color="var(--primary-color)">
-          <span style={{ fontSize: '14px', fontWeight: 600, paddingRight: '8px' }}>Borrowed Active</span>
-        </Badge>
+      title: 'Lending Principal',
+      key: 'amount',
+      render: (_: unknown, record: Loan) => (
+        <Text strong style={{ fontSize: 15, color: 'var(--text-main)' }}>
+          {formatCurrency(record.amount, record.asset)}
+        </Text>
       ),
-      children: <div style={{ marginTop: '8px' }}>{renderTabPane(borrowedActive, 'Borrowed')}</div>,
     },
     {
-      key: 'lent',
-      label: (
-        <Badge count={filterBySearch(lentActive).length} offset={[10, -2]} size="small" color="var(--secondary-color)">
-          <span style={{ fontSize: '14px', fontWeight: 600, paddingRight: '8px' }}>Lent Active</span>
-        </Badge>
+      title: 'Borrower',
+      key: 'borrower',
+      render: (_: unknown, record: Loan) => (
+        <Tag color="cyan" icon={<User size={12} style={{ marginRight: 4 }} />} style={{ borderRadius: 4, fontWeight: 600 }}>
+          {formatAddress(record.borrower)}
+        </Tag>
       ),
-      children: <div style={{ marginTop: '8px' }}>{renderTabPane(lentActive, 'Lent')}</div>,
     },
     {
-      key: 'closed',
-      label: (
-        <Badge count={filterBySearch(closedLoans).length} offset={[10, -2]} size="small" color="var(--success-color)">
-          <span style={{ fontSize: '14px', fontWeight: 600, paddingRight: '8px' }}>Settled / Repaid</span>
-        </Badge>
-      ),
-      children: <div style={{ marginTop: '8px' }}>{renderTabPane(closedLoans, 'Settled')}</div>,
+      title: 'APR & Yield',
+      key: 'aprYield',
+      render: (_: unknown, record: Loan) => {
+        const expectedTotal = calculateRepaymentAmount(record.amount, record.apr, record.duration);
+        const expectedProfit = expectedTotal - record.amount;
+        return (
+          <div>
+            <Tag color="purple" style={{ borderRadius: 4, fontWeight: 700, fontSize: 12 }}>
+              {record.apr}% APR
+            </Tag>
+            <div style={{ fontSize: 11, marginTop: 4, color: 'var(--success-color)', fontWeight: 600 }}>
+              +{formatCurrency(expectedProfit, record.asset)} Interest
+            </div>
+          </div>
+        );
+      },
     },
     {
-      key: 'liquidated',
-      label: (
-        <Badge count={filterBySearch(liquidatedLoans).length} offset={[10, -2]} size="small" color="var(--danger-color)">
-          <span style={{ fontSize: '14px', fontWeight: 600, paddingRight: '8px' }}>Liquidated</span>
-        </Badge>
+      title: 'Due Date',
+      key: 'duration',
+      render: (_: unknown, record: Loan) => (
+        <Space size={4}>
+          <Clock size={14} style={{ color: 'var(--text-muted)' }} />
+          <Text strong>
+            {record.dueDate ? `Due: ${record.dueDate}` : `${record.duration} Days`}
+          </Text>
+        </Space>
       ),
-      children: <div style={{ marginTop: '8px' }}>{renderTabPane(liquidatedLoans, 'Liquidated')}</div>,
+    },
+    {
+      title: 'Status',
+      dataIndex: 'status',
+      key: 'statusTag',
+      render: (status: string) => {
+        let color = 'blue';
+        if (status === 'Repaid' || status === 'Closed') color = 'green';
+        if (status === 'Liquidated') color = 'red';
+        return (
+          <Tag color={color} style={{ borderRadius: 4, fontWeight: 600 }}>
+            {status}
+          </Tag>
+        );
+      },
+    },
+    {
+      title: 'Action',
+      key: 'action',
+      align: 'right' as const,
+      render: (_: unknown, record: Loan) => (
+        <Button
+          type="primary"
+          onClick={() => handleManageLoan(record)}
+          style={{ borderRadius: 8, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+        >
+          <span>Manage Position</span>
+          <ArrowRight size={14} />
+        </Button>
+      ),
     },
   ];
 
-  return (
-    <motion.div 
-      initial={{ opacity: 0, y: 15 }} 
-      animate={{ opacity: 1, y: 0 }} 
-      transition={{ duration: 0.5, ease: 'easeOut' }}
-      style={{ display: 'flex', flexDirection: 'column', gap: '28px', paddingBottom: '40px' }}
-    >
-      
-      {/* 1. Header Banner */}
-      <div 
-        style={{ 
-          background: 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%)', 
-          borderRadius: 'var(--radius-xl)', 
-          padding: '32px',
-          boxShadow: 'var(--shadow-premium)',
-          position: 'relative',
-          overflow: 'hidden',
-          border: '1px solid rgba(255, 255, 255, 0.08)'
-        }}
-      >
-        <div style={{ position: 'absolute', top: '-20%', right: '-10%', width: '400px', height: '400px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(99, 102, 241, 0.12) 0%, transparent 70%)', pointerEvents: 'none' }} />
-        <div style={{ position: 'absolute', bottom: '-30%', left: '10%', width: '300px', height: '300px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(6, 182, 212, 0.08) 0%, transparent 70%)', pointerEvents: 'none' }} />
+  // ── Pending offers table (for Lending tab) ────────────────────────────
 
-        <Space direction="vertical" size={4}>
-          <span style={{ color: 'var(--secondary-color)', fontWeight: 700, fontSize: '13px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
-            On-Chain Ledger
-          </span>
-          <Title level={1} style={{ margin: 0, color: '#ffffff', fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: '32px', letterSpacing: '-0.03em' }}>
-            My Loans Ledger
-          </Title>
-          <Paragraph style={{ margin: '8px 0 0 0', color: 'rgba(255, 255, 255, 0.7)', fontSize: '15px', maxWidth: '750px', lineHeight: 1.5 }}>
-            Verify, track, and manage your custom borrowing, lending, and settled escrow positions on the Stellar Soroban network.
-          </Paragraph>
-        </Space>
-      </div>
-
-      {/* 2. Stats cards row */}
-      <Row gutter={[16, 16]}>
-        
-        {/* Card 1 */}
-        <Col xs={24} sm={12} lg={6}>
-          <motion.div whileHover={{ y: -3 }} transition={{ type: 'spring', stiffness: 300, damping: 20 }}>
-            <Card style={{ borderRadius: 'var(--radius-md)', borderLeft: '4px solid var(--primary-color)' }} styles={{ body: { padding: '20px' } }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div>
-                  <Text type="secondary" style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>Active Borrows</Text>
-                  <Title level={2} style={{ margin: '4px 0 0 0', fontFamily: 'var(--font-heading)', fontWeight: 800 }}>
-                    {formatCurrency(totalBorrowedDebt, 'USDC')}
-                  </Title>
-                </div>
-                <div style={{ padding: '8px', borderRadius: '8px', background: 'rgba(79, 70, 229, 0.08)', color: 'var(--primary-color)' }}>
-                  <Wallet size={18} />
-                </div>
-              </div>
-              <div style={{ marginTop: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>
-                Your total outstanding liabilities
-              </div>
-            </Card>
-          </motion.div>
-        </Col>
-
-        {/* Card 2 */}
-        <Col xs={24} sm={12} lg={6}>
-          <motion.div whileHover={{ y: -3 }} transition={{ type: 'spring', stiffness: 300, damping: 20 }}>
-            <Card style={{ borderRadius: 'var(--radius-md)', borderLeft: '4px solid var(--secondary-color)' }} styles={{ body: { padding: '20px' } }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div>
-                  <Text type="secondary" style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>Active Lends</Text>
-                  <Title level={2} style={{ margin: '4px 0 0 0', fontFamily: 'var(--font-heading)', fontWeight: 800 }}>
-                    {formatCurrency(totalLentPrincipal, 'USDC')}
-                  </Title>
-                </div>
-                <div style={{ padding: '8px', borderRadius: '8px', background: 'rgba(6, 182, 212, 0.08)', color: 'var(--secondary-color)' }}>
-                  <Coins size={18} />
-                </div>
-              </div>
-              <div style={{ marginTop: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>
-                Liquidity active in contract agreements
-              </div>
-            </Card>
-          </motion.div>
-        </Col>
-
-        {/* Card 3 */}
-        <Col xs={24} sm={12} lg={6}>
-          <motion.div whileHover={{ y: -3 }} transition={{ type: 'spring', stiffness: 300, damping: 20 }}>
-            <Card style={{ borderRadius: 'var(--radius-md)', borderLeft: '4px solid var(--success-color)' }} styles={{ body: { padding: '20px' } }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div>
-                  <Text type="secondary" style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>Locked Collateral</Text>
-                  <Title level={2} style={{ margin: '4px 0 0 0', fontFamily: 'var(--font-heading)', fontWeight: 800, color: 'var(--success-color)' }}>
-                    {formatCurrency(totalLockedCollateral, 'USDC')}
-                  </Title>
-                </div>
-                <div style={{ padding: '8px', borderRadius: '8px', background: 'rgba(16, 185, 129, 0.08)', color: 'var(--success-color)' }}>
-                  <ShieldCheck size={18} />
-                </div>
-              </div>
-              <div style={{ marginTop: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>
-                USD value of locked escrow XLM
-              </div>
-            </Card>
-          </motion.div>
-        </Col>
-
-        {/* Card 4 */}
-        <Col xs={24} sm={12} lg={6}>
-          <motion.div whileHover={{ y: -3 }} transition={{ type: 'spring', stiffness: 300, damping: 20 }}>
-            <Card style={{ borderRadius: 'var(--radius-md)', borderLeft: '4px solid var(--warning-color)' }} styles={{ body: { padding: '20px' } }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div>
-                  <Text type="secondary" style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>Settled Agreements</Text>
-                  <Title level={2} style={{ margin: '4px 0 0 0', fontFamily: 'var(--font-heading)', fontWeight: 800 }}>
-                    {totalSettledCount}
-                  </Title>
-                </div>
-                <div style={{ padding: '8px', borderRadius: '8px', background: 'rgba(245, 158, 11, 0.08)', color: 'var(--warning-color)' }}>
-                  <Briefcase size={18} />
-                </div>
-              </div>
-              <div style={{ marginTop: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>
-                Fully repaid and closed contracts
-              </div>
-            </Card>
-          </motion.div>
-        </Col>
-
-      </Row>
-
-      {/* 3. Search and Ledger Table */}
-      <Card 
-        styles={{ body: { padding: '24px' } }}
-        style={{ 
-          borderRadius: 'var(--radius-lg)', 
-          boxShadow: 'var(--shadow-sm)',
-          border: '1px solid var(--border-color)'
-        }}
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          
-          {/* Filters Toolbar */}
-          <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
-            <Input
-              prefix={<Search size={15} style={{ color: 'var(--text-muted)' }} />}
-              placeholder="Search Contract ID or counterparty address..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              allowClear
-              style={{ width: '100%', maxWidth: '380px', borderRadius: 'var(--radius-sm)' }}
-            />
-            
-            <Select
-              value={riskFilter}
-              onChange={setRiskFilter}
-              style={{ width: '180px' }}
-              options={[
-                { value: 'ALL', label: 'All Risk Zones' },
-                { value: 'SAFE', label: 'Safe Zone' },
-                { value: 'WARNING', label: 'Warning Zone' },
-                { value: 'LIQUIDATION_PLANNING', label: 'Liquidation Planning' },
-              ]}
-            />
-
-            <Button 
-              type="text" 
-              icon={<RefreshCw size={14} />} 
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', fontSize: '12px', color: 'var(--text-muted)', marginLeft: 'auto' }}
-              onClick={async () => {
-                try {
-                  await refreshData();
-                  message.success('Ledger records updated');
-                } catch (error) {
-                  message.error(error instanceof Error ? error.message : 'Unable to sync ledger records');
-                }
-              }}
-            >
-              Sync Ledger
-            </Button>
+  const pendingOfferColumns = [
+    {
+      title: 'Offer Amount',
+      key: 'amount',
+      render: (_: unknown, record: typeof myPendingOffers[0]) => (
+        <Text strong style={{ fontSize: 15, color: 'var(--text-main)' }}>
+          {formatCurrency(record.amount, record.asset)}
+        </Text>
+      ),
+    },
+    {
+      title: 'APR & Expected Yield',
+      key: 'aprYield',
+      render: (_: unknown, record: typeof myPendingOffers[0]) => {
+        const expectedTotal = calculateRepaymentAmount(record.amount, record.apr, record.duration);
+        const expectedProfit = expectedTotal - record.amount;
+        return (
+          <div>
+            <Tag color="purple" style={{ borderRadius: 4, fontWeight: 700, fontSize: 12 }}>
+              {record.apr}% APR
+            </Tag>
+            <div style={{ fontSize: 11, marginTop: 4, color: 'var(--success-color)', fontWeight: 600 }}>
+              +{formatCurrency(expectedProfit, record.asset)} Interest
+            </div>
           </div>
+        );
+      },
+    },
+    {
+      title: 'Duration',
+      key: 'duration',
+      render: (_: unknown, record: typeof myPendingOffers[0]) => (
+        <Space size={4}>
+          <Clock size={14} style={{ color: 'var(--text-muted)' }} />
+          <Text strong>{record.duration} Days</Text>
+        </Space>
+      ),
+    },
+    {
+      title: 'Status',
+      key: 'status',
+      render: () => (
+        <Tag color="orange" style={{ borderRadius: 4, fontWeight: 600 }}>
+          Awaiting Borrower
+        </Tag>
+      ),
+    },
+    {
+      title: 'Action',
+      key: 'action',
+      align: 'right' as const,
+      render: () => (
+        <Button
+          type="default"
+          onClick={() => navigate('/app/marketplace')}
+          style={{ borderRadius: 8, fontWeight: 600 }}
+        >
+          View Marketplace
+        </Button>
+      ),
+    },
+  ];
 
-          <Divider style={{ margin: 0 }} />
+  // ── Category section header styles ────────────────────────────────────
 
-          <Tabs defaultActiveKey="borrowed" items={tabItems} />
-
-        </div>
-      </Card>
-      
-      {/* 4. Isolated contract specs block */}
-      <div 
-        style={{ 
-          background: 'rgba(79, 70, 229, 0.02)', 
-          border: '1px solid var(--border-color)', 
-          borderRadius: 'var(--radius-lg)', 
-          padding: '20px 24px',
+  const renderCategoryHeader = (cat: LoanCategory, count: number) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '2px 0' }}>
+      <div
+        style={{
+          width: 32,
+          height: 32,
+          borderRadius: 10,
+          backgroundColor: `${cat.color}15`,
           display: 'flex',
-          gap: '16px',
-          alignItems: 'flex-start'
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: cat.color,
         }}
       >
-        <Info size={20} style={{ color: 'var(--primary-color)', flexShrink: 0, marginTop: '2px' }} />
+        {cat.icon}
+      </div>
+      <Text strong style={{ fontSize: 15 }}>{cat.label}</Text>
+      <Badge
+        count={count}
+        style={{
+          backgroundColor: cat.color,
+          fontWeight: 700,
+          fontSize: 12,
+          boxShadow: 'none',
+        }}
+      />
+    </div>
+  );
+
+  // ── Render ────────────────────────────────────────────────────────────
+
+  const mainTabItems = [
+    {
+      key: 'borrowing',
+      label: `My Borrowing (${myBorrowedLoans.length})`,
+    },
+    {
+      key: 'lending',
+      label: `My Lending (${myLentLoans.length + myPendingOffers.length})`,
+    },
+  ];
+
+  const hasBorrowData = borrowGroups.length > 0;
+  const hasLendData = lendGroups.length > 0 || (lendingSubTab !== 'borrowed' && myPendingOffers.length > 0);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      {/* Page Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
         <div>
-          <Text strong style={{ fontSize: '14px', color: 'var(--text-main)', display: 'block', marginBottom: '4px' }}>
-            Smart contract state verification
-          </Text>
-          <span style={{ fontSize: '13px', color: 'var(--text-muted)', lineHeight: '1.5' }}>
-            All entries listed in this ledger sync with individual isolated escrow contracts deployed on the Stellar network. 
-            When you repay debt or add collateral, consensus is reached instantly and changes are irreversibly written to the Stellar ledger. 
-            You can verify each transaction receipt details by expanding the contract specifications page.
-          </span>
+          <Title level={2} style={{ margin: 0, fontWeight: 800 }}>
+            My Loans
+          </Title>
+          <Paragraph type="secondary" style={{ margin: '4px 0 0 0', fontSize: 14 }}>
+            Monitor and manage your active borrowing and lending positions in real time.
+          </Paragraph>
         </div>
+
+        <Button
+          type="primary"
+          icon={<PlusCircle size={16} />}
+          onClick={() => setCreateOfferOpen(true)}
+          style={{ borderRadius: 8, fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+        >
+          Create Offer
+        </Button>
       </div>
 
-    </motion.div>
+      {/* Main Role Tabs */}
+      <Tabs
+        activeKey={activeMainTab}
+        onChange={(k) => setActiveMainTab(k as 'borrowing' | 'lending')}
+        items={mainTabItems}
+        size="large"
+      />
+
+      {/* Search & Filter Bar */}
+      <div
+        style={{
+          display: 'flex',
+          gap: 12,
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          backgroundColor: '#ffffff',
+          padding: 16,
+          borderRadius: 12,
+          border: '1px solid var(--border-color, #e2e8f0)',
+        }}
+      >
+        <Input
+          placeholder="Search loan ID or wallet address..."
+          prefix={<Search size={16} style={{ color: 'var(--text-muted)' }} />}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ flex: 1, minWidth: 200, borderRadius: 8 }}
+          allowClear
+        />
+
+        {activeMainTab === 'lending' && (
+          <Select
+            value={lendingSubTab}
+            onChange={(val) => setLendingSubTab(val as 'all' | 'borrowed' | 'pending')}
+            style={{ width: 220 }}
+            options={[
+              { value: 'all', label: 'All Lending Positions' },
+              { value: 'borrowed', label: 'Has Borrower (Active Loan)' },
+              { value: 'pending', label: 'Awaiting Borrower (Open Offer)' },
+            ]}
+          />
+        )}
+      </div>
+
+      {/* ── BORROWING TAB ──────────────────────────────────────────────── */}
+      {activeMainTab === 'borrowing' && (
+        !hasBorrowData ? (
+          <EmptyState
+            title="No borrowing loans found"
+            description="You do not have any active loans matching your search filters."
+            action={
+              <Button type="primary" onClick={() => navigate('/app/marketplace')}>
+                Go to Marketplace
+              </Button>
+            }
+          />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {borrowGroups.map(({ category, loans: groupLoans }) => (
+              <Card
+                key={category.key}
+                className="card-premium"
+                styles={{ body: { padding: 0 } }}
+                style={{
+                  borderTop: `3px solid ${category.color}`,
+                  overflow: 'hidden',
+                }}
+              >
+                <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-color, #e2e8f0)' }}>
+                  {renderCategoryHeader(category, groupLoans.length)}
+                </div>
+                <Table
+                  columns={borrowedColumns}
+                  dataSource={groupLoans}
+                  rowKey="id"
+                  pagination={groupLoans.length > 5 ? { pageSize: 5, size: 'small' } : false}
+                />
+              </Card>
+            ))}
+          </div>
+        )
+      )}
+
+      {/* ── LENDING TAB ────────────────────────────────────────────────── */}
+      {activeMainTab === 'lending' && (
+        !hasLendData ? (
+          <EmptyState
+            title="No lending positions found"
+            description="You do not have any lending offers or active loans where you are the lender."
+            action={
+              <Button type="primary" icon={<PlusCircle size={16} />} onClick={() => setCreateOfferOpen(true)}>
+                Create Lending Offer
+              </Button>
+            }
+          />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {/* Grouped Lent Loan Categories */}
+            {lendingSubTab !== 'pending' && lendGroups.map(({ category, loans: groupLoans }) => (
+              <Card
+                key={category.key}
+                className="card-premium"
+                styles={{ body: { padding: 0 } }}
+                style={{
+                  borderTop: `3px solid ${category.color}`,
+                  overflow: 'hidden',
+                }}
+              >
+                <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-color, #e2e8f0)' }}>
+                  {renderCategoryHeader(category, groupLoans.length)}
+                </div>
+                <Table
+                  columns={lendingLoanColumns}
+                  dataSource={groupLoans}
+                  rowKey="id"
+                  pagination={groupLoans.length > 5 ? { pageSize: 5, size: 'small' } : false}
+                />
+              </Card>
+            ))}
+
+            {/* Pending Offers Section */}
+            {lendingSubTab !== 'borrowed' && myPendingOffers.length > 0 && (
+              <Card
+                className="card-premium"
+                styles={{ body: { padding: 0 } }}
+                style={{
+                  borderTop: '3px solid #faad14',
+                  overflow: 'hidden',
+                }}
+              >
+                <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-color, #e2e8f0)' }}>
+                  {renderCategoryHeader(
+                    {
+                      key: 'pending_offers',
+                      label: 'Open Offers (Awaiting Borrower)',
+                      icon: <Hourglass size={16} />,
+                      color: '#faad14',
+                      badgeColor: 'orange',
+                      match: () => true,
+                      order: 99,
+                    },
+                    myPendingOffers.length,
+                  )}
+                </div>
+                <Table
+                  columns={pendingOfferColumns}
+                  dataSource={myPendingOffers}
+                  rowKey="id"
+                  pagination={myPendingOffers.length > 5 ? { pageSize: 5, size: 'small' } : false}
+                />
+              </Card>
+            )}
+          </div>
+        )
+      )}
+
+      {/* Integrated Manage Loan Drawer */}
+      <ManageLoanDrawer
+        open={manageDrawerOpen}
+        loan={selectedLoan}
+        onClose={() => setManageDrawerOpen(false)}
+        onSuccess={() => {
+          setManageDrawerOpen(false);
+          refreshData();
+        }}
+      />
+
+      {/* Create Offer Wizard */}
+      <CreateOfferWizardDrawer
+        open={createOfferOpen}
+        onClose={() => setCreateOfferOpen(false)}
+        onSuccess={() => {
+          setCreateOfferOpen(false);
+          refreshData();
+        }}
+      />
+    </div>
   );
 };
