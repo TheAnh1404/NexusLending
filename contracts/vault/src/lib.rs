@@ -321,7 +321,6 @@ fn require_loan_manager(env: &Env) -> Address {
         .instance()
         .get(&DataKey::LoanManager)
         .unwrap_or_else(|| panic!("loan manager not configured"));
-    trusted.require_auth();
     trusted
 }
 
@@ -331,7 +330,6 @@ fn require_marketplace(env: &Env) -> Address {
         .instance()
         .get(&DataKey::Marketplace)
         .unwrap_or_else(|| panic!("marketplace not configured"));
-    trusted.require_auth();
     trusted
 }
 
