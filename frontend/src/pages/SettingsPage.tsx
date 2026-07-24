@@ -5,6 +5,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAppContext } from '../app/AppContext';
 import { useWallet } from '../hooks/useWallet';
 import { formatAddress } from '../utils/finance';
+import { filterWalletActivities } from '../utils/activity';
+import { getConnectedWalletAddress } from '../utils/wallet';
 import {
   ASSET_CONTRACTS,
   CONTRACTS,
@@ -16,10 +18,11 @@ const { Title, Paragraph, Text } = Typography;
 const NOTIFICATION_SETTINGS_KEY = 'nexus_notification_settings';
 
 export const SettingsPage: React.FC = () => {
-  const { wallet, transactions, oraclePrices, updateOraclePrice, disconnectWallet, refreshData } = useAppContext();
+  const { wallet, transactions, loans, loanOffers, oraclePrices, updateOraclePrice, disconnectWallet, refreshData } = useAppContext();
   const { publicKey, disconnect } = useWallet();
   const { message } = App.useApp();
   const navigate = useNavigate();
+  const connectedWalletAddress = getConnectedWalletAddress(publicKey, wallet.address);
 
   const [emailAlerts, setEmailAlerts] = useState(true);
   const [telegramAlerts, setTelegramAlerts] = useState(false);
@@ -32,8 +35,13 @@ export const SettingsPage: React.FC = () => {
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const notificationSettingsKey = React.useMemo(
-    () => (wallet.address ? `${NOTIFICATION_SETTINGS_KEY}_${wallet.address}` : NOTIFICATION_SETTINGS_KEY),
-    [wallet.address]
+    () => (connectedWalletAddress ? `${NOTIFICATION_SETTINGS_KEY}_${connectedWalletAddress}` : NOTIFICATION_SETTINGS_KEY),
+    [connectedWalletAddress]
+  );
+
+  const walletTransactions = React.useMemo(
+    () => filterWalletActivities(transactions, connectedWalletAddress, loans, loanOffers),
+    [connectedWalletAddress, loanOffers, loans, transactions]
   );
 
   useEffect(() => {
@@ -272,7 +280,7 @@ export const SettingsPage: React.FC = () => {
 
       {/* Transaction History Section */}
       <Card className="card-premium" title={<Text strong style={{ fontSize: 16 }}>Transaction History</Text>}>
-        <Table columns={txColumns} dataSource={transactions} pagination={{ pageSize: 5 }} />
+        <Table columns={txColumns} dataSource={walletTransactions} rowKey="id" pagination={{ pageSize: 5 }} />
       </Card>
     </div>
   );

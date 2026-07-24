@@ -2,9 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { Typography, Input, Select, Button, Row, Col, Card, Table, Tag, Space } from 'antd';
 import { Search, PlusCircle, ArrowRight, Clock } from 'lucide-react';
 import { useAppContext } from '../app/AppContext';
+import { useWallet } from '../hooks/useWallet';
 import { CHAIN_MODE } from '../services/api/client';
 import { offersApi } from '../services/api/offers.api';
 import { calculateRequiredCollateral, formatCurrency, formatAddress } from '../utils/finance';
+import { getConnectedWalletAddress, isSameWalletAddress } from '../utils/wallet';
 import { EmptyState } from '../components/common/CommonStates';
 import { BorrowWizardDrawer } from '../components/common/BorrowWizardDrawer';
 import { CreateOfferWizardDrawer } from '../components/common/CreateOfferWizardDrawer';
@@ -16,6 +18,8 @@ const MARKETPLACE_CHAIN_SYNC_INTERVAL_MS = 10_000;
 
 export const MarketplacePage: React.FC = () => {
   const { loanOffers, loans, oraclePrices, wallet, refreshData } = useAppContext();
+  const { publicKey } = useWallet();
+  const connectedWalletAddress = getConnectedWalletAddress(publicKey, wallet.address);
 
   // Search & Filters
   const [search, setSearch] = useState('');
@@ -39,7 +43,7 @@ export const MarketplacePage: React.FC = () => {
   const activeChainOfferIdsKey = activeChainOfferIds.join('|');
 
   useEffect(() => {
-    if (CHAIN_MODE === 'mock' || !wallet.address || activeChainOfferIds.length === 0) return;
+    if (CHAIN_MODE === 'mock' || !connectedWalletAddress || activeChainOfferIds.length === 0) return;
 
     let cancelled = false;
     const syncActiveOffers = async () => {
@@ -47,7 +51,7 @@ export const MarketplacePage: React.FC = () => {
       if (ids.length === 0) return;
 
       const results = await Promise.allSettled(
-        ids.map((offerId) => offersApi.syncChain(offerId, wallet.address!))
+        ids.map((offerId) => offersApi.syncChain(offerId, connectedWalletAddress))
       );
       const changed = results.some((result) =>
         result.status === 'fulfilled' && result.value.status !== 'Active'
@@ -66,7 +70,7 @@ export const MarketplacePage: React.FC = () => {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [activeChainOfferIds.length, activeChainOfferIdsKey, refreshData, wallet.address]);
+  }, [activeChainOfferIds.length, activeChainOfferIdsKey, connectedWalletAddress, refreshData]);
 
   // Filter loan offers dynamically
   const filteredOffers = loanOffers
@@ -115,7 +119,7 @@ export const MarketplacePage: React.FC = () => {
       dataIndex: 'lender',
       key: 'lender',
       render: (lender: string) => {
-        const isOwner = lender === wallet.address;
+        const isOwner = isSameWalletAddress(lender, connectedWalletAddress);
         return (
           <Space size={6}>
             <Text
@@ -186,7 +190,7 @@ export const MarketplacePage: React.FC = () => {
       key: 'action',
       align: 'right' as const,
       render: (_: unknown, record: LoanOffer) => {
-        const isOwner = record.lender === wallet.address;
+        const isOwner = isSameWalletAddress(record.lender, connectedWalletAddress);
         return (
           <Button
             type="primary"

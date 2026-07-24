@@ -1,6 +1,9 @@
 import { useLending } from '../contexts/LendingContext';
+import { useWallet } from './useWallet';
+import { getConnectedWalletAddress, isSameWalletAddress } from '../utils/wallet';
 
 export const useLoans = () => {
+  const { publicKey } = useWallet();
   const {
     loans,
     addCollateral,
@@ -10,12 +13,17 @@ export const useLoans = () => {
     liquidateLoan,
     wallet,
   } = useLending();
+  const connectedWalletAddress = getConnectedWalletAddress(publicKey, wallet.address);
 
   return {
     loans,
-    walletLoans: loans.filter((loan) => loan.borrower === wallet.address || loan.lender === wallet.address),
-    borrowerLoans: loans.filter((loan) => loan.borrower === wallet.address),
-    lenderLoans: loans.filter((loan) => loan.lender === wallet.address),
+    walletLoans: loans.filter(
+      (loan) =>
+        isSameWalletAddress(loan.borrower, connectedWalletAddress) ||
+        isSameWalletAddress(loan.lender, connectedWalletAddress)
+    ),
+    borrowerLoans: loans.filter((loan) => isSameWalletAddress(loan.borrower, connectedWalletAddress)),
+    lenderLoans: loans.filter((loan) => isSameWalletAddress(loan.lender, connectedWalletAddress)),
     addCollateral,
     partialRepay,
     fullRepay,
@@ -23,4 +31,3 @@ export const useLoans = () => {
     liquidateLoan,
   };
 };
-

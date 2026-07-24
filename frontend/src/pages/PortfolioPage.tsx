@@ -2,7 +2,9 @@ import React, { useState } from 'react';
 import { Typography, Button } from 'antd';
 import { ArrowRightLeft } from 'lucide-react';
 import { useAppContext } from '../app/AppContext';
+import { useWallet } from '../hooks/useWallet';
 import { isOpenLoanStatus } from '../utils/finance';
+import { getConnectedWalletAddress, isSameWalletAddress } from '../utils/wallet';
 import { SwapModal } from '../components/common/SwapModal';
 import { PortfolioSummary } from '../components/portfolio/PortfolioSummary';
 import { PerformanceChart } from '../components/portfolio/PerformanceChart';
@@ -15,10 +17,12 @@ const { Title, Paragraph } = Typography;
 
 export const PortfolioPage: React.FC = () => {
   const { wallet, loans, oraclePrices, refreshData } = useAppContext();
+  const { isConnected, publicKey } = useWallet();
   const [swapModalOpen, setSwapModalOpen] = useState(false);
   const [errorState, setErrorState] = useState<string | null>(null);
+  const connectedWalletAddress = getConnectedWalletAddress(publicKey, wallet.address);
 
-  if (!wallet.connected) {
+  if (!isConnected || !connectedWalletAddress) {
     return <EmptyPortfolio />;
   }
 
@@ -28,49 +32,73 @@ export const PortfolioPage: React.FC = () => {
 
   const xlmPrice = oraclePrices.find((p) => p.asset === 'XLM')?.price || 0.125;
   const usdcPrice = oraclePrices.find((p) => p.asset === 'USDC')?.price || 1.0;
+  const getAssetPrice = (asset: string) => {
+    if (asset === 'XLM') return xlmPrice;
+    if (asset === 'USDC') return usdcPrice;
+    return 0;
+  };
+  const toUsd = (amount: number, asset: string) => amount * getAssetPrice(asset);
 
-  // Active positions calculation
-  const borrowedActive = loans.filter((l) => l.borrower === wallet.address && isOpenLoanStatus(l.status));
-  const lentActive = loans.filter((l) => l.lender === wallet.address && isOpenLoanStatus(l.status));
+  const borrowedActive = loans.filter(
+    (loan) => isSameWalletAddress(loan.borrower, connectedWalletAddress) && isOpenLoanStatus(loan.status)
+  );
+  const lentActive = loans.filter(
+    (loan) => isSameWalletAddress(loan.lender, connectedWalletAddress) && isOpenLoanStatus(loan.status)
+  );
 
-  const totalBorrowedDebtUsd = borrowedActive.reduce((sum, l) => sum + l.outstandingDebt, 0);
-  const totalLentUsd = lentActive.reduce((sum, l) => sum + l.amount, 0);
-  const totalLockedCollateralXlm = borrowedActive.reduce((sum, l) => sum + l.collateralAmount, 0);
-  const lockedCollateralUsd = totalLockedCollateralXlm * xlmPrice;
+  const totalBorrowedDebtUsd = borrowedActive.reduce((sum, loan) => sum + toUsd(loan.outstandingDebt, loan.asset), 0);
+  const totalLentUsd = lentActive.reduce((sum, loan) => sum + toUsd(loan.amount, loan.asset), 0);
+  const lockedCollateralUsd = borrowedActive.reduce(
+    (sum, loan) => sum + toUsd(loan.collateralAmount, loan.collateralAsset),
+    0
+  );
 
-  // Balances
   const xlmWalletBalance = wallet.balanceXLM || 0;
   const usdcWalletBalance = wallet.balanceUSDC || 0;
-
   const xlmUsd = xlmWalletBalance * xlmPrice;
   const usdcUsd = usdcWalletBalance * usdcPrice;
-
   const totalAvailableUsd = xlmUsd + usdcUsd;
   const netPositionUsd = totalAvailableUsd + totalLentUsd + lockedCollateralUsd - totalBorrowedDebtUsd;
 
-  // Real Asset Data
-  const assetsData = [
-    {
-      symbol: 'USDC',
-      walletBalance: usdcWalletBalance,
-      available: usdcWalletBalance,
-      locked: 0,
-      lent: totalLentUsd,
-      borrowed: totalBorrowedDebtUsd,
-      usdValue: usdcUsd,
-      price: usdcPrice,
-    },
-    {
-      symbol: 'XLM',
-      walletBalance: xlmWalletBalance,
-      available: Math.max(0, xlmWalletBalance - totalLockedCollateralXlm),
-      locked: totalLockedCollateralXlm,
-      lent: 0,
-      borrowed: 0,
-      usdValue: xlmUsd,
-      price: xlmPrice,
-    },
-  ];
+  const walletBalancesByAsset: Record<string, number> = {
+    USDC: usdcWalletBalance,
+    XLM: xlmWalletBalance,
+  };
+
+  const assetSymbols = Array.from(new Set([
+    'USDC',
+    'XLM',
+    ...borrowedActive.map((loan) => loan.asset),
+    ...borrowedActive.map((loan) => loan.collateralAsset),
+    ...lentActive.map((loan) => loan.asset),
+  ]));
+
+  const assetsData = assetSymbols
+    .map((symbol) => {
+      const walletBalance = walletBalancesByAsset[symbol] ?? 0;
+      const locked = borrowedActive
+        .filter((loan) => loan.collateralAsset === symbol)
+        .reduce((sum, loan) => sum + loan.collateralAmount, 0);
+      const lent = lentActive
+        .filter((loan) => loan.asset === symbol)
+        .reduce((sum, loan) => sum + loan.amount, 0);
+      const borrowed = borrowedActive
+        .filter((loan) => loan.asset === symbol)
+        .reduce((sum, loan) => sum + loan.outstandingDebt, 0);
+      const price = getAssetPrice(symbol);
+
+      return {
+        symbol,
+        walletBalance,
+        available: walletBalance,
+        locked,
+        lent,
+        borrowed,
+        usdValue: (walletBalance + locked + lent) * price,
+        price,
+      };
+    })
+    .filter((asset) => asset.walletBalance > 0 || asset.locked > 0 || asset.lent > 0 || asset.borrowed > 0);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
@@ -103,7 +131,7 @@ export const PortfolioPage: React.FC = () => {
         totalBorrowedDebtUsd={totalBorrowedDebtUsd}
         activeBorrowedCount={borrowedActive.length}
         lockedCollateralUsd={lockedCollateralUsd}
-        lockedAssetCount={totalLockedCollateralXlm > 0 ? 1 : 0}
+        lockedAssetCount={assetsData.filter((asset) => asset.locked > 0).length}
       />
 
       {/* SECTION 2: Performance */}

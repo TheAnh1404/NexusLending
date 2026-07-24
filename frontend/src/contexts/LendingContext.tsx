@@ -19,6 +19,7 @@ import { CONTRACTS } from '../services/soroban/config';
 import { createUsdcTrustline, hasUsdcTrustline, swapStellarAssets } from '../services/soroban/transaction';
 import type { SwapDirection, TxResult, TxStage } from '../services/soroban/transaction';
 import { ADMIN_WALLET_ADDRESS, isAdminWallet } from '../config/admin';
+import { isSameWalletAddress } from '../utils/wallet';
 import {
   STORAGE_KEY,
   addDismissedTxId,
@@ -687,7 +688,7 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (!offer || offer.status !== 'Active') {
       return failAccept('This offer is no longer available.');
     }
-    if (offer.lender === walletAddress) {
+    if (isSameWalletAddress(offer.lender, walletAddress)) {
       return failAccept('You cannot borrow from your own offer.');
     }
     if (collateralAmount <= 0) {

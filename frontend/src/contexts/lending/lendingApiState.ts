@@ -1,5 +1,4 @@
 import type { WalletState } from '../../types';
-import { isAdminWallet } from '../../config/admin';
 import { loansApi } from '../../services/api/loans.api';
 import { offersApi } from '../../services/api/offers.api';
 import { oracleApi } from '../../services/api/oracle.api';
@@ -13,9 +12,7 @@ export const loadLendingSnapshotFromApi = async (currentWallet: WalletState): Pr
     ? fetchWalletBalances(address)
     : Promise.resolve(null);
   const transactionsPromise = address
-    ? isAdminWallet(address)
-      ? transactionsApi.list()
-      : transactionsApi.list({ relatedWallet: address })
+    ? transactionsApi.list({ relatedWallet: address })
     : Promise.resolve([]);
   const [offers, loans, oraclePrices, transactions, liveBalances] = await Promise.all([
     offersApi.list(),

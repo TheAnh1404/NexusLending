@@ -23,6 +23,7 @@ import { useAppContext } from '../../app/AppContext';
 import { NETWORK_DISPLAY_NAME } from '../../services/soroban/config';
 import { filterWalletActivities } from '../../utils/activity';
 import { isOpenLoanStatus } from '../../utils/finance';
+import { getConnectedWalletAddress, isSameWalletAddress } from '../../utils/wallet';
 import { AppLogo } from './AppLogo';
 
 import type { Transaction } from '../../types';
@@ -56,7 +57,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ onOpenSwap }) => {
     [activities, loanOffers, loans, publicKey, wallet.address]
   );
 
-  const userAddress = publicKey ?? wallet.address ?? '';
+  const userAddress = getConnectedWalletAddress(publicKey, wallet.address);
 
   // ── Compute Supply / Borrow / Health Factor ───────────────────────────
   const { totalSupply, totalBorrow, avgHealthFactor } = useMemo(() => {
@@ -68,10 +69,10 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ onOpenSwap }) => {
 
     // Supply = loans where user is lender (active) + pending offers
     const activeLoansAsLender = loans.filter(
-      (l) => l.lender === userAddress && isOpenLoanStatus(l.status),
+      (l) => isSameWalletAddress(l.lender, userAddress) && isOpenLoanStatus(l.status),
     );
     const activeOffersAsPending = loanOffers.filter(
-      (o) => o.lender === userAddress && o.status === 'Active',
+      (o) => isSameWalletAddress(o.lender, userAddress) && o.status === 'Active',
     );
     const supply =
       activeLoansAsLender.reduce((sum, l) => sum + l.amount * getAssetPrice(l.asset), 0) +
@@ -79,7 +80,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ onOpenSwap }) => {
 
     // Borrow = loans where user is borrower (active)
     const activeLoansAsBorrower = loans.filter(
-      (l) => l.borrower === userAddress && isOpenLoanStatus(l.status),
+      (l) => isSameWalletAddress(l.borrower, userAddress) && isOpenLoanStatus(l.status),
     );
     const borrow = activeLoansAsBorrower.reduce(
       (sum, l) => sum + l.outstandingDebt * getAssetPrice(l.asset), 0,
@@ -443,4 +444,3 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ onOpenSwap }) => {
     </aside>
   );
 };
-

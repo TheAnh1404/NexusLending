@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAppContext } from '../app/AppContext';
+import { useWallet } from '../hooks/useWallet';
 import {
   calculateRepaymentAmount,
   formatAddress,
@@ -21,6 +22,7 @@ import {
   getDaysRemaining,
   isOpenLoanStatus,
 } from '../utils/finance';
+import { getConnectedWalletAddress, isSameWalletAddress } from '../utils/wallet';
 import { EmptyState } from '../components/common/CommonStates';
 import { HealthStatus } from '../components/common/HealthStatus';
 import { ManageLoanDrawer } from '../components/common/ManageLoanDrawer';
@@ -158,6 +160,7 @@ function groupLoans(
 
 export const MyLoansPage: React.FC = () => {
   const { wallet, loans, loanOffers, oraclePrices, refreshData } = useAppContext();
+  const { publicKey } = useWallet();
   const navigate = useNavigate();
 
   const [activeMainTab, setActiveMainTab] = useState<'borrowing' | 'lending'>('borrowing');
@@ -168,7 +171,7 @@ export const MyLoansPage: React.FC = () => {
   const [manageDrawerOpen, setManageDrawerOpen] = useState(false);
   const [createOfferOpen, setCreateOfferOpen] = useState(false);
 
-  const userAddress = wallet.address || '';
+  const userAddress = getConnectedWalletAddress(publicKey, wallet.address);
   const xlmPrice = oraclePrices.find((p) => p.asset === 'XLM')?.price || 0.125;
 
   // ── Filtered source data ──────────────────────────────────────────────
@@ -176,7 +179,7 @@ export const MyLoansPage: React.FC = () => {
   const myBorrowedLoans = useMemo(
     () =>
       loans
-        .filter((l) => l.borrower === userAddress)
+        .filter((l) => isSameWalletAddress(l.borrower, userAddress))
         .filter(
           (l) =>
             l.id.toLowerCase().includes(search.toLowerCase()) ||
@@ -188,7 +191,7 @@ export const MyLoansPage: React.FC = () => {
   const myLentLoans = useMemo(
     () =>
       loans
-        .filter((l) => l.lender === userAddress)
+        .filter((l) => isSameWalletAddress(l.lender, userAddress))
         .filter(
           (l) =>
             l.id.toLowerCase().includes(search.toLowerCase()) ||
@@ -200,7 +203,7 @@ export const MyLoansPage: React.FC = () => {
   const myPendingOffers = useMemo(
     () =>
       loanOffers
-        .filter((o) => o.lender === userAddress && o.status === 'Active')
+        .filter((o) => isSameWalletAddress(o.lender, userAddress) && o.status === 'Active')
         .filter((o) => o.id.toLowerCase().includes(search.toLowerCase()))
         .sort((a, b) => new Date(b.createTime).getTime() - new Date(a.createTime).getTime()),
     [loanOffers, userAddress, search],

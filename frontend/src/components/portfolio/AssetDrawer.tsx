@@ -1,7 +1,10 @@
 import React from 'react';
 import { Drawer, Typography } from 'antd';
 import { useAppContext } from '../../app/AppContext';
+import { useWallet } from '../../hooks/useWallet';
+import { filterWalletActivities } from '../../utils/activity';
 import { formatCurrency } from '../../utils/finance';
+import { getConnectedWalletAddress } from '../../utils/wallet';
 
 const { Title, Text } = Typography;
 
@@ -21,12 +24,18 @@ interface AssetDrawerProps {
 }
 
 export const AssetDrawer: React.FC<AssetDrawerProps> = ({ open, asset, onClose }) => {
-  const { transactions } = useAppContext();
+  const { transactions, loans, loanOffers, wallet } = useAppContext();
+  const { publicKey } = useWallet();
+  const connectedWalletAddress = getConnectedWalletAddress(publicKey, wallet.address);
+
+  const assetTransactions = React.useMemo(() => {
+    if (!asset) return [];
+    return filterWalletActivities(transactions, connectedWalletAddress, loans, loanOffers)
+      .filter((tx) => tx.asset === asset.symbol)
+      .slice(0, 5);
+  }, [asset, connectedWalletAddress, loanOffers, loans, transactions]);
 
   if (!asset) return null;
-
-  // Filter transactions related to this asset
-  const assetTransactions = transactions.filter((t) => t.asset === asset.symbol).slice(0, 5);
 
   return (
     <Drawer

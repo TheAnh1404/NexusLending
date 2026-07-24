@@ -3,6 +3,7 @@ import { Modal, Tabs, Typography, Button, InputNumber, Alert, Tag } from 'antd';
 import { ShieldCheck } from 'lucide-react';
 import type { Loan } from '../../types';
 import { useAppContext } from '../../app/AppContext';
+import { useWallet } from '../../hooks/useWallet';
 import {
   calculateHealthFactor,
   calculateMaxLiquidationRepay,
@@ -12,6 +13,7 @@ import {
   isLiquidatable,
   isOpenLoanStatus,
 } from '../../utils/finance';
+import { getConnectedWalletAddress, isSameWalletAddress } from '../../utils/wallet';
 import { HealthStatus } from './HealthStatus';
 import { getHealthCategory } from '../../utils/health';
 import { AdvancedDetails } from './AdvancedDetails';
@@ -28,6 +30,7 @@ interface ManageLoanDrawerProps {
 
 export const ManageLoanDrawer: React.FC<ManageLoanDrawerProps> = ({ open, loan, onClose, onSuccess }) => {
   const { oraclePrices, wallet, repayLoan, addCollateral, liquidateLoan } = useAppContext();
+  const { publicKey } = useWallet();
 
   const [activeTab, setActiveTab] = useState('overview');
   const [repayAmount, setRepayAmount] = useState<number>(0);
@@ -43,7 +46,8 @@ export const ManageLoanDrawer: React.FC<ManageLoanDrawerProps> = ({ open, loan, 
 
   if (!loan) return null;
 
-  const isBorrower = wallet.address === loan.borrower;
+  const connectedWalletAddress = getConnectedWalletAddress(publicKey, wallet.address);
+  const isBorrower = isSameWalletAddress(connectedWalletAddress, loan.borrower);
   const daysRemaining = getDaysRemaining(loan.dueDate);
   const canLiquidate = isOpenLoanStatus(loan.status) && isLiquidatable(loan.healthFactor, loan.status);
 

@@ -3,6 +3,7 @@ import { Modal, Steps, Button, Typography, Alert, InputNumber, Divider, Tag } fr
 import { ArrowRight, ArrowLeft, CheckCircle2, Wallet, AlertTriangle, Flame, ShieldCheck } from 'lucide-react';
 import type { LoanOffer } from '../../types';
 import { useAppContext } from '../../app/AppContext';
+import { useWallet } from '../../hooks/useWallet';
 import {
   calculateRequiredCollateral,
   calculateRepaymentAmount,
@@ -10,6 +11,7 @@ import {
   formatCurrency,
   formatAddress,
 } from '../../utils/finance';
+import { getConnectedWalletAddress, isSameWalletAddress } from '../../utils/wallet';
 import { AdvancedDetails } from './AdvancedDetails';
 import { TransactionProgress, type TransactionStepState } from './TransactionProgress';
 
@@ -24,6 +26,7 @@ interface BorrowWizardDrawerProps {
 
 export const BorrowWizardDrawer: React.FC<BorrowWizardDrawerProps> = ({ open, offer, onClose, onSuccess }) => {
   const { oraclePrices, wallet, acceptOffer, activateLoan } = useAppContext();
+  const { publicKey } = useWallet();
 
   const [currentStep, setCurrentStep] = useState(0);
   const [collateralAmount, setCollateralAmount] = useState<number>(0);
@@ -51,6 +54,7 @@ export const BorrowWizardDrawer: React.FC<BorrowWizardDrawerProps> = ({ open, of
   const totalRepayment = calculateRepaymentAmount(offer.amount, offer.apr, offer.duration);
   const collateralUsdValue = collateralAmount * xlmPrice;
   const userXlmBalance = wallet.balanceXLM || 0;
+  const connectedWalletAddress = getConnectedWalletAddress(publicKey, wallet.address);
   const isBalanceInsufficient = userXlmBalance < collateralAmount;
 
   const minHfThreshold = Math.max(1.4, offer.minHealthFactor || 1.4);
@@ -65,7 +69,7 @@ export const BorrowWizardDrawer: React.FC<BorrowWizardDrawerProps> = ({ open, of
   const isHfBelowMinRequired = estimatedHF < minHfThreshold;
 
   const handleExecuteBorrow = async () => {
-    if (wallet.address === offer.lender) {
+    if (isSameWalletAddress(connectedWalletAddress, offer.lender)) {
       setTxState('failed');
       setRawError('You cannot borrow from an offer created by your own wallet address. Please switch to a different borrower wallet.');
       return;
