@@ -30,3 +30,26 @@ transactionsRouter.post(
     res.status(201).json({ data: serialize(transaction) });
   })
 );
+
+transactionsRouter.delete(
+  '/:id',
+  asyncHandler(async (req, res) => {
+    const id = String(req.params.id);
+    const walletStr = req.query.wallet ? String(req.query.wallet) : undefined;
+    await transactionsService.delete(id, walletStr);
+    res.json({ success: true, id });
+  })
+);
+
+transactionsRouter.delete(
+  '/',
+  asyncHandler(async (req, res) => {
+    const walletStr = req.query.wallet ? String(req.query.wallet) : undefined;
+    if (!walletStr) {
+      res.status(400).json({ error: 'Wallet parameter is required to delete notifications.' });
+      return;
+    }
+    const result = await transactionsService.deleteAll(walletStr);
+    res.json({ success: true, count: result.count });
+  })
+);

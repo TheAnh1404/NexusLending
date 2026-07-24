@@ -87,5 +87,24 @@ export const transactionsService = {
       create: data,
       update: data
     });
+  },
+
+  async delete(id: string, wallet?: string) {
+    const normalized = normalizeWallet(wallet);
+    const where: Prisma.TransactionWhereInput = { id };
+    if (normalized) {
+      where.wallet = normalized;
+    }
+    return prisma.transaction.deleteMany({
+      where
+    });
+  },
+
+  async deleteAll(wallet: string) {
+    const normalized = normalizeWallet(wallet);
+    if (!normalized) return { count: 0 };
+    return prisma.transaction.deleteMany({
+      where: { wallet: normalized }
+    });
   }
 };
