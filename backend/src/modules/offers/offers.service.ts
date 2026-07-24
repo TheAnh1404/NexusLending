@@ -616,7 +616,17 @@ export const offersService = {
   async accept(id: string, input: AcceptOfferInput) {
     const offer = await this.getById(id);
     ensureAprWithinLimit(offer.fixedAprBps);
-    if (offer.status !== 'Active') {
+
+    // Return existing loan if already created (e.g., indexed by background worker or prior call)
+    const existingLoan = await prisma.loan.findFirst({
+      where: { offerId: id },
+      include: { offer: true }
+    });
+    if (existingLoan) {
+      return existingLoan;
+    }
+
+    if (offer.status !== 'Active' && offer.status !== 'Matched') {
       throw new ApiError(400, 'Borrowers can only accept Active offers');
     }
     if (!offer.contractOfferId) {
