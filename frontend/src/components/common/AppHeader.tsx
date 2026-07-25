@@ -4,7 +4,7 @@ import { Button, Badge, Popover, Dropdown } from 'antd';
 import {
   LogOut,
   Bell,
-  ArrowRightLeft,
+  Coins,
   Copy,
   Check,
   X,
@@ -13,7 +13,6 @@ import {
 import { useWallet } from '../../hooks/useWallet';
 import { useAppContext } from '../../app/AppContext';
 import { filterWalletActivities } from '../../utils/activity';
-import { SwapModal } from './SwapModal';
 import { AppLogo } from './AppLogo';
 import { NotificationDetailModal } from './NotificationDetailModal';
 import type { Transaction } from '../../types';
@@ -25,7 +24,6 @@ export const AppHeader: React.FC = () => {
   const { wallet, disconnectWallet, activities, loanOffers, loans, dismissActivity, clearAllActivities } = useAppContext();
   const { isConnected, shortAddress, publicKey, disconnect } = useWallet();
 
-  const [swapModalOpen, setSwapModalOpen] = useState(false);
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [selectedActivity, setSelectedActivity] = useState<Transaction | null>(null);
@@ -51,6 +49,15 @@ export const AppHeader: React.FC = () => {
 
   const walletMenu = {
     items: [
+      {
+        key: 'faucet',
+        label: (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }} onClick={() => navigate('/faucet')}>
+            <Coins size={14} style={{ color: 'var(--primary-color)' }} />
+            <span style={{ fontWeight: 600 }}>Testnet Faucet</span>
+          </div>
+        ),
+      },
       {
         key: 'copy',
         label: (
@@ -168,9 +175,12 @@ export const AppHeader: React.FC = () => {
           <Button
             type="default"
             size="small"
-            icon={<ArrowRightLeft size={14} />}
-            onClick={() => setSwapModalOpen(true)}
-          />
+            icon={<Coins size={14} style={{ color: 'var(--primary-color)' }} />}
+            onClick={() => navigate('/faucet')}
+            style={{ fontWeight: 600, borderRadius: 6, fontSize: 11 }}
+          >
+            Faucet
+          </Button>
 
           <Popover
             content={notificationContent}
@@ -204,9 +214,6 @@ export const AppHeader: React.FC = () => {
         </div>
       </header>
 
-      {/* Quick Swap Modal */}
-      <SwapModal open={swapModalOpen} onCancel={() => setSwapModalOpen(false)} />
-
       <NotificationDetailModal
         open={!!selectedActivity}
         activity={selectedActivity}
@@ -217,3 +224,4 @@ export const AppHeader: React.FC = () => {
     </>
   );
 };
+

@@ -1,11 +1,10 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAppContext } from '../app/AppContext';
 import { useWallet } from '../hooks/useWallet';
 import { AppSidebar } from '../components/common/AppSidebar';
 import { AppHeader } from '../components/common/AppHeader';
 import { MobileBottomNavigation } from '../components/common/MobileBottomNavigation';
-import { SwapModal } from '../components/common/SwapModal';
 
 const LIVE_WALLET_OVERVIEW_REFRESH_MS = 10_000;
 
@@ -14,8 +13,6 @@ export const AppLayout: React.FC = () => {
   const { isConnected, isLoading, publicKey } = useWallet();
   const navigate = useNavigate();
   const location = useLocation();
-
-  const [swapModalOpen, setSwapModalOpen] = useState(false);
 
   // Sync WalletContext (Freighter connection) with LendingContext (lending state)
   React.useEffect(() => {
@@ -55,7 +52,7 @@ export const AppLayout: React.FC = () => {
   return (
     <div style={{ minHeight: '100vh', display: 'flex', backgroundColor: 'var(--bg-color, #f8fafc)' }}>
       {/* Fixed Vertical Left Sidebar on Desktop */}
-      <AppSidebar onOpenSwap={() => setSwapModalOpen(true)} />
+      <AppSidebar />
 
       {/* Main Right Content Area (With left margin to offset fixed sidebar on desktop) */}
       <div className="app-main-wrapper" style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
@@ -79,9 +76,7 @@ export const AppLayout: React.FC = () => {
 
       {/* Fixed Mobile Bottom Navigation (<768px) */}
       <MobileBottomNavigation />
-
-      {/* Quick Swap Modal */}
-      <SwapModal open={swapModalOpen} onCancel={() => setSwapModalOpen(false)} />
     </div>
   );
 };
+

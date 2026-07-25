@@ -901,6 +901,7 @@ name = "nexus-contracts"
 version = "0.1.0"
 dependencies = [
  "nexus-contracts-shared",
+ "nexus-faucet-contract",
  "nexus-loan-manager-contract",
  "nexus-marketplace-contract",
  "nexus-oracle-contract",
@@ -909,6 +910,13 @@ dependencies = [
 
 [[package]]
 name = "nexus-contracts-shared"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
+name = "nexus-faucet-contract"
 version = "0.1.0"
 dependencies = [
  "soroban-sdk",

@@ -4,19 +4,29 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 // Layouts
 import { PublicLayout } from '../layouts/PublicLayout';
 import { AppLayout } from '../layouts/AppLayout';
+import { FaucetLayout } from '../layouts/FaucetLayout';
 import { ProtectedRoute } from '../components/common/ProtectedRoute';
 
-// 4 Main Pages
+// Pages
 import { LandingPage } from '../pages/LandingPage';
 import { ConnectPage } from '../pages/ConnectPage';
 import { MarketplacePage } from '../pages/MarketplacePage';
 import { MyLoansPage } from '../pages/MyLoansPage';
 import { PortfolioPage } from '../pages/PortfolioPage';
 import { SettingsPage } from '../pages/SettingsPage';
+import { FaucetPage } from '../pages/FaucetPage';
 
 export const AppRoutes: React.FC = () => {
   return (
     <Routes>
+      {/* Standalone Faucet Route */}
+      <Route element={<FaucetLayout />}>
+        <Route path="/faucet" element={<FaucetPage />} />
+      </Route>
+
+      {/* Redirect legacy /swap to /faucet */}
+      <Route path="/swap" element={<Navigate to="/faucet" replace />} />
+
       {/* Public Landing & Connect */}
       <Route element={<PublicLayout />}>
         <Route path="/" element={<LandingPage />} />
@@ -32,7 +42,8 @@ export const AppRoutes: React.FC = () => {
           <Route path="portfolio" element={<PortfolioPage />} />
           <Route path="settings" element={<SettingsPage />} />
 
-          {/* Backward compatibility redirects for legacy routes */}
+          {/* Backward compatibility redirects */}
+          <Route path="swap" element={<Navigate to="/faucet" replace />} />
           <Route path="create-loan" element={<Navigate to="/app/marketplace" replace />} />
           <Route path="borrow/:id" element={<Navigate to="/app/marketplace" replace />} />
           <Route path="loans/:id" element={<Navigate to="/app/my-loans" replace />} />
@@ -51,3 +62,4 @@ export const AppRoutes: React.FC = () => {
     </Routes>
   );
 };
+

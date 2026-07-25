@@ -7,7 +7,6 @@ import {
   PieChart,
   Settings as SettingsIcon,
   Wallet,
-  ArrowRightLeft,
   Bell,
   LogOut,
   Copy,
@@ -38,11 +37,7 @@ const SIDEBAR_NAV_ITEMS = [
   { key: '/app/settings', label: 'Settings', icon: <SettingsIcon size={20} /> },
 ];
 
-interface AppSidebarProps {
-  onOpenSwap?: () => void;
-}
-
-export const AppSidebar: React.FC<AppSidebarProps> = ({ onOpenSwap }) => {
+export const AppSidebar: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { wallet, disconnectWallet, activities, loanOffers, loans, oraclePrices, dismissActivity, clearAllActivities } = useAppContext();
@@ -368,19 +363,8 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({ onOpenSwap }) => {
         )}
       </div>
 
-      {/* Bottom: Network, Notifications, Swap & Wallet Summary */}
+      {/* Bottom: Network, Notifications & Wallet Summary */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, borderTop: '1px solid var(--border-light)', paddingTop: 16 }}>
-        {onOpenSwap && (
-          <Button
-            type="default"
-            icon={<ArrowRightLeft size={16} />}
-            onClick={onOpenSwap}
-            block
-            style={{ borderRadius: 8, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
-          >
-            Swap Assets
-          </Button>
-        )}
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 4px' }}>
           <Tag color="blue" style={{ borderRadius: 4, margin: 0, fontWeight: 600, fontSize: 11 }}>

@@ -1,5 +1,5 @@
 # build-all.ps1
-# Build and optimize all 4 contracts: oracle, vault, marketplace, loan-manager
+# Build and optimize all contracts: oracle, vault, marketplace, loan-manager, faucet
 $ErrorActionPreference = "Stop"
 
 $scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -17,7 +17,13 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host ">>> Optimizing built WASMs..." -ForegroundColor Cyan
-$contracts = @("nexus_oracle_contract", "nexus_vault_contract", "nexus_marketplace_contract", "nexus_loan_manager_contract")
+$contracts = @(
+    "nexus_oracle_contract",
+    "nexus_vault_contract",
+    "nexus_marketplace_contract",
+    "nexus_loan_manager_contract",
+    "nexus_faucet_contract"
+)
 $wasmDir = "$workspaceRoot\target\wasm32v1-none\release"
 
 foreach ($contract in $contracts) {

@@ -45,6 +45,7 @@ export const CONTRACTS = {
   vault: import.meta.env.VITE_VAULT_CONTRACT_ID || testnetDeployments.contracts.vault,
   marketplace: import.meta.env.VITE_MARKETPLACE_CONTRACT_ID || testnetDeployments.contracts.marketplace,
   loanManager: import.meta.env.VITE_LOAN_MANAGER_CONTRACT_ID || testnetDeployments.contracts.loanManager,
+  faucet: import.meta.env.VITE_FAUCET_CONTRACT_ID || (testnetDeployments.contracts as any).faucet || '',
 };
 
 export const USDC_ASSET_CODE = import.meta.env.VITE_USDC_ASSET_CODE ?? 'USDC';
@@ -54,7 +55,11 @@ export const USDC_ASSET = USDC_ISSUER ? new Asset(USDC_ASSET_CODE, USDC_ISSUER) 
 export const ASSET_CONTRACTS: Record<string, string> = {
   XLM: import.meta.env.VITE_XLM_CONTRACT_ID || Asset.native().contractId(NETWORK_PASSPHRASE),
   USDC: import.meta.env.VITE_USDC_CONTRACT_ID || USDC_ASSET?.contractId(NETWORK_PASSPHRASE) || '',
+  COLLATERAL: import.meta.env.VITE_COLLATERAL_CONTRACT_ID || '',
 };
+
+export const isValidContractId = (value: string | undefined): value is string =>
+  Boolean(value && StrKey.isValidContract(value));
 
 export const requireUsdcAsset = (): Asset => {
   if (!USDC_ASSET) {
@@ -67,7 +72,7 @@ export const resolveAssetContractId = (asset: string): string => {
   if (StrKey.isValidContract(asset)) return asset;
 
   const contractId = ASSET_CONTRACTS[asset.toUpperCase()];
-  if (!contractId) {
+  if (!isValidContractId(contractId)) {
     throw new Error(`Missing Soroban asset contract for ${asset}. Set VITE_${asset.toUpperCase()}_CONTRACT_ID or VITE_USDC_ISSUER.`);
   }
   return contractId;

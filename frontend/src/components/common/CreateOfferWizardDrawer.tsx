@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Modal, Steps, Form, InputNumber, Select, Input, Button, Typography, Space, Tooltip, Row, Col } from 'antd';
+import { useNavigate } from 'react-router-dom';
+import { Modal, Steps, Form, InputNumber, Select, Input, Button, Typography, Space, Tooltip, Row, Col, Alert } from 'antd';
 import { HelpCircle, PlusCircle, ArrowRight, ArrowLeft, CheckCircle2 } from 'lucide-react';
 import { useAppContext } from '../../app/AppContext';
 import { DEFAULT_GRACE_PERIOD_DAYS, MAX_FIXED_APR_PERCENT, calculateRepaymentAmount, formatCurrency } from '../../utils/finance';
@@ -14,7 +15,8 @@ interface CreateOfferWizardDrawerProps {
 }
 
 export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = ({ open, onClose, onSuccess }) => {
-  const { createOffer, fundOffer, activateOffer, oraclePrices } = useAppContext();
+  const navigate = useNavigate();
+  const { createOffer, fundOffer, activateOffer, oraclePrices, wallet } = useAppContext();
   const [form] = Form.useForm();
 
   const [currentStep, setCurrentStep] = useState(0);
@@ -404,6 +406,23 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
                   </div>
                 </div>
               </div>
+
+              {wallet.balanceUSDC < amount && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  message="Insufficient USDC Balance"
+                  description={
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+                      <span>You need more test USDC to fund this offer.</span>
+                      <Button size="small" type="primary" onClick={() => navigate('/faucet?asset=USDC&returnTo=/app/marketplace')}>
+                        Open Faucet
+                      </Button>
+                    </div>
+                  }
+                  style={{ marginBottom: 16 }}
+                />
+              )}
 
               <div style={{ display: 'flex', gap: 12 }}>
                 <Button size="large" onClick={() => setCurrentStep(1)} style={{ borderRadius: 10, height: 46 }}>

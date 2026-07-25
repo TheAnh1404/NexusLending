@@ -38,14 +38,23 @@ export const EmptyPortfolio: React.FC = () => {
       <Paragraph type="secondary" style={{ maxWidth: 420, margin: '0 auto 20px auto', fontSize: 14 }}>
         Start lending or borrowing liquidity on Stellar Soroban to build your active portfolio.
       </Paragraph>
-      <Button
-        type="primary"
-        size="large"
-        onClick={() => navigate('/app/marketplace')}
-        style={{ borderRadius: 10, fontWeight: 700 }}
-      >
-        Explore Marketplace
-      </Button>
+      <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
+        <Button
+          type="primary"
+          size="large"
+          onClick={() => navigate('/app/marketplace')}
+          style={{ borderRadius: 10, fontWeight: 700 }}
+        >
+          Explore Marketplace
+        </Button>
+        <Button
+          size="large"
+          onClick={() => navigate('/faucet?returnTo=/app/portfolio')}
+          style={{ borderRadius: 10, fontWeight: 600 }}
+        >
+          Get Test Tokens
+        </Button>
+      </div>
     </div>
   );
 };

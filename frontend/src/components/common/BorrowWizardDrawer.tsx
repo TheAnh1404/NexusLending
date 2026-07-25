@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Modal, Steps, Button, Typography, Alert, InputNumber, Divider, Tag } from 'antd';
 import { ArrowRight, ArrowLeft, CheckCircle2, Wallet, AlertTriangle, Flame, ShieldCheck } from 'lucide-react';
 import type { LoanOffer } from '../../types';
@@ -25,6 +26,7 @@ interface BorrowWizardDrawerProps {
 }
 
 export const BorrowWizardDrawer: React.FC<BorrowWizardDrawerProps> = ({ open, offer, onClose, onSuccess }) => {
+  const navigate = useNavigate();
   const { oraclePrices, wallet, acceptOffer, activateLoan } = useAppContext();
   const { publicKey } = useWallet();
 
@@ -254,6 +256,22 @@ export const BorrowWizardDrawer: React.FC<BorrowWizardDrawerProps> = ({ open, of
                 <Text strong>${collateralUsdValue.toFixed(2)} USD</Text>
               </div>
             </div>
+
+            {userXlmBalance < collateralAmount && (
+              <Alert
+                type="warning"
+                showIcon
+                message="Insufficient XLM Collateral Balance"
+                description={
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+                    <span>You need more test collateral to activate this loan.</span>
+                    <Button size="small" type="primary" onClick={() => navigate('/faucet?asset=XLM&returnTo=/app/marketplace')}>
+                      Open Faucet
+                    </Button>
+                  </div>
+                }
+              />
+            )}
 
             {/* HEALTH FACTOR WARNING SYSTEM */}
             {isHfCriticalDanger ? (

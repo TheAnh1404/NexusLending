@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Typography, Button } from 'antd';
-import { ArrowRightLeft } from 'lucide-react';
+import { Coins } from 'lucide-react';
 import { useAppContext } from '../app/AppContext';
 import { useWallet } from '../hooks/useWallet';
 import { isOpenLoanStatus } from '../utils/finance';
 import { getConnectedWalletAddress, isSameWalletAddress } from '../utils/wallet';
-import { SwapModal } from '../components/common/SwapModal';
 import { PortfolioSummary } from '../components/portfolio/PortfolioSummary';
 import { PerformanceChart } from '../components/portfolio/PerformanceChart';
 import { BreakdownChart } from '../components/portfolio/BreakdownChart';
@@ -16,9 +16,9 @@ import { EmptyPortfolio, ErrorPortfolio } from '../components/portfolio/Portfoli
 const { Title, Paragraph } = Typography;
 
 export const PortfolioPage: React.FC = () => {
+  const navigate = useNavigate();
   const { wallet, loans, oraclePrices, refreshData } = useAppContext();
   const { isConnected, publicKey } = useWallet();
-  const [swapModalOpen, setSwapModalOpen] = useState(false);
   const [errorState, setErrorState] = useState<string | null>(null);
   const connectedWalletAddress = getConnectedWalletAddress(publicKey, wallet.address);
 
@@ -115,11 +115,11 @@ export const PortfolioPage: React.FC = () => {
 
         <Button
           type="primary"
-          icon={<ArrowRightLeft size={16} />}
-          onClick={() => setSwapModalOpen(true)}
+          icon={<Coins size={16} />}
+          onClick={() => navigate('/faucet?returnTo=/app/portfolio')}
           style={{ borderRadius: 8, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6 }}
         >
-          Swap Assets
+          Get Test Tokens
         </Button>
       </div>
 
@@ -158,9 +158,7 @@ export const PortfolioPage: React.FC = () => {
         lentLoans={lentActive}
         onRefresh={() => refreshData()}
       />
-
-      {/* Quick Swap Modal */}
-      <SwapModal open={swapModalOpen} onCancel={() => setSwapModalOpen(false)} />
     </div>
   );
 };
+

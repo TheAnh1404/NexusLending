@@ -441,6 +441,47 @@ h1, h2, h3, h4, h5, h6 {
   animation: fade-in-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
+.faucet-shell,
+.faucet-page,
+.faucet-hero,
+.faucet-card-wrap,
+.faucet-card,
+.faucet-card .ant-card-body {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.faucet-shell {
+  overflow-x: hidden;
+}
+
+.faucet-asset-segmented,
+.faucet-asset-segmented .ant-segmented-group {
+  width: 100%;
+  min-width: 0;
+}
+
+.faucet-asset-segmented .ant-segmented-group {
+  display: flex;
+}
+
+.faucet-asset-segmented .ant-segmented-item {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.faucet-asset-segmented .ant-segmented-item-label {
+  min-width: 0;
+  padding-inline: 6px;
+  overflow: hidden;
+}
+
+.faucet-action-button > span:not(.ant-btn-icon) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 @media (max-width: 991px) {
   .app-content {
     padding: 24px !important;
@@ -485,6 +526,14 @@ h1, h2, h3, h4, h5, h6 {
 
   .public-header {
     padding: 0 16px !important;
+  }
+
+  .faucet-header {
+    padding: 0 16px !important;
+  }
+
+  .faucet-card .ant-card-body {
+    padding: 24px !important;
   }
 }
 

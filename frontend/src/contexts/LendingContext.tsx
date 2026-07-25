@@ -35,7 +35,7 @@ import {
   type OracleImpact,
 } from './lending/lendingState';
 import { loadLendingSnapshotFromApi } from './lending/lendingApiState';
-import { fetchWalletBalances, mockWalletBalances, zeroWalletBalances } from './lending/walletState';
+import { calculateMockWalletBalances, fetchWalletBalances, mockWalletBalances, zeroWalletBalances } from './lending/walletState';
 import { contractReturnId, txReceiptFromResult, txStageLabels } from './lending/sorobanActions';
 import { confirmedTransactionNotification } from './lending/notifications';
 import { clearDemoData, clearLegacyFrontendData } from './lending/storage';
@@ -191,6 +191,8 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   useEffect(() => {
     if (!isApiMode) return;
+    if (typeof window !== 'undefined' && window.location.pathname.startsWith('/faucet')) return;
+
     void refreshFromApi().catch((error) => {
       message.error(error instanceof Error ? error.message : 'Unable to load backend data.');
     });
@@ -218,11 +220,23 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       return;
     }
 
-    setSnapshot((prev) => ({
-      ...prev,
-      loans: normalizeLoans(prev.loans, prev.oraclePrices),
-      offers: normalizeOffers(prev.offers),
-    }));
+    setSnapshot((prev) => {
+      const activeAddress = prev.wallet.address;
+      const updatedBalances = activeAddress
+        ? calculateMockWalletBalances(activeAddress, prev.loans, prev.transactions)
+        : prev.wallet;
+
+      return {
+        ...prev,
+        loans: normalizeLoans(prev.loans, prev.oraclePrices),
+        offers: normalizeOffers(prev.offers),
+        wallet: {
+          ...prev.wallet,
+          balanceXLM: updatedBalances.balanceXLM,
+          balanceUSDC: updatedBalances.balanceUSDC,
+        },
+      };
+    });
   }, [isApiMode, refreshFromApi]);
 
   const connectWallet = useCallback((address: string, _role?: UserRole) => {

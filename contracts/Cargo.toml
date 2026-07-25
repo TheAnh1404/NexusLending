@@ -6,6 +6,7 @@ members = [
   "vault",
   "loan-manager",
   "marketplace",
+  "faucet",
 ]
 resolver = "2"
 
@@ -18,6 +19,7 @@ publish = false
 
 [dependencies]
 nexus-contracts-shared = { path = "shared" }
+nexus-faucet-contract = { path = "faucet" }
 nexus-loan-manager-contract = { path = "loan-manager" }
 nexus-marketplace-contract = { path = "marketplace" }
 nexus-oracle-contract = { path = "oracle" }

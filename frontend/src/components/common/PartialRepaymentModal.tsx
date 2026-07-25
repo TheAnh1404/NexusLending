@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Alert, Button, Form, InputNumber, Space, Typography } from 'antd';
+import { useNavigate } from 'react-router-dom';
 import type { FormInstance } from 'antd';
 import type { Loan, WalletState } from '../../types';
 import { calculateHealthFactor } from '../../utils/finance';
@@ -29,6 +30,7 @@ export const PartialRepaymentModal: React.FC<PartialRepaymentModalProps> = ({
   onCancel,
   onConfirm,
 }) => {
+  const navigate = useNavigate();
   const [amount, setAmount] = useState(0);
   const [isFullRepay, setIsFullRepay] = useState(true);
 
@@ -70,6 +72,23 @@ export const PartialRepaymentModal: React.FC<PartialRepaymentModalProps> = ({
             <Text>Wallet USDC Balance:</Text>
             <Text strong>${wallet.balanceUSDC.toLocaleString()}</Text>
           </div>
+
+          {wallet.balanceUSDC < amount && (
+            <Alert
+              type="warning"
+              showIcon
+              message="Insufficient Test USDC Balance"
+              description={
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+                  <span>Your test USDC balance is insufficient for this repayment.</span>
+                  <Button size="small" type="primary" onClick={() => navigate('/faucet?asset=USDC&returnTo=/app/my-loans')}>
+                    Open Faucet
+                  </Button>
+                </div>
+              }
+              style={{ marginBottom: '16px' }}
+            />
+          )}
 
           <Space orientation="horizontal" style={{ marginBottom: '16px', display: 'flex', flexWrap: 'wrap' }}>
             <Button
