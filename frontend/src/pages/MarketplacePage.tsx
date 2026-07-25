@@ -5,7 +5,7 @@ import { useAppContext } from '../app/AppContext';
 import { useWallet } from '../hooks/useWallet';
 import { CHAIN_MODE } from '../services/api/client';
 import { offersApi } from '../services/api/offers.api';
-import { calculateRequiredCollateral, formatCurrency, formatAddress } from '../utils/finance';
+import { calculateRequiredCollateral, formatAddress } from '../utils/finance';
 import { getConnectedWalletAddress, isSameWalletAddress } from '../utils/wallet';
 import { EmptyState } from '../components/common/CommonStates';
 import { BorrowWizardDrawer } from '../components/common/BorrowWizardDrawer';
@@ -15,6 +15,31 @@ import type { LoanOffer } from '../types';
 
 const { Title, Text } = Typography;
 const MARKETPLACE_CHAIN_SYNC_INTERVAL_MS = 10_000;
+
+const formatTokenAmount = (value: number, asset: string) => {
+  const assetSymbol = asset.toUpperCase();
+  const fractionDigits = assetSymbol === 'USDC' ? 2 : 4;
+
+  return `${new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: fractionDigits,
+  }).format(value)} ${assetSymbol}`;
+};
+
+const getTokenIconStyle = (asset: string): React.CSSProperties => ({
+  width: 32,
+  height: 32,
+  borderRadius: '50%',
+  backgroundColor: asset.toUpperCase() === 'USDC' ? '#2775ca' : '#14b8a6',
+  color: '#ffffff',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  fontWeight: 800,
+  fontSize: 12,
+  letterSpacing: 0,
+  flex: '0 0 32px',
+});
 
 export const MarketplacePage: React.FC = () => {
   const { loanOffers, loans, oraclePrices, wallet, refreshData } = useAppContext();
@@ -107,11 +132,14 @@ export const MarketplacePage: React.FC = () => {
       dataIndex: 'amount',
       key: 'amount',
       render: (val: number, record: LoanOffer) => (
-        <div>
+        <Space size={10} align="center">
+          <div style={getTokenIconStyle(record.asset)} aria-label={`${record.asset.toUpperCase()} token`}>
+            {record.asset.toUpperCase() === 'USDC' ? '$' : record.asset.slice(0, 1).toUpperCase()}
+          </div>
           <Text strong style={{ fontSize: 16, color: 'var(--text-main)' }}>
-            {formatCurrency(val, record.asset)}
+            {formatTokenAmount(val, record.asset)}
           </Text>
-        </div>
+        </Space>
       ),
     },
     {
