@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { validateBody } from '../../middlewares/validate';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { serialize } from '../../utils/serialize';
-import { activateLoanSchema, createLoanSchema, syncLoanSchema, updateLoanSchema } from './loans.schemas';
+import { activateLoanSchema, adminCloseLoanSchema, createLoanSchema, syncLoanSchema, updateLoanSchema } from './loans.schemas';
 import { loansService } from './loans.service';
 
 export const loansRouter = Router();
@@ -34,6 +34,15 @@ loansRouter.post(
   validateBody(syncLoanSchema),
   asyncHandler(async (req, res) => {
     const report = await loansService.recoverChain(req.body);
+    res.json({ data: serialize(report) });
+  })
+);
+
+loansRouter.post(
+  '/admin-close',
+  validateBody(adminCloseLoanSchema),
+  asyncHandler(async (req, res) => {
+    const report = await loansService.adminClose(req.body.loanIds, req.body.reason);
     res.json({ data: serialize(report) });
   })
 );

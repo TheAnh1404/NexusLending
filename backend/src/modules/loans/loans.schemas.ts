@@ -68,3 +68,10 @@ export type CreateLoanInput = z.infer<typeof createLoanSchema>;
 export type UpdateLoanInput = z.infer<typeof updateLoanSchema>;
 export type ActivateLoanInput = z.infer<typeof activateLoanSchema>;
 export type SyncLoanInput = z.infer<typeof syncLoanSchema>;
+
+export const adminCloseLoanSchema = z.object({
+  loanIds: z.array(z.string().min(1)).min(1),
+  reason: z.string().optional()
+});
+
+export type AdminCloseLoanInput = z.infer<typeof adminCloseLoanSchema>;

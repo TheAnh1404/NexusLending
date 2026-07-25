@@ -933,6 +933,112 @@ export const loansService = {
     throw new ApiError(400, 'Unsupported loan action');
   },
 
+  async adminClose(loanIds: string[], reason?: string) {
+    const now = new Date();
+    const results: Array<{
+      loanId: string;
+      success: boolean;
+      previousStatus?: string;
+      newStatus?: string;
+      offerId?: string | null;
+      offerReverted?: boolean;
+      lenderWallet?: string;
+      principal?: string;
+      error?: string;
+    }> = [];
+
+    for (const loanId of loanIds) {
+      try {
+        const loan = await prisma.loan.findUnique({
+          where: { id: loanId },
+          include: { offer: true }
+        });
+
+        if (!loan) {
+          results.push({ loanId, success: false, error: 'Loan not found' });
+          continue;
+        }
+
+        if (['Repaid', 'Closed', 'Liquidated'].includes(loan.status)) {
+          results.push({
+            loanId,
+            success: false,
+            error: `Loan already in terminal status: ${loan.status}`
+          });
+          continue;
+        }
+
+        const offerReverted = loan.offerId != null && loan.offer?.status === 'Matched';
+
+        await prisma.$transaction(async (tx) => {
+          await tx.loan.update({
+            where: { id: loanId },
+            data: {
+              status: 'Closed',
+              outstandingDebt: new Prisma.Decimal(0),
+              collateralAmount: new Prisma.Decimal(0),
+              healthFactor: new Prisma.Decimal(99.99),
+              ltv: new Prisma.Decimal(0),
+              riskZone: 'SAFE',
+              closedAt: now,
+              claimedByLender: false
+            }
+          });
+
+          if (offerReverted && loan.offerId) {
+            await tx.loanOffer.update({
+              where: { id: loan.offerId },
+              data: { status: 'Active' }
+            });
+          }
+
+          await tx.transaction.create({
+            data: {
+              txHash: `admin_close_${loanId}_${now.getTime()}`,
+              type: 'CLAIM_REPAYMENT',
+              wallet: loan.lenderWallet,
+              loanId,
+              offerId: loan.offerId,
+              asset: loan.loanAsset,
+              amount: loan.principal,
+              status: 'ADMIN',
+              metadata: {
+                action: 'ADMIN_CLOSE',
+                reason: reason ?? 'Loan closed by admin due to error; funds to be refunded to lender',
+                previousStatus: loan.status,
+                closedAt: now.toISOString()
+              }
+            }
+          });
+        });
+
+        results.push({
+          loanId,
+          success: true,
+          previousStatus: loan.status,
+          newStatus: 'Closed',
+          offerId: loan.offerId,
+          offerReverted,
+          lenderWallet: loan.lenderWallet,
+          principal: loan.principal.toString()
+        });
+      } catch (error) {
+        results.push({
+          loanId,
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error'
+        });
+      }
+    }
+
+    return {
+      processed: results.length,
+      successful: results.filter((r) => r.success).length,
+      failed: results.filter((r) => !r.success).length,
+      results
+    };
+  },
+
   async recalculateHealth() {
     const loans = await prisma.loan.findMany({
       where: { status: { in: activeStatuses } }
