@@ -107,11 +107,13 @@ export const calculateMockWalletBalances = (
   return balances;
 };
 
-const isConfiguredUsdcBalance = (balance: HorizonBalance): boolean =>
-  balance.asset_type !== 'native'
-  && balance.asset_code === USDC_ASSET_CODE
-  && !!USDC_ISSUER
-  && balance.asset_issuer === USDC_ISSUER;
+const isUsdcBalance = (balance: HorizonBalance): boolean => {
+  if (balance.asset_type === 'native') return false;
+  const code = (balance.asset_code || '').toUpperCase();
+  if (code === 'USDC' || code === USDC_ASSET_CODE.toUpperCase()) return true;
+  if (USDC_ISSUER && balance.asset_issuer === USDC_ISSUER) return true;
+  return false;
+};
 
 export const fetchWalletBalances = async (
   address: string,
@@ -137,8 +139,11 @@ export const fetchWalletBalances = async (
         for (const balance of data.balances) {
           if (balance.asset_type === 'native') {
             xlm = Number(balance.balance ?? 0);
-          } else if (isConfiguredUsdcBalance(balance)) {
-            usdc = Number(balance.balance ?? 0);
+          } else if (isUsdcBalance(balance)) {
+            const amount = Number(balance.balance ?? 0);
+            if (Number.isFinite(amount) && amount > 0) {
+              usdc += amount;
+            }
           }
         }
       }
