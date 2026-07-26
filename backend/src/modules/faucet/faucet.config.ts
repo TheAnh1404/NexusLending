@@ -14,9 +14,9 @@ export interface FaucetAssetConfig {
   icon: string;
 }
 
-const USDC_ISSUER = process.env.USDC_ISSUER ?? process.env.VITE_USDC_ISSUER ?? '';
+const USDC_ISSUER = process.env.USDC_ISSUER ?? process.env.VITE_USDC_ISSUER ?? 'GBP45VXHLS7MB72Q3WMTDXRKGHGCALENPTQ2VE7IRQH6MLJZ3X5LN3GG';
 const COLLATERAL_ISSUER = process.env.COLLATERAL_ISSUER ?? '';
-const USDC_CONTRACT_ID = process.env.USDC_CONTRACT_ID ?? '';
+const USDC_CONTRACT_ID = process.env.USDC_CONTRACT_ID ?? process.env.VITE_USDC_CONTRACT_ID ?? 'CBKAJFOAI5KIOMIPDXYBK3HBPWKFXIEQ564TKM4TMI7P6NU33WIVQYJT';
 const COLLATERAL_CONTRACT_ID = process.env.COLLATERAL_CONTRACT_ID ?? '';
 
 export const faucetAssetAllowlist: FaucetAssetConfig[] = [
