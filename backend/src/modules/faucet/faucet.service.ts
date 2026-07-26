@@ -304,8 +304,9 @@ export class FaucetService {
     }
 
     let distributorKey: Keypair;
-    if (process.env.STELLAR_FAUCET_SECRET && process.env.STELLAR_FAUCET_SECRET.startsWith('S')) {
-      distributorKey = Keypair.fromSecret(process.env.STELLAR_FAUCET_SECRET);
+    const secretKey = (process.env.STELLAR_FAUCET_SECRET ?? '').trim();
+    if (secretKey && StrKey.isValidEd25519SecretSeed(secretKey)) {
+      distributorKey = Keypair.fromSecret(secretKey);
     } else {
       distributorKey = Keypair.random();
       try {
@@ -316,12 +317,12 @@ export class FaucetService {
       }
     }
 
-    const contractId = assetConfig.contractId;
-    if (!contractId) {
-      if (assetConfig.issuer) {
+    const contractId = (assetConfig.contractId ?? '').trim();
+    if (!contractId || !StrKey.isValidContract(contractId)) {
+      if (assetConfig.issuer && StrKey.isValidEd25519PublicKey(assetConfig.issuer.trim())) {
         return this.fundClassicAsset(cleanAddress, assetConfig);
       }
-      throw new Error(`Contract ID is not configured for ${assetConfig.code}.`);
+      throw new Error(`Contract ID is invalid or not configured for ${assetConfig.code}.`);
     }
 
     const isAuthorizedMinter = assetConfig.issuer ? distributorKey.publicKey() === assetConfig.issuer : true;
@@ -431,9 +432,9 @@ export class FaucetService {
   ): Promise<{ txHash: string; balance: number }> {
     try {
       let distributorKey: Keypair;
-
-      if (process.env.STELLAR_FAUCET_SECRET && process.env.STELLAR_FAUCET_SECRET.startsWith('S')) {
-        distributorKey = Keypair.fromSecret(process.env.STELLAR_FAUCET_SECRET);
+      const secretKey = (process.env.STELLAR_FAUCET_SECRET ?? '').trim();
+      if (secretKey && StrKey.isValidEd25519SecretSeed(secretKey)) {
+        distributorKey = Keypair.fromSecret(secretKey);
       } else {
         distributorKey = Keypair.random();
         try {
