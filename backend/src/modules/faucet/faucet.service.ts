@@ -479,6 +479,16 @@ export class FaucetService {
       };
     } catch (err: any) {
       const resultCodes = err?.response?.data?.extras?.result_codes;
+      const opCodes: string[] = Array.isArray(resultCodes?.operations) ? resultCodes.operations : [];
+
+      if (opCodes.includes('op_no_trust') || opCodes.includes('op_src_no_trust')) {
+        const issuerAddr = asset.isNative() ? '' : (asset.getIssuer() || '');
+        const issuerShort = issuerAddr ? ` (Issuer: ${issuerAddr.slice(0, 6)}...)` : '';
+        throw new Error(
+          `Recipient account (${recipientAddress.slice(0, 6)}...${recipientAddress.slice(-6)}) does not have a valid trustline for ${asset.getCode()}${issuerShort}. Please add/re-add the ${asset.getCode()} trustline in Freighter.`
+        );
+      }
+
       const horizonDetail = err?.response?.data?.detail ?? err?.response?.data?.title ?? (err instanceof Error ? err.message : String(err));
       const detailedMsg = resultCodes ? `${horizonDetail} (Codes: ${JSON.stringify(resultCodes)})` : horizonDetail;
 
