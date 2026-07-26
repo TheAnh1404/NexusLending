@@ -28,7 +28,6 @@
     "zod": "^4.1.12"
   },
   "devDependencies": {
-    "@esbuild/win32-x64": "^0.28.1",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.5",
     "@types/node": "^24.10.1",
