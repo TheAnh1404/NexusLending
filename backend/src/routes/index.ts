@@ -1,12 +1,12 @@
 import { Router } from 'express';
-import { analyticsRouter } from '../modules/analytics/analytics.routes';
-import { faucetRouter } from '../modules/faucet/faucet.routes';
-import { indexerRouter } from '../modules/indexer/indexer.routes';
-import { loansRouter } from '../modules/loans/loans.routes';
-import { offersRouter } from '../modules/offers/offers.routes';
-import { oracleRouter } from '../modules/oracle/oracle.routes';
-import { transactionsRouter } from '../modules/transactions/transactions.routes';
-import { usersRouter } from '../modules/users/users.routes';
+import { analyticsRouter } from '../modules/analytics/analytics.routes.js';
+import { faucetRouter } from '../modules/faucet/faucet.routes.js';
+import { indexerRouter } from '../modules/indexer/indexer.routes.js';
+import { loansRouter } from '../modules/loans/loans.routes.js';
+import { offersRouter } from '../modules/offers/offers.routes.js';
+import { oracleRouter } from '../modules/oracle/oracle.routes.js';
+import { transactionsRouter } from '../modules/transactions/transactions.routes.js';
+import { usersRouter } from '../modules/users/users.routes.js';
 
 export const apiRouter = Router();
 

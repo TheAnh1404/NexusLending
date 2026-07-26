@@ -1,4 +1,4 @@
-import { ApiError } from '../../utils/apiError';
+import { ApiError } from '../../utils/apiError.js';
 
 export class VerificationError extends ApiError {
   constructor(message: string, statusCode = 400) {

@@ -1,10 +1,10 @@
 import { Router } from 'express';
 
-import { validateBody } from '../../middlewares/validate';
-import { asyncHandler } from '../../utils/asyncHandler';
-import { serialize } from '../../utils/serialize';
-import { upsertOraclePriceSchema } from './oracle.schemas';
-import { oracleService } from './oracle.service';
+import { validateBody } from '../../middlewares/validate.js';
+import { asyncHandler } from '../../utils/asyncHandler.js';
+import { serialize } from '../../utils/serialize.js';
+import { upsertOraclePriceSchema } from './oracle.schemas.js';
+import { oracleService } from './oracle.service.js';
 
 export const oracleRouter = Router();
 

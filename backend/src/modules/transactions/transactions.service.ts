@@ -1,8 +1,8 @@
 import { Prisma } from '@prisma/client';
 
-import { prisma } from '../../prisma/client';
-import { explorerService, transactionVerifierService } from '../verification';
-import type { CreateTransactionInput } from './transactions.schemas';
+import { prisma } from '../../prisma/client.js';
+import { explorerService, transactionVerifierService } from '../verification/index.js';
+import type { CreateTransactionInput } from './transactions.schemas.js';
 
 interface TransactionListQuery {
   wallet?: string;

@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { MAX_FIXED_APR_BPS } from '../../utils/finance';
-import { confirmedChainReceiptSchema, optionalDateSchema } from '../transactions/transactions.schemas';
+import { MAX_FIXED_APR_BPS } from '../../utils/finance.js';
+import { confirmedChainReceiptSchema, optionalDateSchema } from '../transactions/transactions.schemas.js';
 
 const decimalInput = z.union([z.string().min(1), z.number()]).transform(String);
 

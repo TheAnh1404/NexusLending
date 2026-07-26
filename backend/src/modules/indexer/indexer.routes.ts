@@ -1,7 +1,7 @@
 import { Router } from 'express';
 
-import { asyncHandler } from '../../utils/asyncHandler';
-import { indexerService } from './indexer.service';
+import { asyncHandler } from '../../utils/asyncHandler.js';
+import { indexerService } from './indexer.service.js';
 
 export const indexerRouter = Router();
 

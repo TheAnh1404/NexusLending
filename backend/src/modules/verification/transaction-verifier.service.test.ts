@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { TransactionVerifierService } from './transaction-verifier.service';
-import { TransactionNotFoundError, WrongNetworkError } from './verification.errors';
+import { TransactionVerifierService } from './transaction-verifier.service.js';
+import { TransactionNotFoundError, WrongNetworkError } from './verification.errors.js';
 
 const txHash = 'b'.repeat(64);
 

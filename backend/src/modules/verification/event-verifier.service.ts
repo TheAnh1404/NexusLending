@@ -6,8 +6,8 @@ import {
   WrongEntityError,
   WrongEventError,
   WrongWalletError,
-} from './verification.errors';
-import type { NormalizedEvent, VerificationAction, VerificationRequest } from './verification.types';
+} from './verification.errors.js';
+import type { NormalizedEvent, VerificationAction, VerificationRequest } from './verification.types.js';
 
 const actionEvents: Record<VerificationAction, string[]> = {
   create_offer: ['offer_created'],

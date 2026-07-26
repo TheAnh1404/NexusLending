@@ -2,15 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Prisma } from '@prisma/client';
 
-import { EventVerifierService } from './event-verifier.service';
+import { EventVerifierService } from './event-verifier.service.js';
 import {
   WrongAmountError,
   WrongContractError,
   WrongEntityError,
   WrongEventError,
   WrongWalletError,
-} from './verification.errors';
-import type { NormalizedEvent } from './verification.types';
+} from './verification.errors.js';
+import type { NormalizedEvent } from './verification.types.js';
 
 const baseEvent: NormalizedEvent = {
   contractId: 'C_MARKET',

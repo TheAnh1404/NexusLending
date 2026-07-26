@@ -1,5 +1,5 @@
 import { Address, Asset, Contract, Horizon, Keypair, Memo, Networks, Operation, StrKey, TransactionBuilder, nativeToScVal, rpc } from '@stellar/stellar-sdk';
-import { faucetAssetAllowlist, type FaucetAssetConfig } from './faucet.config';
+import { faucetAssetAllowlist, type FaucetAssetConfig } from './faucet.config.js';
 
 const HORIZON_TESTNET_URL = 'https://horizon-testnet.stellar.org';
 const horizonServer = new Horizon.Server(HORIZON_TESTNET_URL);

@@ -1,7 +1,7 @@
 import type { NextFunction, Request, Response } from 'express';
 import { ZodError } from 'zod';
 
-import { ApiError } from '../utils/apiError';
+import { ApiError } from '../utils/apiError.js';
 
 export const notFoundHandler = (req: Request, _res: Response, next: NextFunction): void => {
   next(new ApiError(404, `Route not found: ${req.method} ${req.originalUrl}`));

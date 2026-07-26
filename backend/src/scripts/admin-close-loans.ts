@@ -1,6 +1,6 @@
-import { prisma } from '../prisma/client';
-import { serialize } from '../utils/serialize';
-import { loansService } from '../modules/loans/loans.service';
+import { prisma } from '../prisma/client.js';
+import { serialize } from '../utils/serialize.js';
+import { loansService } from '../modules/loans/loans.service.js';
 
 const loanIds = process.argv
   .filter((arg) => arg.startsWith('--id='))

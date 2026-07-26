@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { faucetController } from './faucet.controller';
+import { faucetController } from './faucet.controller.js';
 
 export const faucetRouter = Router();
 

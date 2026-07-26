@@ -1,16 +1,16 @@
 import { Router } from 'express';
 
-import { validateBody } from '../../middlewares/validate';
-import { asyncHandler } from '../../utils/asyncHandler';
-import { serialize } from '../../utils/serialize';
+import { validateBody } from '../../middlewares/validate.js';
+import { asyncHandler } from '../../utils/asyncHandler.js';
+import { serialize } from '../../utils/serialize.js';
 import {
   acceptOfferSchema,
   createOfferSchema,
   offerActionWalletSchema,
   syncOfferSchema,
   updateOfferStatusSchema
-} from './offers.schemas';
-import { offersService } from './offers.service';
+} from './offers.schemas.js';
+import { offersService } from './offers.service.js';
 
 export const offersRouter = Router();
 

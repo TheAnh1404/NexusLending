@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { prisma } from '../../prisma/client';
-import { VerificationService } from './verification.service';
-import type { NormalizedEvent, RpcTransaction } from './verification.types';
+import { prisma } from '../../prisma/client.js';
+import { VerificationService } from './verification.service.js';
+import type { NormalizedEvent, RpcTransaction } from './verification.types.js';
 
 const txHash = 'c'.repeat(64);
 

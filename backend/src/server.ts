@@ -1,7 +1,7 @@
-import { app } from './app';
-import { env } from './config/env';
-import { prisma } from './prisma/client';
-import { indexerService } from './modules/indexer/indexer.service';
+import { app } from './app.js';
+import { env } from './config/env.js';
+import { prisma } from './prisma/client.js';
+import { indexerService } from './modules/indexer/indexer.service.js';
 
 // Start Soroban event indexer in background.
 indexerService.start();

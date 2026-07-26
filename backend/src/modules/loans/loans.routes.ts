@@ -1,10 +1,10 @@
 import { Router } from 'express';
 
-import { validateBody } from '../../middlewares/validate';
-import { asyncHandler } from '../../utils/asyncHandler';
-import { serialize } from '../../utils/serialize';
-import { activateLoanSchema, adminCloseLoanSchema, createLoanSchema, syncLoanSchema, updateLoanSchema } from './loans.schemas';
-import { loansService } from './loans.service';
+import { validateBody } from '../../middlewares/validate.js';
+import { asyncHandler } from '../../utils/asyncHandler.js';
+import { serialize } from '../../utils/serialize.js';
+import { activateLoanSchema, adminCloseLoanSchema, createLoanSchema, syncLoanSchema, updateLoanSchema } from './loans.schemas.js';
+import { loansService } from './loans.service.js';
 
 export const loansRouter = Router();
 

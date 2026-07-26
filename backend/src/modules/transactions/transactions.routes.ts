@@ -1,10 +1,10 @@
 import { Router } from 'express';
 
-import { validateBody } from '../../middlewares/validate';
-import { asyncHandler } from '../../utils/asyncHandler';
-import { serialize } from '../../utils/serialize';
-import { createTransactionSchema } from './transactions.schemas';
-import { transactionsService } from './transactions.service';
+import { validateBody } from '../../middlewares/validate.js';
+import { asyncHandler } from '../../utils/asyncHandler.js';
+import { serialize } from '../../utils/serialize.js';
+import { createTransactionSchema } from './transactions.schemas.js';
+import { transactionsService } from './transactions.service.js';
 
 export const transactionsRouter = Router();
 

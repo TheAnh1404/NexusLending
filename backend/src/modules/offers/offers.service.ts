@@ -1,11 +1,11 @@
 import { OfferStatus, Prisma, TransactionType } from '@prisma/client';
 
-import { env } from '../../config/env';
-import { prisma } from '../../prisma/client';
-import { ApiError } from '../../utils/apiError';
-import { MAX_FIXED_APR_BPS, calculateRepaymentAmount } from '../../utils/finance';
-import { DEFAULT_GRACE_PERIOD_DAYS, buildRiskPatch } from '../loans/loans.service';
-import { createLedgerTransaction, requireConfirmedReceipt } from '../transactions/chainReceipt';
+import { env } from '../../config/env.js';
+import { prisma } from '../../prisma/client.js';
+import { ApiError } from '../../utils/apiError.js';
+import { MAX_FIXED_APR_BPS, calculateRepaymentAmount } from '../../utils/finance.js';
+import { DEFAULT_GRACE_PERIOD_DAYS, buildRiskPatch } from '../loans/loans.service.js';
+import { createLedgerTransaction, requireConfirmedReceipt } from '../transactions/chainReceipt.js';
 import {
   contractReaderService,
   explorerService,
@@ -15,15 +15,15 @@ import {
   WrongContractError,
   WrongNetworkError,
   WrongWalletError,
-} from '../verification';
-import type { VerificationTransactionInput, VerifiedTransaction } from '../verification';
+} from '../verification/index.js';
+import type { VerificationTransactionInput, VerifiedTransaction } from '../verification/index.js';
 import type {
   AcceptOfferInput,
   CreateOfferInput,
   OfferActionWalletInput,
   SyncOfferInput,
   UpdateOfferStatusInput
-} from './offers.schemas';
+} from './offers.schemas.js';
 
 const SAFE_HEALTH_FACTOR_BPS = 14_000;
 const BPS_DENOMINATOR = 10_000;

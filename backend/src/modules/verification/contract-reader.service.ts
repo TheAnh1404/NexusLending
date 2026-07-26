@@ -7,8 +7,8 @@ import {
   TransactionBuilder,
 } from '@stellar/stellar-sdk';
 
-import { env } from '../../config/env';
-import { VerificationError } from './verification.errors';
+import { env } from '../../config/env.js';
+import { VerificationError } from './verification.errors.js';
 
 interface RpcClient {
   getAccount(accountId: string): Promise<{ sequenceNumber(): string }>;

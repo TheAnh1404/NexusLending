@@ -1,11 +1,11 @@
 import { Prisma } from '@prisma/client';
 
-import { env } from '../../config/env';
-import { prisma } from '../../prisma/client';
-import { loansService } from '../loans/loans.service';
-import { createLedgerTransaction } from '../transactions/chainReceipt';
-import { verificationService } from '../verification';
-import type { UpsertOraclePriceInput } from './oracle.schemas';
+import { env } from '../../config/env.js';
+import { prisma } from '../../prisma/client.js';
+import { loansService } from '../loans/loans.service.js';
+import { createLedgerTransaction } from '../transactions/chainReceipt.js';
+import { verificationService } from '../verification/index.js';
+import type { UpsertOraclePriceInput } from './oracle.schemas.js';
 
 export const oracleService = {
   async list() {

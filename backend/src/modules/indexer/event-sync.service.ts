@@ -1,11 +1,11 @@
 import { LoanStatus, Prisma, TransactionType } from '@prisma/client';
 
-import { prisma } from '../../prisma/client';
-import { MAX_FIXED_APR_BPS } from '../../utils/finance';
-import { buildRiskPatch } from '../loans/loans.service';
-import { createLedgerTransaction } from '../transactions/chainReceipt';
-import { contractReaderService } from '../verification';
-import type { NormalizedEvent, VerifiedTransaction } from '../verification';
+import { prisma } from '../../prisma/client.js';
+import { MAX_FIXED_APR_BPS } from '../../utils/finance.js';
+import { buildRiskPatch } from '../loans/loans.service.js';
+import { createLedgerTransaction } from '../transactions/chainReceipt.js';
+import { contractReaderService } from '../verification/index.js';
+import type { NormalizedEvent, VerifiedTransaction } from '../verification/index.js';
 
 const transactionTypeForEvent: Record<string, TransactionType> = {
   offer_created: 'CREATE_OFFER',

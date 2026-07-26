@@ -1,12 +1,12 @@
 import { rpc } from '@stellar/stellar-sdk';
 import { Prisma } from '@prisma/client';
 
-import { env } from '../../config/env';
-import { prisma } from '../../prisma/client';
-import { explorerService } from '../verification';
-import { TransactionVerifierService } from '../verification/transaction-verifier.service';
-import type { RpcTransaction } from '../verification/verification.types';
-import { eventSyncService, EventSyncService } from './event-sync.service';
+import { env } from '../../config/env.js';
+import { prisma } from '../../prisma/client.js';
+import { explorerService } from '../verification/index.js';
+import { TransactionVerifierService } from '../verification/transaction-verifier.service.js';
+import type { RpcTransaction } from '../verification/verification.types.js';
+import { eventSyncService, EventSyncService } from './event-sync.service.js';
 
 interface RpcClient {
   getLatestLedger(): Promise<{ sequence: number }>;

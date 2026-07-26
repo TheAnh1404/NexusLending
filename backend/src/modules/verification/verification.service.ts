@@ -1,16 +1,16 @@
 import { Prisma } from '@prisma/client';
 
-import { prisma } from '../../prisma/client';
-import { eventVerifierService, EventVerifierService } from './event-verifier.service';
-import { explorerService, ExplorerService } from './explorer.service';
-import { transactionVerifierService, TransactionVerifierService } from './transaction-verifier.service';
-import { VerificationError } from './verification.errors';
+import { prisma } from '../../prisma/client.js';
+import { eventVerifierService, EventVerifierService } from './event-verifier.service.js';
+import { explorerService, ExplorerService } from './explorer.service.js';
+import { transactionVerifierService, TransactionVerifierService } from './transaction-verifier.service.js';
+import { VerificationError } from './verification.errors.js';
 import type {
   NormalizedEvent,
   VerificationRequest,
   VerificationTransactionInput,
   VerifiedTransaction,
-} from './verification.types';
+} from './verification.types.js';
 
 const txHashPattern = /^[a-fA-F0-9]{64}$/;
 

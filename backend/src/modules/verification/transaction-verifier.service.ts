@@ -6,14 +6,14 @@ import {
   normalizeStellarNetworkName,
   passphraseForNetwork,
   type StellarNetworkName,
-} from '../../config/env';
-import { explorerService, ExplorerService } from './explorer.service';
+} from '../../config/env.js';
+import { explorerService, ExplorerService } from './explorer.service.js';
 import {
   TransactionNotFoundError,
   TransactionNotSuccessfulError,
   WrongNetworkError,
-} from './verification.errors';
-import type { EntityType, NormalizedEvent, RpcTransaction } from './verification.types';
+} from './verification.errors.js';
+import type { EntityType, NormalizedEvent, RpcTransaction } from './verification.types.js';
 
 interface RpcClient {
   getLatestLedger(): Promise<{ sequence: number }>;

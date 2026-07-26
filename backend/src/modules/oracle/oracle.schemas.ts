@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { confirmedChainReceiptSchema } from '../transactions/transactions.schemas';
+import { confirmedChainReceiptSchema } from '../transactions/transactions.schemas.js';
 
 const decimalInput = z.union([z.string().min(1), z.number()]).transform(String);
 

@@ -1,6 +1,6 @@
-import { prisma } from '../../prisma/client';
-import { ApiError } from '../../utils/apiError';
-import type { CreateUserInput } from './users.schemas';
+import { prisma } from '../../prisma/client.js';
+import { ApiError } from '../../utils/apiError.js';
+import type { CreateUserInput } from './users.schemas.js';
 
 export const usersService = {
   async getByWallet(wallet: string) {

@@ -1,7 +1,7 @@
 import { LoanStatus, Prisma, RiskZone } from '@prisma/client';
 
-import { prisma } from '../../prisma/client';
-import { loansService } from '../loans/loans.service';
+import { prisma } from '../../prisma/client.js';
+import { loansService } from '../loans/loans.service.js';
 
 const DAY_MS = 86_400_000;
 const DEFAULT_GRACE_PERIOD_DAYS = 7;

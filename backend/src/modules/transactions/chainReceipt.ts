@@ -1,8 +1,8 @@
 import { Prisma, TransactionType } from '@prisma/client';
 
-import { ApiError } from '../../utils/apiError';
-import { explorerService } from '../verification/explorer.service';
-import type { LedgerTransactionInput, VerifiedTransaction } from '../verification/verification.types';
+import { ApiError } from '../../utils/apiError.js';
+import { explorerService } from '../verification/explorer.service.js';
+import type { LedgerTransactionInput, VerifiedTransaction } from '../verification/verification.types.js';
 
 export interface ConfirmedChainReceiptInput {
   txHash?: string;

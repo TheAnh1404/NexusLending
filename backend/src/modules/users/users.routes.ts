@@ -1,10 +1,10 @@
 import { Router } from 'express';
 
-import { validateBody } from '../../middlewares/validate';
-import { asyncHandler } from '../../utils/asyncHandler';
-import { serialize } from '../../utils/serialize';
-import { createUserSchema } from './users.schemas';
-import { usersService } from './users.service';
+import { validateBody } from '../../middlewares/validate.js';
+import { asyncHandler } from '../../utils/asyncHandler.js';
+import { serialize } from '../../utils/serialize.js';
+import { createUserSchema } from './users.schemas.js';
+import { usersService } from './users.service.js';
 
 export const usersRouter = Router();
 

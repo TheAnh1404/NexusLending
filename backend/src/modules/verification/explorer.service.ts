@@ -1,4 +1,4 @@
-import { env, normalizeStellarNetworkName } from '../../config/env';
+import { env, normalizeStellarNetworkName } from '../../config/env.js';
 
 export class ExplorerService {
   constructor(private readonly network: string = env.stellarNetwork) {}

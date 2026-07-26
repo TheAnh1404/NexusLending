@@ -1,8 +1,8 @@
 import { Router } from 'express';
 
-import { asyncHandler } from '../../utils/asyncHandler';
-import { serialize } from '../../utils/serialize';
-import { analyticsService } from './analytics.service';
+import { asyncHandler } from '../../utils/asyncHandler.js';
+import { serialize } from '../../utils/serialize.js';
+import { analyticsService } from './analytics.service.js';
 
 export const analyticsRouter = Router();
 

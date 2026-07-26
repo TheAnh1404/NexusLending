@@ -1,12 +1,12 @@
 import { LoanStatus, Prisma, RiskZone } from '@prisma/client';
 
-import { env } from '../../config/env';
-import { prisma } from '../../prisma/client';
-import { ApiError } from '../../utils/apiError';
+import { env } from '../../config/env.js';
+import { prisma } from '../../prisma/client.js';
+import { ApiError } from '../../utils/apiError.js';
 import {
   MAX_FIXED_APR_BPS,
-} from '../../utils/finance';
-import { createLedgerTransaction, requireConfirmedReceipt } from '../transactions/chainReceipt';
+} from '../../utils/finance.js';
+import { createLedgerTransaction, requireConfirmedReceipt } from '../transactions/chainReceipt.js';
 import {
   contractReaderService,
   explorerService,
@@ -16,9 +16,9 @@ import {
   WrongContractError,
   WrongNetworkError,
   WrongWalletError,
-} from '../verification';
-import type { OnChainLoan, VerificationTransactionInput, VerifiedTransaction } from '../verification';
-import type { ActivateLoanInput, CreateLoanInput, SyncLoanInput, UpdateLoanInput } from './loans.schemas';
+} from '../verification/index.js';
+import type { OnChainLoan, VerificationTransactionInput, VerifiedTransaction } from '../verification/index.js';
+import type { ActivateLoanInput, CreateLoanInput, SyncLoanInput, UpdateLoanInput } from './loans.schemas.js';
 
 const activeStatuses: LoanStatus[] = [
   'Active',

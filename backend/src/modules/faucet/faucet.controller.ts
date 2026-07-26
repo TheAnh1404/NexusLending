@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import { faucetService } from './faucet.service';
+import { faucetService } from './faucet.service.js';
 
 export const faucetController = {
   getConfig(_req: Request, res: Response): void {
