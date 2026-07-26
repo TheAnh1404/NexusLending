@@ -400,14 +400,30 @@ export const AppSidebar: React.FC = () => {
                 border: '1px solid var(--border-light, #e2e8f0)',
                 cursor: 'pointer',
                 display: 'flex',
-                alignItems: 'center',
-                gap: 8,
+                flexDirection: 'column',
+                gap: 6,
               }}
             >
-              <Wallet size={16} style={{ color: 'var(--primary-color)' }} />
-              <div style={{ flex: 1, overflow: 'hidden' }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-main)' }}>Connected</div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{shortAddress}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Wallet size={16} style={{ color: 'var(--primary-color)' }} />
+                <div style={{ flex: 1, overflow: 'hidden' }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-main)' }}>Connected</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{shortAddress}</div>
+                </div>
+              </div>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: 'var(--text-secondary)',
+                  borderTop: '1px solid var(--border-light, #f1f5f9)',
+                  paddingTop: 6,
+                }}
+              >
+                <span>{wallet.balanceXLM.toLocaleString(undefined, { maximumFractionDigits: 2 })} XLM</span>
+                <span style={{ color: '#4f46e5' }}>{wallet.balanceUSDC.toLocaleString(undefined, { maximumFractionDigits: 2 })} USDC</span>
               </div>
             </div>
           </Dropdown>

@@ -92,8 +92,6 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const isApiMode = DATA_MODE === 'api';
 
   const refreshLiveWalletBalances = useCallback(async (): Promise<void> => {
-    if (!isApiMode) return;
-
     const currentWallet = walletRef.current;
     if (!currentWallet.connected || !currentWallet.address) return;
 
@@ -115,7 +113,7 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         wallet: nextWallet,
       };
     });
-  }, [isApiMode]);
+  }, []);
 
   const runSorobanTransaction = useCallback(async (
     send: (onStage: (stage: TxStage) => void) => Promise<TxResult>
@@ -131,6 +129,7 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const txRes = await send(showStage);
       closeStageMessage?.();
       notification.success(confirmedTransactionNotification(txRes));
+      void refreshLiveWalletBalances();
       return txRes;
     } catch (error) {
       closeStageMessage?.();
@@ -154,10 +153,22 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return runSorobanTransaction(send);
   }, [runSorobanTransaction]);
 
-
   useEffect(() => {
     walletRef.current = snapshot.wallet;
   }, [snapshot.wallet]);
+
+  // Auto-poll live wallet balances every 6 seconds while wallet is connected
+  useEffect(() => {
+    const { connected, address } = snapshot.wallet;
+    if (!connected || !address) return;
+
+    void refreshLiveWalletBalances();
+    const timer = setInterval(() => {
+      void refreshLiveWalletBalances();
+    }, 6000);
+
+    return () => clearInterval(timer);
+  }, [snapshot.wallet.connected, snapshot.wallet.address, refreshLiveWalletBalances]);
 
   useEffect(() => {
     if (!isApiMode) {

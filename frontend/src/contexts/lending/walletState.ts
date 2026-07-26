@@ -117,57 +117,40 @@ export const fetchWalletBalances = async (
   address: string,
   fallbackBalances: WalletBalances = zeroWalletBalances
 ): Promise<WalletBalances> => {
+  if (!address || typeof address !== 'string' || !address.trim()) {
+    return zeroWalletBalances;
+  }
+
+  const cleanAddress = address.trim();
+
   try {
     const horizonUrl = HORIZON_URL.replace(/\/$/, '');
-    const response = await fetch(`${horizonUrl}/accounts/${address}`);
-    let xlm = fallbackBalances.balanceXLM;
-    let usdc = fallbackBalances.balanceUSDC;
+    const response = await fetch(`${horizonUrl}/accounts/${cleanAddress}`);
+    let xlm = 0;
+    let usdc = 0;
+    let accountExists = false;
 
     if (response.ok) {
-      const data = await response.json() as { balances?: HorizonBalance[] };
+      accountExists = true;
+      const data = (await response.json()) as { balances?: HorizonBalance[] };
       if (Array.isArray(data.balances)) {
-        let foundXlm = false;
-        let foundUsdc = false;
         for (const balance of data.balances) {
           if (balance.asset_type === 'native') {
             xlm = Number(balance.balance ?? 0);
-            foundXlm = true;
           } else if (isConfiguredUsdcBalance(balance)) {
             usdc = Number(balance.balance ?? 0);
-            foundUsdc = true;
           }
         }
-        if (!foundXlm) xlm = fallbackBalances.balanceXLM;
-        if (!foundUsdc) usdc = fallbackBalances.balanceUSDC;
       }
     }
 
-    // Apply local Faucet claims so wallet balance updates instantly for both XLM & USDC
-    if (typeof localStorage !== 'undefined') {
-      try {
-        const rawClaims = localStorage.getItem('nexus_faucet_recent_requests');
-        if (rawClaims) {
-          const claims = JSON.parse(rawClaims) as Array<{ walletAddress?: string; asset?: string; amount?: string }>;
-          claims.forEach((claim) => {
-            if (!claim.walletAddress || claim.walletAddress.trim() === address.trim()) {
-              const claimNum = parseFloat(claim.amount || '0');
-              const assetUpper = (claim.asset || '').toUpperCase();
-              if (assetUpper === 'USDC') {
-                usdc += claimNum || 1000;
-              } else if (assetUpper === 'XLM' && !response.ok) {
-                xlm += claimNum || 100;
-              }
-            }
-          });
-        }
-      } catch {
-        // Ignore JSON error
-      }
+    if (!accountExists) {
+      return zeroWalletBalances;
     }
 
     return {
-      balanceXLM: Number.isFinite(xlm) ? xlm : fallbackBalances.balanceXLM,
-      balanceUSDC: Number.isFinite(usdc) ? usdc : fallbackBalances.balanceUSDC,
+      balanceXLM: Number.isFinite(xlm) && xlm >= 0 ? xlm : fallbackBalances.balanceXLM,
+      balanceUSDC: Number.isFinite(usdc) && usdc >= 0 ? usdc : fallbackBalances.balanceUSDC,
     };
   } catch (error) {
     console.error('Error fetching wallet balances from Horizon:', error);
