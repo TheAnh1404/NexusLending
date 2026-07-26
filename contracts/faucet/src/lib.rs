@@ -93,7 +93,9 @@ impl FaucetContract {
             enabled,
         };
 
-        env.storage().persistent().set(&DataKey::Asset(asset), &config);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Asset(asset), &config);
         bump_instance(&env);
     }
 
@@ -104,7 +106,11 @@ impl FaucetContract {
 
     /// Check if a recipient is eligible to claim an asset and remaining cooldown ledgers
     pub fn get_eligibility(env: Env, recipient: Address, asset: Address) -> (bool, u32) {
-        let config: AssetConfig = match env.storage().persistent().get::<DataKey, AssetConfig>(&DataKey::Asset(asset.clone())) {
+        let config: AssetConfig = match env
+            .storage()
+            .persistent()
+            .get::<DataKey, AssetConfig>(&DataKey::Asset(asset.clone()))
+        {
             Some(cfg) if cfg.enabled => cfg,
             _ => return (false, 0),
         };
@@ -144,10 +150,7 @@ impl FaucetContract {
 
         let current_ledger = env.ledger().sequence();
         let last_claim_key = DataKey::LastClaim(recipient.clone(), asset.clone());
-        let last_claim: Option<u32> = env
-            .storage()
-            .persistent()
-            .get(&last_claim_key);
+        let last_claim: Option<u32> = env.storage().persistent().get(&last_claim_key);
 
         if let Some(last_seq) = last_claim {
             let elapsed = current_ledger.saturating_sub(last_seq);
@@ -157,14 +160,20 @@ impl FaucetContract {
         }
 
         // Record current claim ledger sequence
-        env.storage().persistent().set(&last_claim_key, &current_ledger);
+        env.storage()
+            .persistent()
+            .set(&last_claim_key, &current_ledger);
 
         // Perform token transfer or mint to recipient
         let token_client = TokenClient::new(&env, &asset);
         let contract_balance = token_client.balance(&env.current_contract_address());
 
         if contract_balance >= config.claim_amount {
-            token_client.transfer(&env.current_contract_address(), &recipient, &config.claim_amount);
+            token_client.transfer(
+                &env.current_contract_address(),
+                &recipient,
+                &config.claim_amount,
+            );
         } else {
             // Attempt owner-restricted mint if faucet is authorized minter
             let stellar_client = StellarAssetClient::new(&env, &asset);
@@ -186,7 +195,11 @@ impl FaucetContract {
 
         for asset in assets.iter() {
             // Internal claim logic per asset
-            let config: AssetConfig = match env.storage().persistent().get::<DataKey, AssetConfig>(&DataKey::Asset(asset.clone())) {
+            let config: AssetConfig = match env
+                .storage()
+                .persistent()
+                .get::<DataKey, AssetConfig>(&DataKey::Asset(asset.clone()))
+            {
                 Some(cfg) if cfg.enabled => cfg,
                 _ => continue, // Skip unconfigured/disabled assets gracefully
             };
@@ -202,13 +215,19 @@ impl FaucetContract {
                 }
             }
 
-            env.storage().persistent().set(&last_claim_key, &current_ledger);
+            env.storage()
+                .persistent()
+                .set(&last_claim_key, &current_ledger);
 
             let token_client = TokenClient::new(&env, &asset);
             let contract_balance = token_client.balance(&env.current_contract_address());
 
             if contract_balance >= config.claim_amount {
-                token_client.transfer(&env.current_contract_address(), &recipient, &config.claim_amount);
+                token_client.transfer(
+                    &env.current_contract_address(),
+                    &recipient,
+                    &config.claim_amount,
+                );
             } else {
                 let stellar_client = StellarAssetClient::new(&env, &asset);
                 stellar_client.mint(&recipient, &config.claim_amount);
@@ -223,4 +242,3 @@ impl FaucetContract {
         bump_instance(&env);
     }
 }
-

@@ -7,7 +7,10 @@ use soroban_sdk::{
     Address, Env,
 };
 
-fn create_token_contract<'a>(env: &Env, admin: &Address) -> (TokenClient<'a>, StellarAssetClient<'a>) {
+fn create_token_contract<'a>(
+    env: &Env,
+    admin: &Address,
+) -> (TokenClient<'a>, StellarAssetClient<'a>) {
     let contract_id = env.register_stellar_asset_contract_v2(admin.clone());
     (
         TokenClient::new(env, &contract_id.address()),
@@ -165,4 +168,3 @@ fn test_batch_claim_success() {
     assert_eq!(token_a.balance(&recipient), 1_000_0000000);
     assert_eq!(token_b.balance(&recipient), 500_0000000);
 }
-
