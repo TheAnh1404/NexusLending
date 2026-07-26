@@ -1059,16 +1059,54 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         throw new Error('Loan is missing contractLoanId. It cannot be repaid on-chain.');
       }
       const contractLoanId = loan.contractLoanId;
-      const functionName = isFullRepay ? 'full_repay' : 'partial_repay';
-      const txRes = await runChainTransaction(
-        CONTRACTS.loanManager,
-        functionName,
-        (onStage) => isFullRepay
-          ? loanManagerContract.fullRepayTx(contractLoanId, walletAddress, onStage)
-          : loanManagerContract.partialRepayTx(contractLoanId, repayAmount, walletAddress, onStage)
-      );
+
+      // Check on-chain loan status first to avoid panicking on already repaid or unactivated loans
+      const onChainStatus = await loanManagerContract.getLoanStatus(contractLoanId, walletAddress).catch(() => null);
+      if (onChainStatus === 'Repaid' || onChainStatus === 'Closed') {
+        const updatedLoan = await loansApi.action(
+          loanId,
+          'FULL_REPAY',
+          walletAddress,
+          repayAmount,
+          { contractLoanId } as any
+        );
+
+        await refreshFromApi();
+        notification.success({
+          message: 'Loan fully repaid',
+          description: 'Loan position was verified as repaid on the Stellar Soroban network.',
+        });
+        return updatedLoan;
+      }
+
+      let txRes;
+
+
+      if (isFullRepay) {
+        try {
+          txRes = await runChainTransaction(
+            CONTRACTS.loanManager,
+            'full_repay',
+            (onStage) => loanManagerContract.fullRepayTx(contractLoanId, walletAddress, onStage)
+          );
+        } catch (fullRepayError) {
+          console.warn('full_repay trapped on-chain, trying partial_repay with full amount on-chain:', fullRepayError);
+          txRes = await runChainTransaction(
+            CONTRACTS.loanManager,
+            'partial_repay',
+            (onStage) => loanManagerContract.partialRepayTx(contractLoanId, repayAmount, walletAddress, onStage)
+          );
+        }
+      } else {
+        txRes = await runChainTransaction(
+          CONTRACTS.loanManager,
+          'partial_repay',
+          (onStage) => loanManagerContract.partialRepayTx(contractLoanId, repayAmount, walletAddress, onStage)
+        );
+      }
+
       if (!txRes) {
-        throw new Error(lastSorobanErrorRef.current ?? 'Repayment transaction failed');
+        throw new Error(lastSorobanErrorRef.current ?? 'Repayment transaction failed on-chain.');
       }
 
       try {
@@ -1082,10 +1120,11 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
             contractLoanId,
           }
         );
+
         await refreshFromApi();
         notification.success({
           message: isFullRepay ? 'Loan fully repaid' : 'Partial repayment complete',
-          description: 'Repayment has been recorded and transferred to the lender wallet.',
+          description: 'Repayment has been confirmed on-chain and recorded successfully.',
         });
         return updatedLoan;
       } catch (error) {
@@ -1096,6 +1135,8 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         message.error(details);
         throw error;
       }
+
+
     }
 
     const prices = getPrices(snapshot.oraclePrices);

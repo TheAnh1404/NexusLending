@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Modal, Spin, Button, Typography, Space, Steps } from 'antd';
-import { CheckCircle2, XCircle, Loader2, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react';
+import { Modal, Typography, Space, Button, Tag } from 'antd';
+import { XCircle, ExternalLink, KeyRound, Lock, ShieldCheck, Sparkles, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react';
+
 import { EXPLORER_NETWORK } from '../../services/soroban/config';
 
 const { Title, Paragraph, Text } = Typography;
@@ -44,7 +45,7 @@ const getFriendlyErrorMessage = (errorText?: string): string => {
 export const TransactionProgress: React.FC<TransactionProgressProps> = ({
   open,
   state,
-  successMessage = 'Action completed successfully on the Stellar blockchain.',
+  successMessage = 'Action completed successfully on the Stellar Soroban protocol.',
   txHash,
   rawError,
   onClose,
@@ -52,38 +53,11 @@ export const TransactionProgress: React.FC<TransactionProgressProps> = ({
 }) => {
   const [showTechnical, setShowTechnical] = useState(false);
 
-  const isExecuting =
-    state === 'preparing' ||
-    state === 'signing' ||
-    state === 'simulating' ||
-    state === 'submitting' ||
-    state === 'confirming';
-
+  const isSigningPhase = state === 'preparing' || state === 'signing';
+  const isExecutingPhase = state === 'simulating' || state === 'submitting' || state === 'confirming';
+  const isExecuting = isSigningPhase || isExecutingPhase;
   const isSuccess = state === 'success';
   const isFailed = state === 'failed' || state === 'rejected';
-
-  const stepItems = [
-    { title: 'Prepare' },
-    { title: 'Confirm in Wallet' },
-    { title: 'Blockchain Confirmation' },
-  ];
-
-  const getCurrentStepIndex = () => {
-    switch (state) {
-      case 'preparing':
-        return 0;
-      case 'signing':
-        return 1;
-      case 'simulating':
-      case 'submitting':
-      case 'confirming':
-        return 2;
-      case 'success':
-        return 3;
-      default:
-        return 0;
-    }
-  };
 
   return (
     <Modal
@@ -92,56 +66,231 @@ export const TransactionProgress: React.FC<TransactionProgressProps> = ({
       closable={!isExecuting}
       onCancel={isExecuting ? undefined : onClose}
       centered
-      width={440}
+      width={460}
+      styles={{
+        mask: {
+          backdropFilter: 'blur(12px)',
+          backgroundColor: 'rgba(15, 23, 42, 0.75)',
+        },
+        wrapper: {
+          border: 'none',
+        },
+        body: {
+          borderRadius: '24px',
+          padding: 0,
+          overflow: 'hidden',
+          backgroundColor: '#0f172a',
+          color: '#ffffff',
+          border: 'none',
+        },
+      }}
+
+
     >
-      <div style={{ padding: '16px 8px', textAlign: 'center' }}>
-        {isExecuting && (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
-            <Spin indicator={<Loader2 size={44} className="pulse-animation" style={{ color: 'var(--primary-color, #4f46e5)' }} />} />
+      <div
+        style={{
+          position: 'relative',
+          padding: '32px 28px',
+          background: 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #312e81 100%)',
+          color: '#ffffff',
+          overflow: 'hidden',
+        }}
+      >
+        {/* Background Glowing Orb Effect */}
+        <div
+          style={{
+            position: 'absolute',
+            top: '-50px',
+            right: '-50px',
+            width: '180px',
+            height: '180px',
+            borderRadius: '50%',
+            background: isSuccess
+              ? 'radial-gradient(circle, rgba(16, 185, 129, 0.4) 0%, rgba(16, 185, 129, 0) 70%)'
+              : isFailed
+              ? 'radial-gradient(circle, rgba(239, 68, 68, 0.4) 0%, rgba(239, 68, 68, 0) 70%)'
+              : 'radial-gradient(circle, rgba(99, 102, 241, 0.4) 0%, rgba(99, 102, 241, 0) 70%)',
+            filter: 'blur(25px)',
+            pointerEvents: 'none',
+          }}
+        />
+
+        {/* ── PHASE 1: WALLET SIGNATURE STEP ──────────────────────────────────── */}
+        {isSigningPhase && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: 20, position: 'relative', zIndex: 2 }}>
+            <Tag
+              color="purple"
+              style={{
+                borderRadius: 20,
+                fontWeight: 800,
+                fontSize: 11,
+                padding: '4px 14px',
+                border: '1px solid rgba(139, 92, 246, 0.4)',
+                backgroundColor: 'rgba(139, 92, 246, 0.2)',
+                color: '#c4b5fd',
+                letterSpacing: '0.05em',
+                margin: 0,
+              }}
+            >
+              STEP 1 OF 2 • SIGNING CONTRACT DRAFT
+            </Tag>
+
+            {/* Glowing Key Signature Animation */}
+            <div style={{ position: 'relative', margin: '10px 0' }}>
+              <div
+                style={{
+                  width: 84,
+                  height: 84,
+                  borderRadius: '50%',
+                  backgroundColor: 'rgba(99, 102, 241, 0.15)',
+                  border: '2px solid rgba(129, 140, 248, 0.4)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: '0 0 30px rgba(99, 102, 241, 0.4)',
+                }}
+              >
+                <KeyRound size={38} style={{ color: '#818cf8' }} />
+              </div>
+            </div>
+
             <div>
-              <Title level={4} style={{ margin: 0, fontWeight: 700 }}>
-                {state === 'signing'
-                  ? 'Confirming in Wallet...'
-                  : state === 'confirming' || state === 'submitting'
-                  ? 'Waiting for Blockchain Confirmation...'
-                  : 'Preparing Transaction...'}
+              <Title level={4} style={{ margin: 0, fontWeight: 800, color: '#ffffff' }}>
+                Confirming in Wallet...
               </Title>
-              <Paragraph type="secondary" style={{ marginTop: 4, marginBottom: 0, fontSize: '13px' }}>
-                {state === 'signing'
-                  ? 'Please check your Freighter Wallet extension to review and sign.'
-                  : 'Submitting transaction to Stellar Soroban node...'}
+              <Paragraph style={{ margin: '8px 0 0 0', fontSize: 13, color: '#cbd5e1', lineHeight: '1.5' }}>
+                Please review and approve the contract authorization prompt in your Freighter or Albedo wallet extension.
               </Paragraph>
             </div>
-            <Steps
-              current={getCurrentStepIndex()}
-              size="small"
-              items={stepItems}
-              style={{ marginTop: 12, width: '100%' }}
-            />
+
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                backgroundColor: 'rgba(255, 255, 255, 0.08)',
+                borderRadius: 12,
+                padding: '8px 16px',
+                border: '1px solid rgba(255, 255, 255, 0.12)',
+                fontSize: 12,
+                color: '#94a3b8',
+              }}
+            >
+              <RefreshCw size={14} className="pulse-animation" style={{ color: '#818cf8' }} />
+              <span>Awaiting cryptographic signature...</span>
+            </div>
           </div>
         )}
 
-        {isSuccess && (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+        {/* ── PHASE 2: ON-CHAIN EXECUTION STEP ────────────────────────────────── */}
+        {isExecutingPhase && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: 20, position: 'relative', zIndex: 2 }}>
+            <Tag
+              color="cyan"
+              style={{
+                borderRadius: 20,
+                fontWeight: 800,
+                fontSize: 11,
+                padding: '4px 14px',
+                border: '1px solid rgba(6, 182, 212, 0.4)',
+                backgroundColor: 'rgba(6, 182, 212, 0.2)',
+                color: '#67e8f9',
+                letterSpacing: '0.05em',
+                margin: 0,
+              }}
+            >
+              STEP 2 OF 2 • EXECUTING SOROBAN ESCROW
+            </Tag>
+
+            {/* Glowing Escrow Lock Animation */}
+            <div style={{ position: 'relative', margin: '10px 0' }}>
+              <div
+                style={{
+                  width: 84,
+                  height: 84,
+                  borderRadius: '50%',
+                  backgroundColor: 'rgba(6, 182, 212, 0.15)',
+                  border: '2px solid rgba(6, 182, 212, 0.4)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: '0 0 30px rgba(6, 182, 212, 0.4)',
+                }}
+              >
+                <Lock size={38} style={{ color: '#22d3ee' }} />
+              </div>
+            </div>
+
+            <div>
+              <Title level={4} style={{ margin: 0, fontWeight: 800, color: '#ffffff' }}>
+                Executing Smart Escrow...
+              </Title>
+              <Paragraph style={{ margin: '8px 0 0 0', fontSize: 13, color: '#cbd5e1', lineHeight: '1.5' }}>
+                Submitting signed contract payload to Stellar Soroban Testnet RPC nodes for final confirmation.
+              </Paragraph>
+            </div>
+
             <div
               style={{
-                width: 60,
-                height: 60,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                backgroundColor: 'rgba(6, 182, 212, 0.12)',
+                borderRadius: 12,
+                padding: '8px 16px',
+                border: '1px solid rgba(6, 182, 212, 0.3)',
+                fontSize: 12,
+                color: '#67e8f9',
+              }}
+            >
+              <Sparkles size={14} />
+              <span>Verifying ledger transaction...</span>
+            </div>
+          </div>
+        )}
+
+        {/* ── PHASE 3: SUCCESS ────────────────────────────────────────────────── */}
+        {isSuccess && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: 20, position: 'relative', zIndex: 2 }}>
+            <Tag
+              color="green"
+              style={{
+                borderRadius: 20,
+                fontWeight: 800,
+                fontSize: 11,
+                padding: '4px 14px',
+                border: '1px solid rgba(16, 185, 129, 0.4)',
+                backgroundColor: 'rgba(16, 185, 129, 0.2)',
+                color: '#6ee7b7',
+                letterSpacing: '0.05em',
+                margin: 0,
+              }}
+            >
+              PROTOCOL TRANSACTION VERIFIED
+            </Tag>
+
+            {/* Victory Badge */}
+            <div
+              style={{
+                width: 84,
+                height: 84,
                 borderRadius: '50%',
-                backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                border: '2px solid rgba(16, 185, 129, 0.5)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                color: 'var(--success-color, #10b981)',
+                boxShadow: '0 0 35px rgba(16, 185, 129, 0.4)',
               }}
             >
-              <CheckCircle2 size={36} />
+              <ShieldCheck size={44} style={{ color: '#34d399' }} />
             </div>
+
             <div>
-              <Title level={4} style={{ margin: 0, fontWeight: 700 }}>
-                Transaction Complete!
+              <Title level={4} style={{ margin: 0, fontWeight: 800, color: '#ffffff' }}>
+                Contract Signed & Executed!
               </Title>
-              <Paragraph type="secondary" style={{ marginTop: 4, marginBottom: 0, fontSize: '13px' }}>
+              <Paragraph style={{ margin: '8px 0 0 0', fontSize: 13, color: '#cbd5e1', lineHeight: '1.5' }}>
                 {successMessage}
               </Paragraph>
             </div>
@@ -150,60 +299,112 @@ export const TransactionProgress: React.FC<TransactionProgressProps> = ({
               <div
                 style={{
                   width: '100%',
-                  padding: '10px 14px',
-                  backgroundColor: 'var(--bg-subtle, #f9fafb)',
-                  borderRadius: '6px',
+                  padding: '12px 16px',
+                  backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                  borderRadius: 12,
+                  border: 'none',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
-                  fontSize: '12px',
+                  fontSize: 12,
                 }}
               >
-                <Text type="secondary">Tx Hash:</Text>
+                <Text style={{ color: '#94a3b8' }}>Stellar Tx Hash:</Text>
                 <a
                   href={`https://stellar.expert/explorer/${EXPLORER_NETWORK}/tx/${txHash}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  style={{ color: 'var(--primary-color, #4f46e5)', display: 'inline-flex', alignItems: 'center', gap: 4, fontWeight: 500 }}
+                  style={{
+                    color: '#818cf8',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    fontWeight: 700,
+                    fontFamily: 'monospace',
+                  }}
                 >
                   {txHash.slice(0, 8)}...{txHash.slice(-8)}
-                  <ExternalLink size={12} />
+                  <ExternalLink size={13} />
                 </a>
               </div>
             )}
 
-            <Space style={{ width: '100%', justifyContent: 'center', marginTop: 8 }}>
+
+            <Space size={12} style={{ width: '100%', justifyContent: 'center', marginTop: 6 }}>
               {onViewLoan && (
-                <Button type="primary" onClick={onViewLoan}>
+                <Button
+                  type="primary"
+                  onClick={onViewLoan}
+                  style={{
+                    borderRadius: 10,
+                    fontWeight: 700,
+                    height: 42,
+                    padding: '0 20px',
+                    backgroundColor: '#4f46e5',
+                  }}
+                >
                   View Details
                 </Button>
               )}
-              <Button onClick={onClose}>Done</Button>
+              <Button
+                onClick={onClose}
+                style={{
+                  borderRadius: 10,
+                  fontWeight: 600,
+                  height: 42,
+                  padding: '0 24px',
+                  backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                  color: '#ffffff',
+                  border: '1px solid rgba(255, 255, 255, 0.2)',
+                }}
+              >
+                Close
+              </Button>
             </Space>
           </div>
         )}
 
+        {/* ── PHASE 4: FAILED / REJECTED ──────────────────────────────────────── */}
         {isFailed && (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: 20, position: 'relative', zIndex: 2 }}>
+            <Tag
+              color="error"
+              style={{
+                borderRadius: 20,
+                fontWeight: 800,
+                fontSize: 11,
+                padding: '4px 14px',
+                border: '1px solid rgba(239, 68, 68, 0.4)',
+                backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                color: '#fca5a5',
+                letterSpacing: '0.05em',
+                margin: 0,
+              }}
+            >
+              TRANSACTION INTERRUPTED
+            </Tag>
+
             <div
               style={{
-                width: 60,
-                height: 60,
+                width: 84,
+                height: 84,
                 borderRadius: '50%',
-                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                border: '2px solid rgba(239, 68, 68, 0.4)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                color: 'var(--danger-color, #ef4444)',
+                boxShadow: '0 0 30px rgba(239, 68, 68, 0.4)',
               }}
             >
-              <XCircle size={36} />
+              <XCircle size={44} style={{ color: '#f87171' }} />
             </div>
+
             <div>
-              <Title level={4} style={{ margin: 0, fontWeight: 700 }}>
-                Transaction Failed
+              <Title level={4} style={{ margin: 0, fontWeight: 800, color: '#ffffff' }}>
+                Signing Interrupted
               </Title>
-              <Paragraph type="secondary" style={{ marginTop: 4, marginBottom: 0, fontSize: '13px' }}>
+              <Paragraph style={{ margin: '8px 0 0 0', fontSize: 13, color: '#fca5a5', lineHeight: '1.5' }}>
                 {getFriendlyErrorMessage(rawError)}
               </Paragraph>
             </div>
@@ -214,25 +415,30 @@ export const TransactionProgress: React.FC<TransactionProgressProps> = ({
                   type="text"
                   size="small"
                   onClick={() => setShowTechnical(!showTechnical)}
-                  style={{ fontSize: '12px', color: 'var(--text-muted, #6b7280)', padding: 0 }}
+                  style={{
+                    color: '#94a3b8',
+                    fontSize: 12,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: 0,
+                  }}
                 >
-                  <Space size={4}>
-                    <span>View Technical Details</span>
-                    {showTechnical ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-                  </Space>
+                  <span>{showTechnical ? 'Hide Technical Details' : 'Show Technical Traceback'}</span>
+                  {showTechnical ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                 </Button>
-
                 {showTechnical && (
                   <div
                     style={{
                       marginTop: 8,
-                      padding: 10,
-                      backgroundColor: '#1e293b',
-                      color: '#f8fafc',
-                      borderRadius: 6,
-                      fontSize: '11px',
+                      padding: 12,
+                      backgroundColor: 'rgba(0, 0, 0, 0.4)',
+                      borderRadius: 10,
+                      border: '1px solid rgba(255, 255, 255, 0.1)',
+                      fontSize: 11,
                       fontFamily: 'monospace',
-                      maxHeight: 140,
+                      color: '#f87171',
+                      maxHeight: 120,
                       overflowY: 'auto',
                       wordBreak: 'break-all',
                     }}
@@ -243,8 +449,19 @@ export const TransactionProgress: React.FC<TransactionProgressProps> = ({
               </div>
             )}
 
-            <Button type="primary" onClick={onClose} block style={{ marginTop: 8 }}>
-              Close
+            <Button
+              type="primary"
+              onClick={onClose}
+              style={{
+                borderRadius: 10,
+                fontWeight: 700,
+                height: 42,
+                padding: '0 28px',
+                backgroundColor: '#ef4444',
+                borderColor: '#ef4444',
+              }}
+            >
+              Close & Retry
             </Button>
           </div>
         )}

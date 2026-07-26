@@ -258,8 +258,12 @@ const normalizeSorobanSimulationError = (rawError: string, functionName?: string
     if (functionName === 'activate_loan') {
       return 'Loan cannot be activated on-chain. Common causes: (1) Loan is not PendingCollateral, (2) Borrower balance is below required XLM collateral, or (3) Missing USDC trustline.';
     }
+    if (functionName === 'full_repay' || functionName === 'partial_repay') {
+      return 'Repayment transaction trapped on Soroban smart contract. Common causes: (1) Loan is not in Active status on-chain, (2) Wallet USDC balance is insufficient, or (3) Loan has already been repaid or closed on-chain. Please verify loan status and wallet USDC balance.';
+    }
     return 'Soroban VM simulation trapped (UnreachableCodeReached). Please verify smart contract parameters and status.';
   }
+
 
   return rawError;
 };

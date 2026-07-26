@@ -248,22 +248,69 @@ export const ManageLoanDrawer: React.FC<ManageLoanDrawerProps> = ({ open, loan, 
             </div>
           </div>
 
-          {!isFullRepay && (
-            <div>
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                Enter Amount to Repay ({loan.asset})
+          <div>
+            <Text type="secondary" style={{ fontSize: 12, fontWeight: 600 }}>
+              Enter Amount to Repay ({loan.asset})
+            </Text>
+            <InputNumber
+              style={{ width: '100%', borderRadius: 10, marginTop: 6 }}
+              size="large"
+              min={0.01}
+              max={loan.outstandingDebt}
+              value={repayAmount}
+              onChange={(val) => {
+                const num = val || 0;
+                setRepayAmount(num);
+                if (Math.abs(num - loan.outstandingDebt) < 0.01) {
+                  setIsFullRepay(true);
+                } else {
+                  setIsFullRepay(false);
+                }
+              }}
+              addonAfter={loan.asset}
+            />
+
+            {/* Quick Percentage Presets */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
+              <Text type="secondary" style={{ fontSize: 12, marginRight: 2, fontWeight: 600 }}>
+                Quick Presets:
               </Text>
-              <InputNumber
-                style={{ width: '100%', borderRadius: 10, marginTop: 6 }}
-                size="large"
-                min={1}
-                max={loan.outstandingDebt}
-                value={repayAmount}
-                onChange={(val) => setRepayAmount(val || 0)}
-                addonAfter={loan.asset}
-              />
+              {[
+                { label: '25%', ratio: 0.25 },
+                { label: '50%', ratio: 0.50 },
+                { label: '75%', ratio: 0.75 },
+                { label: '100% Full', ratio: 1.0 },
+              ].map((preset) => {
+                const calculatedVal = Math.round(loan.outstandingDebt * preset.ratio * 100) / 100;
+                const isSelected = Math.abs(repayAmount - calculatedVal) < 0.05;
+                return (
+                  <Tag
+                    key={preset.label}
+                    color={isSelected ? 'blue' : 'default'}
+                    style={{
+                      cursor: 'pointer',
+                      borderRadius: 8,
+                      fontWeight: isSelected ? 700 : 500,
+                      padding: '3px 10px',
+                      fontSize: 12,
+                      transition: 'all 0.15s ease',
+                    }}
+                    onClick={() => {
+                      if (preset.ratio === 1.0) {
+                        setIsFullRepay(true);
+                      } else {
+                        setIsFullRepay(false);
+                      }
+                      setRepayAmount(calculatedVal);
+                    }}
+                  >
+                    {preset.label} (${calculatedVal.toFixed(2)})
+                  </Tag>
+                );
+              })}
             </div>
-          )}
+          </div>
+
 
           <div style={{ backgroundColor: 'var(--bg-subtle, #f8fafc)', padding: 14, borderRadius: 10, fontSize: 13 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>

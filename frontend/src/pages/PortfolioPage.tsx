@@ -135,7 +135,14 @@ export const PortfolioPage: React.FC = () => {
       />
 
       {/* SECTION 2: Performance */}
-      <PerformanceChart />
+      <PerformanceChart
+        netPositionUsd={netPositionUsd}
+        totalLentUsd={totalLentUsd}
+        totalBorrowedUsd={totalBorrowedDebtUsd}
+        lentLoans={lentActive}
+        borrowedLoans={borrowedActive}
+      />
+
 
       {/* SECTION 3: Portfolio Breakdown */}
       <BreakdownChart

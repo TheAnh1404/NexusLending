@@ -31,7 +31,7 @@ export const BorrowWizardDrawer: React.FC<BorrowWizardDrawerProps> = ({ open, of
   const { publicKey } = useWallet();
 
   const [currentStep, setCurrentStep] = useState(0);
-  const [collateralAmount, setCollateralAmount] = useState<number>(0);
+  const [collateralAmount, setCollateralAmount] = useState<number | null>(null);
   const [txState, setTxState] = useState<TransactionStepState>('idle');
   const [rawError, setRawError] = useState<string | undefined>(undefined);
 
@@ -44,41 +44,65 @@ export const BorrowWizardDrawer: React.FC<BorrowWizardDrawerProps> = ({ open, of
 
   useEffect(() => {
     if (offer) {
-      setCollateralAmount(Math.ceil(minRequiredXLM));
+      // Do not pre-fill collateralAmount in input box per user request
+      setCollateralAmount(null);
       setCurrentStep(0);
       setTxState('idle');
       setRawError(undefined);
     }
-  }, [offer, minRequiredXLM]);
+  }, [offer]);
 
   if (!offer) return null;
 
   const totalRepayment = calculateRepaymentAmount(offer.amount, offer.apr, offer.duration);
-  const collateralUsdValue = collateralAmount * xlmPrice;
+  const effectiveCollateral = collateralAmount || 0;
+  const collateralUsdValue = effectiveCollateral * xlmPrice;
   const userXlmBalance = wallet.balanceXLM || 0;
   const connectedWalletAddress = getConnectedWalletAddress(publicKey, wallet.address);
-  const isBalanceInsufficient = userXlmBalance < collateralAmount;
 
   const minHfThreshold = Math.max(1.4, offer.minHealthFactor || 1.4);
-  const estimatedHF = calculateHealthFactor(
-    collateralAmount,
-    xlmPrice,
-    totalRepayment,
-    1.0,
-    offer.liquidationThreshold
-  );
-  const isHfCriticalDanger = estimatedHF < 1.20;
-  const isHfBelowMinRequired = estimatedHF < minHfThreshold;
+  const estimatedHF = effectiveCollateral > 0
+    ? calculateHealthFactor(
+        effectiveCollateral,
+        xlmPrice,
+        totalRepayment,
+        1.0,
+        offer.liquidationThreshold
+      )
+    : 0;
+
+  const isHfCriticalDanger = effectiveCollateral > 0 && estimatedHF < 1.20;
+  const isHfBelowMinRequired = effectiveCollateral > 0 && estimatedHF < minHfThreshold;
+
+  // Recommended Collateral Presets for HF 1.4+, HF 1.6+, HF 2.0+
+  const minReqValue = Math.ceil(minRequiredXLM);
+
+  const calculateXlmForHf = (targetHf: number) => {
+    if (!offer || xlmPrice <= 0 || offer.liquidationThreshold <= 0) return 0;
+    const thresholdDecimal = offer.liquidationThreshold / 100;
+    const reqXlm = (targetHf * totalRepayment) / (xlmPrice * thresholdDecimal);
+    return Math.ceil(reqXlm);
+  };
+
+  const hf14Value = calculateXlmForHf(1.4);
+  const hf16Value = calculateXlmForHf(1.6);
+  const hf20Value = calculateXlmForHf(2.0);
+
 
   const handleExecuteBorrow = async () => {
+    if (!effectiveCollateral || effectiveCollateral <= 0) {
+      setTxState('failed');
+      setRawError('Please enter a valid collateral deposit amount in XLM.');
+      return;
+    }
     if (isSameWalletAddress(connectedWalletAddress, offer.lender)) {
       setTxState('failed');
       setRawError('You cannot borrow from an offer created by your own wallet address. Please switch to a different borrower wallet.');
       return;
     }
-    if (userXlmBalance < collateralAmount) {
+    if (userXlmBalance < effectiveCollateral) {
       setTxState('failed');
-      setRawError(`Insufficient XLM balance for collateral. Required ${collateralAmount.toLocaleString()} XLM, available ${userXlmBalance.toLocaleString()} XLM.`);
+      setRawError(`Insufficient XLM balance for collateral. Required ${effectiveCollateral.toLocaleString()} XLM, available ${userXlmBalance.toLocaleString()} XLM.`);
       return;
     }
     if (isHfBelowMinRequired) {
@@ -90,7 +114,7 @@ export const BorrowWizardDrawer: React.FC<BorrowWizardDrawerProps> = ({ open, of
     setRawError(undefined);
     try {
       // Step 1: Accept Offer & Deposit Collateral
-      const createdLoan = await acceptOffer(offer.id, collateralAmount);
+      const createdLoan = await acceptOffer(offer.id, effectiveCollateral);
       if (!createdLoan) {
         setTxState('failed');
         setRawError('Failed to accept offer on Stellar smart contract.');
@@ -192,8 +216,8 @@ export const BorrowWizardDrawer: React.FC<BorrowWizardDrawerProps> = ({ open, of
                   <Text strong>{offer.duration} Days</Text>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <Text type="secondary">Required Collateral</Text>
-                  <Text strong>{Math.ceil(minRequiredXLM).toLocaleString()} XLM</Text>
+                  <Text type="secondary">Minimum Required Collateral</Text>
+                  <Text strong>{minReqValue.toLocaleString()} XLM</Text>
                 </div>
                 <Divider style={{ margin: '8px 0' }} />
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -232,7 +256,7 @@ export const BorrowWizardDrawer: React.FC<BorrowWizardDrawerProps> = ({ open, of
                 Set Collateral Deposit
               </Title>
               <Paragraph type="secondary" style={{ fontSize: 13 }}>
-                Collateral will be safely locked in a Soroban Escrow Smart Contract.
+                Type your XLM deposit or pick a quick suggestion preset below.
               </Paragraph>
             </div>
 
@@ -245,19 +269,49 @@ export const BorrowWizardDrawer: React.FC<BorrowWizardDrawerProps> = ({ open, of
               <InputNumber
                 style={{ width: '100%', borderRadius: 10 }}
                 size="large"
-                min={Math.ceil(minRequiredXLM)}
+                min={minReqValue}
                 value={collateralAmount}
-                onChange={(val) => setCollateralAmount(val || Math.ceil(minRequiredXLM))}
+                onChange={(val) => setCollateralAmount(val)}
                 addonAfter="XLM"
+                placeholder={`Enter XLM collateral (Min: ${minReqValue.toLocaleString()} XLM)`}
               />
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, fontSize: 12 }}>
+              {/* Quick Presets Recommendations (Exactly 3 items starting from HF 1.4+) */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
+                <Text type="secondary" style={{ fontSize: 12, marginRight: 2, fontWeight: 600 }}>
+                  Quick Presets:
+                </Text>
+                {[
+                  { label: 'Safe (HF 1.4)', value: hf14Value, color: 'blue' },
+                  { label: 'Optimal (HF 1.6)', value: hf16Value, color: 'green' },
+                  { label: 'Ultra Safe (HF 2.0)', value: hf20Value, color: 'purple' },
+                ].map((preset, idx) => (
+                  <Tag
+                    key={idx}
+                    color={collateralAmount === preset.value ? 'blue' : 'default'}
+                    style={{
+                      cursor: 'pointer',
+                      borderRadius: 8,
+                      fontWeight: collateralAmount === preset.value ? 700 : 500,
+                      padding: '3px 10px',
+                      fontSize: 12,
+                      transition: 'all 0.15s ease',
+                    }}
+                    onClick={() => setCollateralAmount(preset.value)}
+                  >
+                    {preset.label}: {preset.value.toLocaleString()} XLM
+                  </Tag>
+                ))}
+              </div>
+
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 10, fontSize: 12 }}>
                 <Text type="secondary">Converted USD Value:</Text>
                 <Text strong>${collateralUsdValue.toFixed(2)} USD</Text>
               </div>
             </div>
 
-            {userXlmBalance < collateralAmount && (
+            {effectiveCollateral > 0 && userXlmBalance < effectiveCollateral && (
               <Alert
                 type="warning"
                 showIcon
@@ -274,10 +328,17 @@ export const BorrowWizardDrawer: React.FC<BorrowWizardDrawerProps> = ({ open, of
             )}
 
             {/* HEALTH FACTOR WARNING SYSTEM */}
-            {isHfCriticalDanger ? (
+            {!effectiveCollateral || effectiveCollateral <= 0 ? (
+              <Alert
+                message="Select or Type Collateral Deposit Amount"
+                description={`Minimum required collateral for this offer is ${minReqValue.toLocaleString()} XLM. Click a Quick Preset above or type custom amount.`}
+                type="info"
+                showIcon
+              />
+            ) : isHfCriticalDanger ? (
               <Alert
                 message="🚨 Critical Liquidation Risk (HF < 1.20)"
-                description={`Collateral of ${collateralAmount.toLocaleString()} XLM results in a dangerous Health Factor of ${estimatedHF.toFixed(2)}. Your collateral will be at severe risk of immediate liquidation if market price moves down. Please deposit more XLM.`}
+                description={`Collateral of ${effectiveCollateral.toLocaleString()} XLM results in a dangerous Health Factor of ${estimatedHF.toFixed(2)}. Your collateral will be at severe risk of immediate liquidation if market price moves down. Please deposit more XLM.`}
                 type="error"
                 showIcon
                 icon={<Flame size={20} color="#dc2626" />}
@@ -319,15 +380,6 @@ export const BorrowWizardDrawer: React.FC<BorrowWizardDrawerProps> = ({ open, of
               </div>
             )}
 
-            {isBalanceInsufficient && (
-              <Alert
-                message="Insufficient XLM Balance"
-                description={`You need ${collateralAmount.toLocaleString()} XLM, but your wallet only has ${userXlmBalance.toLocaleString()} XLM.`}
-                type="error"
-                showIcon
-              />
-            )}
-
             <div style={{ display: 'flex', gap: 12 }}>
               <Button size="large" onClick={() => setCurrentStep(0)} style={{ borderRadius: 10, height: 46 }}>
                 <ArrowLeft size={16} />
@@ -337,50 +389,55 @@ export const BorrowWizardDrawer: React.FC<BorrowWizardDrawerProps> = ({ open, of
                 type="primary"
                 size="large"
                 block
-                disabled={isBalanceInsufficient || isHfBelowMinRequired}
+                disabled={!effectiveCollateral || effectiveCollateral < minReqValue || isHfBelowMinRequired}
                 onClick={() => setCurrentStep(2)}
                 style={{ borderRadius: 10, height: 46, fontWeight: 700 }}
               >
-                <span>Review & Confirm</span>
+                <span>Continue to Review</span>
                 <ArrowRight size={16} />
               </Button>
             </div>
           </div>
         )}
 
-        {/* STEP 3: CONFIRM & SIGN */}
+        {/* STEP 3: CONFIRM & SUBMIT */}
         {currentStep === 2 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            <Alert
-              message="Final Confirmation"
-              description="Please review your borrow request carefully before signing with Freighter Wallet."
-              type="warning"
-              showIcon
-            />
-
             <div style={{ border: '1px solid var(--border-color)', borderRadius: 12, padding: 18 }}>
+              <Title level={5} style={{ marginTop: 0, marginBottom: 16 }}>
+                Final Loan Authorization
+              </Title>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12, fontSize: 14 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <Text type="secondary">You Borrow</Text>
-                  <Text strong style={{ fontSize: 16, color: 'var(--success-color)' }}>
-                    {formatCurrency(offer.amount, offer.asset)}
+                  <Text type="secondary">Borrow Principal</Text>
+                  <Text strong>{formatCurrency(offer.amount, offer.asset)}</Text>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <Text type="secondary">Collateral Deposit</Text>
+                  <Text strong style={{ color: 'var(--primary-color)' }}>
+                    {effectiveCollateral.toLocaleString()} XLM (${collateralUsdValue.toFixed(2)})
                   </Text>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <Text type="secondary">You Lock in Escrow</Text>
-                  <Text strong style={{ fontSize: 16 }}>
-                    {collateralAmount.toLocaleString()} XLM
+                  <Text type="secondary">Initial Health Factor</Text>
+                  <Text strong style={{ color: '#10b981' }}>
+                    HF {estimatedHF.toFixed(2)} (Safe Position)
                   </Text>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <Text type="secondary">You Repay Total</Text>
-                  <Text strong style={{ fontSize: 16, color: 'var(--primary-color)' }}>
-                    {formatCurrency(totalRepayment, offer.asset)}
-                  </Text>
+                  <Text type="secondary">Interest Rate</Text>
+                  <Text strong>{offer.apr}% APR</Text>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <Text type="secondary">Duration</Text>
                   <Text strong>{offer.duration} Days</Text>
+                </div>
+                <Divider style={{ margin: '8px 0' }} />
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <Text type="secondary">Total Repayment Due</Text>
+                  <Text strong style={{ color: 'var(--primary-color)', fontSize: 16 }}>
+                    {formatCurrency(totalRepayment, offer.asset)}
+                  </Text>
                 </div>
               </div>
             </div>
@@ -397,13 +454,13 @@ export const BorrowWizardDrawer: React.FC<BorrowWizardDrawerProps> = ({ open, of
                 onClick={handleExecuteBorrow}
                 style={{ borderRadius: 10, height: 46, fontWeight: 700 }}
               >
-                Confirm and Sign
+                Sign & Deposit Collateral
               </Button>
             </div>
           </div>
         )}
 
-        {/* STEP 4: COMPLETED */}
+        {/* STEP 4: SUCCESS */}
         {currentStep === 3 && (
           <div style={{ textAlign: 'center', padding: '20px 0', display: 'flex', flexDirection: 'column', gap: 16 }}>
             <CheckCircle2 size={56} style={{ color: 'var(--success-color)', margin: '0 auto' }} />
@@ -411,15 +468,10 @@ export const BorrowWizardDrawer: React.FC<BorrowWizardDrawerProps> = ({ open, of
               Loan Activated Successfully!
             </Title>
             <Paragraph type="secondary" style={{ fontSize: 14 }}>
-              Your collateral of {collateralAmount.toLocaleString()} XLM has been deposited, and {formatCurrency(offer.amount, offer.asset)} is active in your wallet.
+              Your loan of {formatCurrency(offer.amount, offer.asset)} is now active. Collateral of {effectiveCollateral.toLocaleString()} XLM is locked in Soroban Smart Escrow.
             </Paragraph>
-            <Button
-              type="primary"
-              size="large"
-              onClick={onClose}
-              style={{ borderRadius: 10, height: 46, fontWeight: 700 }}
-            >
-              Done
+            <Button type="primary" size="large" onClick={onClose} style={{ borderRadius: 10, height: 46, fontWeight: 700 }}>
+              View My Loans
             </Button>
           </div>
         )}
@@ -429,7 +481,7 @@ export const BorrowWizardDrawer: React.FC<BorrowWizardDrawerProps> = ({ open, of
       <TransactionProgress
         open={txState !== 'idle' && currentStep !== 3}
         state={txState}
-        successMessage="Your loan has been activated on the Stellar Soroban network."
+        successMessage="Your loan has been activated and collateral locked in Soroban smart escrow."
         rawError={rawError}
         onClose={() => setTxState('idle')}
       />

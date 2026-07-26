@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, Button, Form, InputNumber, Space, Typography } from 'antd';
+import { Alert, Button, Form, InputNumber, Space, Typography, Tag } from 'antd';
+
 import { useNavigate } from 'react-router-dom';
 import type { FormInstance } from 'antd';
 import type { Loan, WalletState } from '../../types';
@@ -139,14 +140,60 @@ export const PartialRepaymentModal: React.FC<PartialRepaymentModalProps> = ({
             ]}
           >
             <InputNumber
-              min={1}
+              min={0.01}
               max={loan.outstandingDebt}
-              disabled={isFullRepay}
-              style={{ width: '100%' }}
+              style={{ width: '100%', borderRadius: 10 }}
               size="large"
-              onChange={(val) => setAmount(val || 0)}
+              onChange={(val) => {
+                const num = val || 0;
+                setAmount(num);
+                setIsFullRepay(Math.abs(num - loan.outstandingDebt) < 0.01);
+              }}
+              addonAfter="USDC"
             />
           </Form.Item>
+
+          {/* Quick Presets (25%, 50%, 75%, 100%) */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+            <Text type="secondary" style={{ fontSize: 12, marginRight: 2, fontWeight: 600 }}>
+              Quick Presets:
+            </Text>
+            {[
+              { label: '25%', ratio: 0.25 },
+              { label: '50%', ratio: 0.50 },
+              { label: '75%', ratio: 0.75 },
+              { label: '100% Full', ratio: 1.0 },
+            ].map((preset) => {
+              const calculatedVal = Math.round(loan.outstandingDebt * preset.ratio * 100) / 100;
+              const isSelected = Math.abs(amount - calculatedVal) < 0.05;
+              return (
+                <Tag
+                  key={preset.label}
+                  color={isSelected ? 'blue' : 'default'}
+                  style={{
+                    cursor: 'pointer',
+                    borderRadius: 8,
+                    fontWeight: isSelected ? 700 : 500,
+                    padding: '3px 10px',
+                    fontSize: 12,
+                    transition: 'all 0.15s ease',
+                  }}
+                  onClick={() => {
+                    if (preset.ratio === 1.0) {
+                      setIsFullRepay(true);
+                    } else {
+                      setIsFullRepay(false);
+                    }
+                    setAmount(calculatedVal);
+                    form.setFieldsValue({ amount: calculatedVal });
+                  }}
+                >
+                  {preset.label} (${calculatedVal.toFixed(2)})
+                </Tag>
+              );
+            })}
+          </div>
+
 
           {isFullRepay ? (
             <Alert
