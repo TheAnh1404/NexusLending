@@ -103,32 +103,32 @@ export class FaucetService {
       throw new Error(`${assetObj.code} faucet is not configured for this environment.`);
     }
 
-    if (useContractTx && assetObj.type === 'soroban_token') {
-      if (!assetObj.contractId || !isValidContractId(assetObj.contractId)) {
-        throw new Error(`${assetObj.code} contract ID is not configured. Set VITE_${assetObj.code}_CONTRACT_ID or VITE_USDC_ISSUER.`);
+    if (useContractTx && assetObj.type === 'soroban_token' && faucetContract.isConfigured()) {
+      try {
+        if (!assetObj.contractId || !isValidContractId(assetObj.contractId)) {
+          throw new Error(`${assetObj.code} contract ID is not configured.`);
+        }
+
+        if (assetObj.code.toUpperCase() === USDC_ASSET_CODE.toUpperCase()) {
+          await this.ensureUsdcTrustline(cleanAddress, onStage);
+        }
+
+        const txResult = await faucetContract.requestTokensTx(cleanAddress, assetObj.code, assetObj.contractId, onStage);
+        const nextAvailableAt = new Date(Date.now() + assetObj.cooldownSeconds * 1000).toISOString();
+        return {
+          requestId: `contract_${txResult.txHash.slice(0, 10)}`,
+          walletAddress: cleanAddress,
+          asset: assetObj.code,
+          amount: assetObj.claimAmount,
+          txHash: txResult.txHash,
+          explorerUrl: txResult.explorerUrl,
+          updatedBalance: parseFloat(assetObj.claimAmount),
+          claimedAt: new Date().toISOString(),
+          nextAvailableAt,
+        };
+      } catch (err: unknown) {
+        console.warn('[Faucet] Direct Soroban contract call failed, falling back to backend distribution API:', err);
       }
-
-      if (assetObj.code.toUpperCase() === USDC_ASSET_CODE.toUpperCase()) {
-        await this.ensureUsdcTrustline(cleanAddress, onStage);
-      }
-
-      const txResult = await faucetContract.requestTokensTx(cleanAddress, assetObj.code, assetObj.contractId, onStage);
-      const nextAvailableAt = new Date(Date.now() + assetObj.cooldownSeconds * 1000).toISOString();
-      return {
-        requestId: `contract_${txResult.txHash.slice(0, 10)}`,
-        walletAddress: cleanAddress,
-        asset: assetObj.code,
-        amount: assetObj.claimAmount,
-        txHash: txResult.txHash,
-        explorerUrl: txResult.explorerUrl,
-        updatedBalance: parseFloat(assetObj.claimAmount),
-        claimedAt: new Date().toISOString(),
-        nextAvailableAt,
-      };
-    }
-
-    if (assetObj.type === 'soroban_token') {
-      throw new Error(`Connect Freighter and use the connected wallet address to claim ${assetObj.code} through the Soroban faucet contract.`);
     }
 
     const idempotencyKey = `idemp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
