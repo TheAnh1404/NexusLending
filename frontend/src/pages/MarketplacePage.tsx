@@ -10,6 +10,7 @@ import { getConnectedWalletAddress, isSameWalletAddress } from '../utils/wallet'
 import { EmptyState } from '../components/common/CommonStates';
 import { BorrowWizardDrawer } from '../components/common/BorrowWizardDrawer';
 import { CreateOfferWizardDrawer } from '../components/common/CreateOfferWizardDrawer';
+import { ManageOfferDrawer } from '../components/common/ManageOfferDrawer';
 import { MarketplaceBanner } from '../components/marketplace/MarketplaceBanner';
 import { OfferIdBadge } from '../components/common/OfferIdBadge';
 import type { LoanOffer } from '../types';
@@ -191,6 +192,7 @@ export const MarketplacePage: React.FC = () => {
   const [createDrawerOpen, setCreateDrawerOpen] = useState(false);
   const [selectedOffer, setSelectedOffer] = useState<LoanOffer | null>(null);
   const [borrowDrawerOpen, setBorrowDrawerOpen] = useState(false);
+  const [manageDrawerOpen, setManageDrawerOpen] = useState(false);
 
   const xlmPrice = oraclePrices.find((p) => p.asset === 'XLM')?.price || 0.125;
 
@@ -362,7 +364,11 @@ export const MarketplacePage: React.FC = () => {
 
   const handleSelectOffer = (offer: LoanOffer) => {
     setSelectedOffer(offer);
-    setBorrowDrawerOpen(true);
+    if (isSameWalletAddress(offer.lender, connectedWalletAddress)) {
+      setManageDrawerOpen(true);
+    } else {
+      setBorrowDrawerOpen(true);
+    }
   };
 
   // Table List Column Definitions for each Tier Group
@@ -925,6 +931,16 @@ export const MarketplacePage: React.FC = () => {
         onClose={() => setBorrowDrawerOpen(false)}
         onSuccess={() => {
           setBorrowDrawerOpen(false);
+          refreshData();
+        }}
+      />
+
+      <ManageOfferDrawer
+        open={manageDrawerOpen}
+        offer={selectedOffer}
+        onClose={() => setManageDrawerOpen(false)}
+        onSuccess={() => {
+          setManageDrawerOpen(false);
           refreshData();
         }}
       />
