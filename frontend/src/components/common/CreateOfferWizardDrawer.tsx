@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Modal, Steps, Form, InputNumber, Select, Input, Button, Typography, Space, Tooltip, Row, Col, Alert } from 'antd';
-import { HelpCircle, PlusCircle, ArrowRight, ArrowLeft, CheckCircle2 } from 'lucide-react';
+import { HelpCircle, PlusCircle, ArrowRight, ArrowLeft, CheckCircle2, AlertTriangle, ChevronDown } from 'lucide-react';
 import { useAppContext } from '../../app/AppContext';
 import { DEFAULT_GRACE_PERIOD_DAYS, MAX_FIXED_APR_PERCENT, calculateRepaymentAmount, formatCurrency } from '../../utils/finance';
 import { TransactionProgress, type TransactionStepState } from './TransactionProgress';
@@ -25,18 +25,36 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
 
   const xlmPrice = oraclePrices.find((p) => p.asset === 'XLM')?.price || 0.125;
 
-  // Form field state for live preview
-  const [amount, setAmount] = useState<number>(1000);
-  const [apr, setApr] = useState<number>(8);
-  const [duration, setDuration] = useState<number>(30);
+  // Form field state for live preview (Start empty as requested by user)
+  const [amount, setAmount] = useState<number | undefined>(undefined);
+  const [apr, setApr] = useState<number | undefined>(undefined);
+  const [duration, setDuration] = useState<number | undefined>(undefined);
   const [maxLtv, setMaxLtv] = useState<number>(75);
   const [liquidationThreshold, setLiquidationThreshold] = useState<number>(80);
-  const [minHealthFactor, setMinHealthFactor] = useState<number>(1.2);
+  const [minHealthFactor, setMinHealthFactor] = useState<number>(1.4);
+
+  const [liquidationBonus, setLiquidationBonus] = useState<number>(10);
   const [description, setDescription] = useState<string>('');
 
-  const expectedTotalRepayment = calculateRepaymentAmount(amount, apr, duration);
-  const expectedReturnInterest = expectedTotalRepayment - amount;
-  const minCollateralUsdRequired = (amount / (maxLtv / 100));
+  React.useEffect(() => {
+    if (open) {
+      setCurrentStep(0);
+      setTxState('idle');
+      setRawError(undefined);
+      setAmount(undefined);
+      setApr(undefined);
+      setDuration(undefined);
+      form.resetFields();
+    }
+  }, [open, form]);
+
+  const safeAmount = amount || 0;
+  const safeApr = apr || 0;
+  const safeDuration = duration || 0;
+
+  const expectedTotalRepayment = calculateRepaymentAmount(safeAmount, safeApr, safeDuration);
+  const expectedReturnInterest = safeAmount > 0 ? expectedTotalRepayment - safeAmount : 0;
+  const minCollateralUsdRequired = maxLtv > 0 ? (safeAmount / (maxLtv / 100)) : 0;
   const minCollateralXlmRequired = minCollateralUsdRequired / xlmPrice;
 
   const handleNextFromTerms = async () => {
@@ -50,7 +68,7 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
 
   const handleNextFromRules = async () => {
     try {
-      await form.validateFields(['maxLtv', 'liquidationThreshold', 'minHealthFactor']);
+      await form.validateFields(['maxLtv', 'liquidationThreshold', 'minHealthFactor', 'liquidationBonus']);
       setCurrentStep(2);
     } catch {
       // Form validation failed
@@ -58,6 +76,12 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
   };
 
   const handlePublishOffer = async () => {
+    if (!amount || !apr || !duration) {
+      setTxState('failed');
+      setRawError('Please fill in all required loan term fields.');
+      return;
+    }
+
     setTxState('signing');
     setRawError(undefined);
 
@@ -71,7 +95,7 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
         collateralAsset: 'XLM',
         maxLTV: maxLtv,
         liquidationThreshold,
-        liquidationBonus: 10,
+        liquidationBonus,
         gracePeriod: DEFAULT_GRACE_PERIOD_DAYS,
         minHealthFactor,
         description: description || 'Standard Nexus Fixed Loan Offer',
@@ -123,7 +147,7 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
         onCancel={onClose}
         footer={null}
         centered
-        width={580}
+        width={600}
         styles={{
           mask: {
             backdropFilter: 'blur(8px)',
@@ -131,7 +155,7 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
           },
           body: {
             borderRadius: '16px',
-            padding: '12px 4px',
+            padding: '16px 8px',
           },
         }}
       >
@@ -156,7 +180,7 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
               Create Lending Offer
             </Title>
             <Text type="secondary" style={{ fontSize: 13 }}>
-              Fund principal liquidity into Soroban smart escrow and earn fixed yield.
+              Type any custom loan parameter freely or pick from suggestion dropdowns.
             </Text>
           </div>
         </div>
@@ -166,14 +190,6 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
         <Form
           form={form}
           layout="vertical"
-          initialValues={{
-            amount: 1000,
-            apr: 8,
-            duration: 30,
-            maxLtv: 75,
-            liquidationThreshold: 80,
-            minHealthFactor: 1.2,
-          }}
         >
           {/* STEP 0: LOAN TERMS */}
           {currentStep === 0 && (
@@ -181,16 +197,52 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
               <Form.Item
                 name="amount"
                 label={<Text strong>Principal Borrow Amount (USDC)</Text>}
-                rules={[{ required: true, message: 'Please enter loan amount' }]}
+                rules={[
+                  { required: true, message: 'Please enter loan amount' },
+                  {
+                    validator: (_, value) => {
+                      const num = Number(value);
+                      if (isNaN(num) || num <= 0) return Promise.reject(new Error('Amount must be greater than 0'));
+                      return Promise.resolve();
+                    },
+                  },
+                ]}
               >
                 <InputNumber
                   style={{ width: '100%', borderRadius: 10 }}
                   size="large"
-                  min={10}
-                  max={100000}
+                  min={1}
+                  max={1000000}
+                  placeholder="e.g. 1000"
                   value={amount}
-                  onChange={(val) => setAmount(val || 1000)}
-                  addonAfter="USDC"
+                  onChange={(val) => {
+                    const nextVal = val ?? undefined;
+                    setAmount(nextVal);
+                    form.setFieldsValue({ amount: nextVal });
+                  }}
+                  addonAfter={
+                    <Select
+                      placeholder=""
+                      style={{ width: 44 }}
+                      value={undefined}
+                      popupMatchSelectWidth={false}
+                      suffixIcon={<ChevronDown size={14} style={{ color: 'var(--text-muted, #64748b)' }} />}
+                      onChange={(val) => {
+                        const num = Number(val);
+                        setAmount(num);
+                        form.setFieldsValue({ amount: num });
+                      }}
+                      options={[
+                        { value: 100, label: '100 USDC' },
+                        { value: 200, label: '200 USDC' },
+                        { value: 500, label: '500 USDC' },
+                        { value: 1000, label: '1,000 USDC' },
+                        { value: 2500, label: '2,500 USDC' },
+                        { value: 5000, label: '5,000 USDC' },
+                        { value: 10000, label: '10,000 USDC' },
+                      ]}
+                    />
+                  }
                 />
               </Form.Item>
 
@@ -199,37 +251,116 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
                   <Form.Item
                     name="apr"
                     label={<Text strong>Fixed Interest Rate (APR %)</Text>}
-                    rules={[{ required: true, message: 'Please enter APR' }]}
+                    rules={[
+                      { required: true, message: 'Please enter APR percentage' },
+                      {
+                        validator: (_, value) => {
+                          const num = Number(value);
+                          if (isNaN(num) || num <= 0) return Promise.reject(new Error('APR must be greater than 0%'));
+                          if (num > 50) return Promise.reject(new Error('Maximum allowed APR limit is 50%'));
+                          return Promise.resolve();
+                        },
+                      },
+                    ]}
+                    help={
+                      apr && apr > MAX_FIXED_APR_PERCENT ? (
+                        <div style={{ color: '#d97706', fontSize: 12, marginTop: 4, display: 'flex', alignItems: 'center', gap: 4, fontWeight: 600 }}>
+                          <AlertTriangle size={14} style={{ flex: '0 0 14px' }} />
+                          <span>High APR Warning: Exceeds recommended {MAX_FIXED_APR_PERCENT}% cap. High rates may reduce borrower demand.</span>
+                        </div>
+                      ) : undefined
+                    }
+                  >
+                    <InputNumber
+                      style={{ width: '100%', borderRadius: 10 }}
+                      size="large"
+                      min={0.1}
+                      max={50}
+                      placeholder="e.g. 8"
+                      value={apr}
+                      onChange={(val) => {
+                        const nextVal = val ?? undefined;
+                        setApr(nextVal);
+                        form.setFieldsValue({ apr: nextVal });
+                      }}
+                      addonAfter={
+                        <Select
+                          placeholder=""
+                          style={{ width: 44 }}
+                          value={undefined}
+                          popupMatchSelectWidth={false}
+                          suffixIcon={<ChevronDown size={14} style={{ color: 'var(--text-muted, #64748b)' }} />}
+                          onChange={(val) => {
+                            const num = Number(val);
+                            setApr(num);
+                            form.setFieldsValue({ apr: num });
+                          }}
+                          options={[
+                            { value: 5, label: '5% APR' },
+                            { value: 8, label: '8% APR' },
+                            { value: 10, label: '10% APR' },
+                            { value: 12, label: '12% APR' },
+                            { value: 15, label: '15% APR' },
+                            { value: 18, label: '18% APR' },
+                            { value: 20, label: '20% APR' },
+                            { value: 25, label: '25% APR' },
+                            { value: 30, label: '30% APR' },
+                          ]}
+                        />
+                      }
+                    />
+                  </Form.Item>
+                </Col>
+
+                <Col span={12}>
+                  <Form.Item
+                    name="duration"
+                    label={<Text strong>Loan Duration (Days)</Text>}
+                    rules={[
+                      { required: true, message: 'Please enter duration' },
+                      {
+                        validator: (_, value) => {
+                          const num = Number(value);
+                          if (isNaN(num) || num <= 0) return Promise.reject(new Error('Duration must be greater than 0 days'));
+                          return Promise.resolve();
+                        },
+                      },
+                    ]}
                   >
                     <InputNumber
                       style={{ width: '100%', borderRadius: 10 }}
                       size="large"
                       min={1}
-                      max={MAX_FIXED_APR_PERCENT}
-                      value={apr}
-                      onChange={(val) => setApr(val || 8)}
-                      addonAfter="%"
-                    />
-                  </Form.Item>
-                </Col>
-                <Col span={12}>
-                  <Form.Item
-                    name="duration"
-                    label={<Text strong>Loan Duration (Days)</Text>}
-                    rules={[{ required: true, message: 'Please enter duration' }]}
-                  >
-                    <Select
-                      size="large"
-                      style={{ borderRadius: 10 }}
+                      max={365}
+                      placeholder="e.g. 30"
                       value={duration}
-                      onChange={(val) => setDuration(val)}
-                      options={[
-                        { value: 7, label: '7 Days' },
-                        { value: 14, label: '14 Days' },
-                        { value: 30, label: '30 Days' },
-                        { value: 60, label: '60 Days' },
-                        { value: 90, label: '90 Days' },
-                      ]}
+                      onChange={(val) => {
+                        const nextVal = val ?? undefined;
+                        setDuration(nextVal);
+                        form.setFieldsValue({ duration: nextVal });
+                      }}
+                      addonAfter={
+                        <Select
+                          placeholder=""
+                          style={{ width: 44 }}
+                          value={undefined}
+                          popupMatchSelectWidth={false}
+                          suffixIcon={<ChevronDown size={14} style={{ color: 'var(--text-muted, #64748b)' }} />}
+                          onChange={(val) => {
+                            const num = Number(val);
+                            setDuration(num);
+                            form.setFieldsValue({ duration: num });
+                          }}
+                          options={[
+                            { value: 7, label: '7 Days' },
+                            { value: 14, label: '14 Days' },
+                            { value: 30, label: '30 Days' },
+                            { value: 60, label: '60 Days' },
+                            { value: 90, label: '90 Days' },
+                            { value: 180, label: '180 Days' },
+                          ]}
+                        />
+                      }
                     />
                   </Form.Item>
                 </Col>
@@ -266,13 +397,13 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
                 onClick={handleNextFromTerms}
                 style={{ borderRadius: 10, marginTop: 8, height: 46, fontWeight: 700 }}
               >
-                <span>Next: Collateral Rules</span>
+                <span>Next: Collateral & Safety Rules</span>
                 <ArrowRight size={18} />
               </Button>
             </div>
           )}
 
-          {/* STEP 1: COLLATERAL RULES */}
+          {/* STEP 1: COLLATERAL & SAFETY RULES */}
           {currentStep === 1 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <Row gutter={16}>
@@ -287,16 +418,49 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
                         </Tooltip>
                       </Space>
                     }
-                    rules={[{ required: true }]}
+                    rules={[
+                      { required: true, message: 'Please enter Max LTV' },
+                      {
+                        validator: (_, value) => {
+                          const num = Number(value);
+                          if (isNaN(num) || num <= 0 || num > 90) return Promise.reject(new Error('Max LTV must be between 1% and 90%'));
+                          return Promise.resolve();
+                        },
+                      },
+                    ]}
                   >
                     <InputNumber
                       style={{ width: '100%', borderRadius: 10 }}
                       size="large"
-                      min={50}
+                      min={1}
                       max={90}
                       value={maxLtv}
-                      onChange={(val) => setMaxLtv(val || 75)}
-                      addonAfter="%"
+                      onChange={(val) => {
+                        if (val !== null && val !== undefined) {
+                          setMaxLtv(val);
+                          form.setFieldsValue({ maxLtv: val });
+                        }
+                      }}
+                      addonAfter={
+                        <Select
+                          placeholder="Suggestions"
+                          style={{ width: 85 }}
+                          value={maxLtv}
+                          onChange={(val) => {
+                            const num = Number(val);
+                            setMaxLtv(num);
+                            form.setFieldsValue({ maxLtv: num });
+                          }}
+                          options={[
+                            { value: 50, label: '50%' },
+                            { value: 60, label: '60%' },
+                            { value: 65, label: '65%' },
+                            { value: 70, label: '70%' },
+                            { value: 75, label: '75%' },
+                            { value: 80, label: '80%' },
+                          ]}
+                        />
+                      }
                     />
                   </Form.Item>
                 </Col>
@@ -306,49 +470,178 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
                     name="liquidationThreshold"
                     label={
                       <Space size={4}>
-                        <Text strong>Liquidation Threshold</Text>
-                        <Tooltip title="Ratio below which a borrower loan is eligible for partial liquidation.">
+                        <Text strong>Liquidation Threshold (%)</Text>
+                        <Tooltip title="Ratio at which borrower position becomes eligible for liquidation.">
                           <HelpCircle size={14} style={{ color: 'var(--text-muted)' }} />
                         </Tooltip>
                       </Space>
                     }
-                    rules={[{ required: true }]}
+                    rules={[
+                      { required: true, message: 'Please enter Liquidation Threshold' },
+                      {
+                        validator: (_, value) => {
+                          const num = Number(value);
+                          if (isNaN(num) || num <= 0 || num > 95) return Promise.reject(new Error('Threshold must be between 1% and 95%'));
+                          return Promise.resolve();
+                        },
+                      },
+                    ]}
                   >
                     <InputNumber
                       style={{ width: '100%', borderRadius: 10 }}
                       size="large"
-                      min={60}
+                      min={1}
                       max={95}
                       value={liquidationThreshold}
-                      onChange={(val) => setLiquidationThreshold(val || 80)}
-                      addonAfter="%"
+                      onChange={(val) => {
+                        if (val !== null && val !== undefined) {
+                          setLiquidationThreshold(val);
+                          form.setFieldsValue({ liquidationThreshold: val });
+                        }
+                      }}
+                      addonAfter={
+                        <Select
+                          placeholder="Suggestions"
+                          style={{ width: 85 }}
+                          value={liquidationThreshold}
+                          onChange={(val) => {
+                            const num = Number(val);
+                            setLiquidationThreshold(num);
+                            form.setFieldsValue({ liquidationThreshold: num });
+                          }}
+                          options={[
+                            { value: 75, label: '75%' },
+                            { value: 80, label: '80%' },
+                            { value: 85, label: '85%' },
+                            { value: 90, label: '90%' },
+                            { value: 95, label: '95%' },
+                          ]}
+                        />
+                      }
                     />
                   </Form.Item>
                 </Col>
               </Row>
 
-              <Form.Item
-                name="minHealthFactor"
-                label={
-                  <Space size={4}>
-                    <Text strong>Minimum Health Factor</Text>
-                    <Tooltip title="Minimum health factor required when borrower accepts the offer.">
-                      <HelpCircle size={14} style={{ color: 'var(--text-muted)' }} />
-                    </Tooltip>
-                  </Space>
-                }
-                rules={[{ required: true }]}
-              >
-                <InputNumber
-                  style={{ width: '100%', borderRadius: 10 }}
-                  size="large"
-                  min={1.0}
-                  max={2.0}
-                  step={0.1}
-                  value={minHealthFactor}
-                  onChange={(val) => setMinHealthFactor(val || 1.2)}
-                />
-              </Form.Item>
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Form.Item
+                    name="minHealthFactor"
+                    label={
+                      <Space size={4}>
+                        <Text strong>Minimum Health Factor (Min HF)</Text>
+                        <Tooltip title="Minimum health factor required for borrowers to open a loan under this offer.">
+                          <HelpCircle size={14} style={{ color: 'var(--text-muted)' }} />
+                        </Tooltip>
+                      </Space>
+                    }
+                    rules={[
+                      { required: true, message: 'Please enter Minimum Health Factor' },
+                      {
+                        validator: (_, value) => {
+                          const num = Number(value);
+                          if (isNaN(num) || num < 1.4) return Promise.reject(new Error('Min HF must be at least 1.4'));
+                          return Promise.resolve();
+                        },
+                      },
+                    ]}
+                  >
+                    <InputNumber
+                      style={{ width: '100%', borderRadius: 10 }}
+                      size="large"
+                      min={1.4}
+                      max={5.0}
+                      step={0.1}
+                      value={minHealthFactor}
+                      onChange={(val) => {
+                        if (val !== null && val !== undefined) {
+                          setMinHealthFactor(val);
+                          form.setFieldsValue({ minHealthFactor: val });
+                        }
+                      }}
+
+                      addonAfter={
+                        <Select
+                          placeholder="Suggestions"
+                          style={{ width: 85 }}
+                          value={minHealthFactor}
+                          onChange={(val) => {
+                            const num = Number(val);
+                            setMinHealthFactor(num);
+                            form.setFieldsValue({ minHealthFactor: num });
+                          }}
+                          options={[
+                            { value: 1.4, label: '1.4' },
+                            { value: 1.5, label: '1.5' },
+                            { value: 1.6, label: '1.6' },
+                            { value: 1.8, label: '1.8' },
+                            { value: 2.0, label: '2.0' },
+                            { value: 2.5, label: '2.5' },
+                          ]}
+
+                        />
+                      }
+                    />
+                  </Form.Item>
+                </Col>
+
+                <Col span={12}>
+                  <Form.Item
+                    name="liquidationBonus"
+                    label={
+                      <Space size={4}>
+                        <Text strong>Liquidator Bonus (%)</Text>
+                        <Tooltip title="Bonus percentage rewarded to liquidator bots if collateral drops below safety threshold.">
+                          <HelpCircle size={14} style={{ color: 'var(--text-muted)' }} />
+                        </Tooltip>
+                      </Space>
+                    }
+                    rules={[
+                      { required: true, message: 'Please enter Liquidation Bonus' },
+                      {
+                        validator: (_, value) => {
+                          const num = Number(value);
+                          if (isNaN(num) || num < 0 || num > 30) return Promise.reject(new Error('Bonus must be between 0% and 30%'));
+                          return Promise.resolve();
+                        },
+                      },
+                    ]}
+                  >
+                    <InputNumber
+                      style={{ width: '100%', borderRadius: 10 }}
+                      size="large"
+                      min={0}
+                      max={30}
+                      value={liquidationBonus}
+                      onChange={(val) => {
+                        if (val !== null && val !== undefined) {
+                          setLiquidationBonus(val);
+                          form.setFieldsValue({ liquidationBonus: val });
+                        }
+                      }}
+                      addonAfter={
+                        <Select
+                          placeholder="Suggestions"
+                          style={{ width: 85 }}
+                          value={liquidationBonus}
+                          onChange={(val) => {
+                            const num = Number(val);
+                            setLiquidationBonus(num);
+                            form.setFieldsValue({ liquidationBonus: num });
+                          }}
+                          options={[
+                            { value: 5, label: '5%' },
+                            { value: 8, label: '8%' },
+                            { value: 10, label: '10%' },
+                            { value: 12, label: '12%' },
+                            { value: 15, label: '15%' },
+                          ]}
+                        />
+                      }
+                    />
+                  </Form.Item>
+                </Col>
+              </Row>
 
               <Form.Item label={<Text strong>Memo / Note (Optional)</Text>}>
                 <Input
@@ -385,12 +678,12 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
                 }}
               >
                 <Title level={5} style={{ marginTop: 0, marginBottom: 16, fontWeight: 700 }}>
-                  Offer Breakdown
+                  Offer Parameters Breakdown
                 </Title>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12, fontSize: 14 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <Text type="secondary">Principal Loan:</Text>
-                    <Text strong>{formatCurrency(amount, 'USDC')}</Text>
+                    <Text strong>{formatCurrency(amount || 0, 'USDC')}</Text>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <Text type="secondary">Required Collateral:</Text>
@@ -398,7 +691,15 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <Text type="secondary">Duration & Rate:</Text>
-                    <Text strong>{duration} Days @ {apr}% APR</Text>
+                    <Text strong>{duration || 0} Days @ {apr || 0}% APR</Text>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Text type="secondary">Max LTV & Threshold:</Text>
+                    <Text strong>{maxLtv}% Max LTV / {liquidationThreshold}% Threshold</Text>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Text type="secondary">Min Health Factor:</Text>
+                    <Text strong>{minHealthFactor} Min HF</Text>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--success-color)', fontWeight: 600 }}>
                     <span>Your Expected Return:</span>
@@ -407,7 +708,7 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
                 </div>
               </div>
 
-              {wallet.balanceUSDC < amount && (
+              {wallet.balanceUSDC < (amount || 0) && (
                 <Alert
                   type="warning"
                   showIcon
@@ -450,7 +751,7 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
                 Offer Published on Marketplace!
               </Title>
               <Paragraph type="secondary" style={{ fontSize: 14 }}>
-                Your principal of {formatCurrency(amount, 'USDC')} has been funded into Soroban smart escrow.
+                Your principal of {formatCurrency(amount || 0, 'USDC')} has been funded into Soroban smart escrow.
               </Paragraph>
               <Button type="primary" size="large" onClick={onClose} style={{ borderRadius: 10, height: 46, fontWeight: 700 }}>
                 Done

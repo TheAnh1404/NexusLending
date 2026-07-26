@@ -245,32 +245,63 @@ h1, h2, h3, h4, h5, h6 {
   background: transparent !important;
 }
 
+.ant-table-container {
+  border-radius: var(--radius-lg) !important;
+  overflow: hidden;
+}
+
+/* Ensure table cells never wrap text vertically into micro-columns */
+.ant-table-cell {
+  white-space: nowrap !important;
+  vertical-align: middle !important;
+}
+
 .ant-table-thead > tr > th {
-  background-color: var(--border-light) !important;
-  color: var(--text-muted) !important;
-  font-weight: 600 !important;
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%) !important;
+  color: #64748b !important;
+  font-weight: 700 !important;
   font-family: var(--font-heading) !important;
-  font-size: 12px !important;
+  font-size: 11px !important;
   text-transform: uppercase !important;
-  letter-spacing: 0.06em !important;
+  letter-spacing: 0.08em !important;
   border-bottom: 1px solid var(--border-color) !important;
-  padding: 16px 20px !important;
+  padding: 14px 18px !important;
+  white-space: nowrap !important;
 }
 
 .ant-table-tbody > tr > td {
   font-family: var(--font-body) !important;
-  font-size: 14px !important;
-  border-bottom: 1px solid var(--border-light) !important;
-  padding: 16px 20px !important;
+  font-size: 13.5px !important;
+  border-bottom: 1px solid #f1f5f9 !important;
+  padding: 16px 18px !important;
   color: var(--text-main) !important;
+  white-space: nowrap !important;
 }
 
 .ant-table-row {
-  transition: background-color 0.15s ease;
+  transition: all 0.2s ease;
 }
 
 .ant-table-row:hover > td {
-  background-color: var(--border-light) !important;
+  background-color: rgba(99, 102, 241, 0.04) !important;
+}
+
+/* Custom horizontal scrollbar for tables */
+.ant-table-body::-webkit-scrollbar,
+.ant-table-content::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+
+.ant-table-body::-webkit-scrollbar-thumb,
+.ant-table-content::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.4);
+  border-radius: 999px;
+}
+
+.ant-table-body::-webkit-scrollbar-track,
+.ant-table-content::-webkit-scrollbar-track {
+  background: rgba(241, 245, 249, 0.6);
 }
 
 .ant-card {

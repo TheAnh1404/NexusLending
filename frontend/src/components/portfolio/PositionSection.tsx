@@ -270,7 +270,6 @@ export const PositionSection: React.FC<PositionSectionProps> = ({ borrowedLoans,
               columns={borrowingColumns}
               rowKey="id"
               pagination={false}
-              scroll={{ x: 650 }}
             />
           </Card>
         )
@@ -290,7 +289,6 @@ export const PositionSection: React.FC<PositionSectionProps> = ({ borrowedLoans,
               columns={lendingColumns}
               rowKey="id"
               pagination={false}
-              scroll={{ x: 650 }}
             />
           </Card>
         )

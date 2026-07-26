@@ -13,6 +13,8 @@ import {
   Hourglass,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { OfferIdBadge } from '../components/common/OfferIdBadge';
+
 import { useAppContext } from '../app/AppContext';
 import { useWallet } from '../hooks/useWallet';
 import {
@@ -391,8 +393,16 @@ export const MyLoansPage: React.FC = () => {
 
   const pendingOfferColumns = [
     {
+      title: 'Offer ID',
+      dataIndex: 'id',
+      key: 'id',
+      render: (id: string) => <OfferIdBadge id={id} />,
+    },
+
+    {
       title: 'Offer Amount',
       key: 'amount',
+
       render: (_: unknown, record: typeof myPendingOffers[0]) => (
         <Text strong style={{ fontSize: 15, color: 'var(--text-main)' }}>
           {formatCurrency(record.amount, record.asset)}
