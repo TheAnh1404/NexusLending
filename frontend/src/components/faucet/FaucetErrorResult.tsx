@@ -20,6 +20,8 @@ export const FaucetErrorResult: React.FC<FaucetErrorResultProps> = ({
   technicalDetails,
   onRetry,
 }) => {
+  const isTrustlineError = errorMessage.toLowerCase().includes('trustline') || technicalDetails?.rawError?.toLowerCase().includes('trustline');
+
   return (
     <Card
       styles={{ body: { padding: 24 } }}
@@ -56,6 +58,22 @@ export const FaucetErrorResult: React.FC<FaucetErrorResultProps> = ({
         </Paragraph>
       </div>
 
+      {isTrustlineError && (
+        <div
+          style={{
+            padding: 12,
+            borderRadius: 8,
+            backgroundColor: '#fffbe6',
+            border: '1px solid #ffe58f',
+            fontSize: 12,
+            marginBottom: 16,
+            color: '#d48806',
+          }}
+        >
+          <strong>💡 Stellar Security Requirement:</strong> Your Stellar wallet address requires an active <strong>USDC Trustline</strong> before it can receive test USDC. Connect your wallet via Freighter and select <em>"Use Connected Wallet"</em> to add the trustline automatically.
+        </div>
+      )}
+
       {technicalDetails && (
         <Collapse
           ghost
@@ -80,7 +98,7 @@ export const FaucetErrorResult: React.FC<FaucetErrorResultProps> = ({
         />
       )}
 
-      <div style={{ display: 'flex', justifyContent: 'center' }}>
+      <div style={{ display: 'flex', justifyContent: 'center', gap: 12 }}>
         <Button
           type="primary"
           danger
@@ -94,3 +112,4 @@ export const FaucetErrorResult: React.FC<FaucetErrorResultProps> = ({
     </Card>
   );
 };
+

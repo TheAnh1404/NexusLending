@@ -36,7 +36,7 @@ export const faucetAssetAllowlist: FaucetAssetConfig[] = [
   {
     code: 'USDC',
     displayName: 'Test USDC (Stablecoin)',
-    type: USDC_ISSUER ? 'custom_asset' : 'soroban_token',
+    type: USDC_CONTRACT_ID ? 'soroban_token' : (USDC_ISSUER ? 'custom_asset' : 'soroban_token'),
     contractId: USDC_CONTRACT_ID,
     issuer: USDC_ISSUER || undefined,
     decimals: 7,
@@ -51,7 +51,7 @@ export const faucetAssetAllowlist: FaucetAssetConfig[] = [
   {
     code: 'COLLATERAL',
     displayName: 'Test Collateral Token',
-    type: COLLATERAL_ISSUER ? 'custom_asset' : 'soroban_token',
+    type: COLLATERAL_CONTRACT_ID ? 'soroban_token' : (COLLATERAL_ISSUER ? 'custom_asset' : 'soroban_token'),
     contractId: COLLATERAL_CONTRACT_ID,
     issuer: COLLATERAL_ISSUER || undefined,
     decimals: 7,
@@ -64,3 +64,4 @@ export const faucetAssetAllowlist: FaucetAssetConfig[] = [
     icon: 'COLLATERAL',
   },
 ];
+

@@ -1,8 +1,9 @@
-import { Asset, Horizon, Keypair, Memo, Networks, Operation, StrKey, TransactionBuilder } from '@stellar/stellar-sdk';
+import { Address, Asset, Contract, Horizon, Keypair, Memo, Networks, Operation, StrKey, TransactionBuilder, nativeToScVal, rpc } from '@stellar/stellar-sdk';
 import { faucetAssetAllowlist, type FaucetAssetConfig } from './faucet.config';
 
 const HORIZON_TESTNET_URL = 'https://horizon-testnet.stellar.org';
 const horizonServer = new Horizon.Server(HORIZON_TESTNET_URL);
+const rpcServer = new rpc.Server(process.env.STELLAR_RPC_URL || 'https://soroban-testnet.stellar.org:443');
 
 export interface FaucetClaimRequest {
   walletAddress: string;
@@ -185,14 +186,14 @@ export class FaucetService {
       const result = await this.fundXlmFriendbot(cleanAddress);
       txHash = result.txHash;
       updatedBalance = result.balance;
-    } else if (assetConfig.type === 'custom_asset') {
-      const result = await this.fundClassicAsset(cleanAddress, assetConfig);
+    } else if (assetConfig.type === 'soroban_token' || assetConfig.contractId) {
+      const result = await this.fundSorobanToken(cleanAddress, assetConfig);
       txHash = result.txHash;
       updatedBalance = result.balance;
     } else {
-      throw new Error(
-        `${assetConfig.code} is configured as a Soroban token. Connect Freighter and claim with the on-chain faucet contract so the recipient can authorize the request.`
-      );
+      const result = await this.fundClassicAsset(cleanAddress, assetConfig);
+      txHash = result.txHash;
+      updatedBalance = result.balance;
     }
 
     const explorerUrl = `https://stellar.expert/explorer/testnet/tx/${txHash}`;
@@ -240,7 +241,6 @@ export class FaucetService {
       accountExists = false;
     }
 
-    // 1. If account is brand new (not yet on Testnet), Friendbot creates & funds it with 10,000 XLM
     if (!accountExists) {
       try {
         const response = await fetch(`https://friendbot.stellar.org?addr=${encodeURIComponent(address)}`);
@@ -258,8 +258,95 @@ export class FaucetService {
       }
     }
 
-    // 2. If account already exists on Testnet, send 100 XLM payment
     return this.submitRealOnChainPayment(address, '100', 'XLM', existingBalance);
+  }
+
+  /**
+   * Fund Soroban token directly on-chain via Soroban RPC mint invocation.
+   * Works for ANY wallet ID without requiring a Stellar Classic trustline!
+   */
+
+  private async fundSorobanToken(
+    address: string,
+    assetConfig: FaucetAssetConfig
+  ): Promise<{ txHash: string; balance: number }> {
+    const claimNum = parseFloat(assetConfig.claimAmount) || 1000;
+
+    // Ensure recipient account is activated on Testnet first
+    try {
+      const acc = await horizonServer.loadAccount(address);
+      if (!acc) {
+        await fetch(`https://friendbot.stellar.org?addr=${encodeURIComponent(address)}`);
+      }
+    } catch {
+      try {
+        await fetch(`https://friendbot.stellar.org?addr=${encodeURIComponent(address)}`);
+      } catch {
+        // Friendbot fallback
+      }
+    }
+
+    let distributorKey: Keypair;
+    if (process.env.STELLAR_FAUCET_SECRET && process.env.STELLAR_FAUCET_SECRET.startsWith('S')) {
+      distributorKey = Keypair.fromSecret(process.env.STELLAR_FAUCET_SECRET);
+    } else {
+      distributorKey = Keypair.random();
+      try {
+        const fRes = await fetch(`https://friendbot.stellar.org?addr=${encodeURIComponent(distributorKey.publicKey())}`);
+        if (fRes.ok) await fRes.json();
+      } catch {
+        // Ignore
+      }
+    }
+
+    const contractId = assetConfig.contractId;
+    if (!contractId) {
+      if (assetConfig.issuer) {
+        return this.fundClassicAsset(address, assetConfig);
+      }
+      throw new Error(`Contract ID is not configured for ${assetConfig.code}.`);
+    }
+
+    try {
+      const account = await horizonServer.loadAccount(distributorKey.publicKey());
+      const contract = new Contract(contractId);
+      const amountStroops = BigInt(Math.floor(claimNum * 10_000_000));
+
+      const tx = new TransactionBuilder(account, {
+        fee: '100000',
+        networkPassphrase: Networks.TESTNET,
+      })
+        .addOperation(
+          contract.call(
+            'mint',
+            Address.fromString(address).toScVal(),
+            nativeToScVal(amountStroops, { type: 'i128' })
+          )
+        )
+        .setTimeout(30)
+        .build();
+
+      const simResult = await rpcServer.simulateTransaction(tx);
+      if (rpc.Api.isSimulationSuccess(simResult)) {
+        const assembledTx = rpc.assembleTransaction(tx, simResult).build();
+        assembledTx.sign(distributorKey);
+        const sendResult = await rpcServer.sendTransaction(assembledTx);
+        if (sendResult.hash) {
+          return {
+            txHash: sendResult.hash,
+            balance: claimNum,
+          };
+        }
+      }
+    } catch {
+      // If Soroban mint invocation encounters error, attempt classic payment fallback
+    }
+
+    if (assetConfig.issuer) {
+      return this.fundClassicAsset(address, assetConfig);
+    }
+
+    throw new Error(`Failed to disburse Soroban token ${assetConfig.code} on-chain.`);
   }
 
   /**
@@ -298,6 +385,9 @@ export class FaucetService {
     const asset = new Asset(assetConfig.code, assetConfig.issuer);
     const existingBalance = this.getAssetBalance(account, asset);
     if (existingBalance === null) {
+      if (assetConfig.contractId) {
+        return this.fundSorobanToken(address, assetConfig);
+      }
       throw new Error(
         `${address.slice(0, 6)}...${address.slice(-6)} does not have a ${assetConfig.code} trustline. Add the trustline from Freighter before requesting this asset.`
       );
@@ -305,6 +395,7 @@ export class FaucetService {
 
     return this.submitRealOnChainPayment(address, claimNum.toString(), assetConfig.code, existingBalance, asset);
   }
+
 
   /**
    * Submit real, signed transaction on Stellar Testnet Horizon RPC
@@ -322,17 +413,16 @@ export class FaucetService {
 
       if (process.env.STELLAR_FAUCET_SECRET && process.env.STELLAR_FAUCET_SECRET.startsWith('S')) {
         distributorKey = Keypair.fromSecret(process.env.STELLAR_FAUCET_SECRET);
-      } else if (!asset.isNative()) {
-        throw new Error(`STELLAR_FAUCET_SECRET is required for ${asset.getCode()} faucet payments.`);
       } else {
-        // Generate a new testnet keypair and activate it via Friendbot to perform funding payment
+        // Fallback: Generate a new testnet keypair and activate it via Friendbot to perform funding payment
         distributorKey = Keypair.random();
-        const fRes = await fetch(`https://friendbot.stellar.org?addr=${encodeURIComponent(distributorKey.publicKey())}`);
-        if (fRes.ok) {
-          const fData = (await fRes.json()) as { hash?: string };
-          if (fData.hash) {
-            // Distributor keypair activated on Testnet
+        try {
+          const fRes = await fetch(`https://friendbot.stellar.org?addr=${encodeURIComponent(distributorKey.publicKey())}`);
+          if (fRes.ok) {
+            await fRes.json();
           }
+        } catch {
+          // Friendbot network fallback
         }
       }
 
@@ -366,14 +456,19 @@ export class FaucetService {
         txHash: response.hash,
         balance: newBal > 0 ? newBal : parseFloat(amountStr) + 1000,
       };
-    } catch (err: unknown) {
+    } catch (err: any) {
+      const resultCodes = err?.response?.data?.extras?.result_codes;
+      const horizonDetail = err?.response?.data?.detail ?? err?.response?.data?.title ?? (err instanceof Error ? err.message : String(err));
+      const detailedMsg = resultCodes ? `${horizonDetail} (Codes: ${JSON.stringify(resultCodes)})` : horizonDetail;
+
       if (!asset.isNative()) {
-        throw new Error(`Failed to submit ${asset.getCode()} faucet payment: ${err instanceof Error ? err.message : String(err)}`);
+        throw new Error(`Failed to submit ${asset.getCode()} faucet payment: ${detailedMsg}`);
       }
 
-      throw new Error(`Failed to submit on-chain transaction to Stellar Testnet: ${err instanceof Error ? err.message : String(err)}`);
+      throw new Error(`Failed to submit on-chain transaction to Stellar Testnet: ${detailedMsg}`);
     }
   }
+
 
   private getAssetBalance(account: LoadedAccount, asset: Asset): number | null {
     const balance = account.balances.find((item) => {

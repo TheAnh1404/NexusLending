@@ -137,3 +137,32 @@ fn test_request_after_cooldown_expiry() {
     faucet.request_tokens(&recipient, &token_address);
     assert_eq!(token_client.balance(&recipient), 2_000_0000000);
 }
+
+#[test]
+fn test_batch_claim_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let faucet = create_faucet_contract(&env, &admin);
+    let recipient = Address::generate(&env);
+
+    let (token_a, token_a_admin) = create_token_contract(&env, &admin);
+    let (token_b, token_b_admin) = create_token_contract(&env, &admin);
+
+    token_a_admin.mint(&faucet.address, &10_000_0000000);
+    token_b_admin.mint(&faucet.address, &10_000_0000000);
+
+    faucet.set_asset_config(&token_a.address, &1_000_0000000, &100, &true);
+    faucet.set_asset_config(&token_b.address, &500_0000000, &100, &true);
+
+    let mut assets = soroban_sdk::Vec::new(&env);
+    assets.push_back(token_a.address.clone());
+    assets.push_back(token_b.address.clone());
+
+    faucet.batch_claim(&recipient, &assets);
+
+    assert_eq!(token_a.balance(&recipient), 1_000_0000000);
+    assert_eq!(token_b.balance(&recipient), 500_0000000);
+}
+
