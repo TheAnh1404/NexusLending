@@ -15,11 +15,16 @@ app.use(
       if (!origin) return callback(null, true);
       const allowedOrigins = [
         env.frontendUrl,
+        'https://nexus-nta9.vercel.app',
         'http://localhost:5173',
         'http://localhost:5174',
         'http://localhost:3000',
       ];
-      if (allowedOrigins.includes(origin) || /^http:\/\/localhost:\d+$/.test(origin)) {
+      if (
+        allowedOrigins.includes(origin) ||
+        /^http:\/\/localhost:\d+$/.test(origin) ||
+        /\.vercel\.app$/.test(origin)
+      ) {
         callback(null, true);
       } else {
         callback(new Error('Not allowed by CORS'));
@@ -30,7 +35,7 @@ app.use(
 );
 app.use(express.json({ limit: '1mb' }));
 
-app.get('/api/health', (_req, res) => {
+app.get(['/api/health', '/health'], (_req, res) => {
   res.json({
     data: {
       service: 'nexus-backend',
@@ -44,4 +49,6 @@ app.get('/api/health', (_req, res) => {
 app.use('/api', apiRouter);
 app.use(notFoundHandler);
 app.use(errorHandler);
+
+export default app;
 
