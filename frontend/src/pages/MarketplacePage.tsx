@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Typography, Input, Select, Button, Row, Col, Card, Table, Tag, Space, Tabs, Tooltip, Badge, Slider } from 'antd';
+import { Typography, Input, Select, Button, Row, Col, Card, Table, Tag, Space, Tabs, Popover, Badge, Slider } from 'antd';
 import { Search, PlusCircle, ArrowRight, Clock, Coins, Percent, TrendingUp, Star, UserCheck, Zap, DollarSign } from 'lucide-react';
 import { useAppContext } from '../app/AppContext';
 import { useWallet } from '../hooks/useWallet';
@@ -52,6 +52,127 @@ interface AmountTierGroup {
   offers: LoanOffer[];
   bestApr: number;
 }
+
+const OfferHoverCardContent: React.FC<{
+  offer: LoanOffer;
+  xlmPrice: number;
+  connectedWalletAddress: string;
+}> = ({ offer, xlmPrice, connectedWalletAddress }) => {
+  const isOwner = isSameWalletAddress(offer.lender, connectedWalletAddress);
+  const requiredCollateral = calculateRequiredCollateral(offer.amount, 1.0, xlmPrice, offer.maxLTV);
+  const collateralValueUsd = Math.ceil(requiredCollateral) * xlmPrice;
+  const interestReturn = (offer.amount * (offer.apr / 100) * offer.duration) / 365;
+  const totalRepayment = offer.amount + interestReturn;
+  const ltvPercent = offer.maxLTV;
+  const liquidationThreshold = Math.min(100, Math.round(ltvPercent * 1.15));
+
+  return (
+    <div style={{ width: 310, padding: '4px 2px' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <OfferIdBadge id={offer.id} size="small" />
+          {isOwner && (
+            <Tag color="cyan" style={{ fontSize: 10, fontWeight: 700, margin: 0, borderRadius: 4 }}>
+              YOUR OFFER
+            </Tag>
+          )}
+        </div>
+        <Tag color="purple" style={{ fontWeight: 800, fontSize: 11, margin: 0, borderRadius: 6 }}>
+          {offer.apr}% APR
+        </Tag>
+      </div>
+
+      {/* Financial Details Box */}
+      <div
+        style={{
+          borderRadius: 10,
+          backgroundColor: '#f8fafc',
+          border: '1px solid #e2e8f0',
+          padding: '10px 12px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+          marginBottom: 10,
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Principal Amount:</span>
+          <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-main)' }}>
+            {offer.amount.toLocaleString()} {offer.asset}
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Loan Duration:</span>
+          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-main)' }}>
+            {offer.duration} Days
+          </span>
+        </div>
+
+        <div style={{ height: 1, backgroundColor: '#e2e8f0' }} />
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Expected Interest:</span>
+          <span style={{ fontSize: 12, fontWeight: 700, color: '#10b981' }}>
+            +{interestReturn.toFixed(2)} {offer.asset}
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Total Repayment:</span>
+          <span style={{ fontSize: 13, fontWeight: 800, color: '#4f46e5' }}>
+            {totalRepayment.toFixed(2)} {offer.asset}
+          </span>
+        </div>
+      </div>
+
+      {/* Collateral & Risk Details */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 10 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+          Collateral & Risk Guard
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+          <span style={{ color: 'var(--text-secondary)' }}>Required Collateral:</span>
+          <span style={{ fontWeight: 700, color: 'var(--text-main)' }}>
+            {Math.ceil(requiredCollateral).toLocaleString()} {offer.collateralAsset} (~${collateralValueUsd.toFixed(2)})
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+          <span style={{ color: 'var(--text-secondary)' }}>Max LTV / Liquidation:</span>
+          <span style={{ fontWeight: 700, color: '#2563eb' }}>
+            {ltvPercent}% LTV / {liquidationThreshold}% Thresh
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
+          <span style={{ color: 'var(--text-secondary)' }}>Health Factor Guard:</span>
+          <span style={{ fontWeight: 700, color: '#52c41a' }}>
+            ≥ 1.40 Min HF
+          </span>
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div
+        style={{
+          fontSize: 11,
+          color: 'var(--text-muted)',
+          borderTop: '1px solid #e2e8f0',
+          paddingTop: 6,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+        }}
+      >
+        <span>Lender: {formatAddress(offer.lender)}</span>
+        <span style={{ fontSize: 10, color: '#2563eb', fontWeight: 600 }}>Soroban Protected 🔒</span>
+      </div>
+    </div>
+  );
+};
 
 export const MarketplacePage: React.FC = () => {
   const { loanOffers, oraclePrices, wallet, refreshData } = useAppContext();
@@ -253,28 +374,34 @@ export const MarketplacePage: React.FC = () => {
       render: (id: string, record: LoanOffer) => {
         const isBestInTier = record.apr === bestAprInTier && !isMyOffersTab;
         return (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start', whiteSpace: 'nowrap' }}>
-            <OfferIdBadge id={id} size="small" />
-            {isBestInTier && (
-              <Tag
-                color="green"
-                icon={<Star size={10} fill="#10b981" style={{ marginRight: 2 }} />}
-                style={{
-                  borderRadius: 12,
-                  fontWeight: 800,
-                  fontSize: 10,
-                  padding: '1px 6px',
-                  border: '1px solid rgba(16, 185, 129, 0.4)',
-                  backgroundColor: 'rgba(16, 185, 129, 0.12)',
-                  color: '#059669',
-                  margin: 0,
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                BEST IN TIER
-              </Tag>
-            )}
-          </div>
+          <Popover
+            content={<OfferHoverCardContent offer={record} xlmPrice={xlmPrice} connectedWalletAddress={connectedWalletAddress} />}
+            placement="right"
+            mouseEnterDelay={0.12}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start', whiteSpace: 'nowrap', cursor: 'pointer' }}>
+              <OfferIdBadge id={id} size="small" />
+              {isBestInTier && (
+                <Tag
+                  color="green"
+                  icon={<Star size={10} fill="#10b981" style={{ marginRight: 2 }} />}
+                  style={{
+                    borderRadius: 12,
+                    fontWeight: 800,
+                    fontSize: 10,
+                    padding: '1px 6px',
+                    border: '1px solid rgba(16, 185, 129, 0.4)',
+                    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                    color: '#059669',
+                    margin: 0,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  BEST IN TIER
+                </Tag>
+              )}
+            </div>
+          </Popover>
         );
       },
     },
@@ -283,43 +410,55 @@ export const MarketplacePage: React.FC = () => {
       dataIndex: 'amount',
       key: 'amount',
       render: (val: number, record: LoanOffer) => (
-        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}>
-          <div style={getTokenIconStyle(record.asset)} aria-label={`${record.asset.toUpperCase()} token`}>
-            {record.asset.toUpperCase() === 'USDC' ? '$' : record.asset.slice(0, 1).toUpperCase()}
+        <Popover
+          content={<OfferHoverCardContent offer={record} xlmPrice={xlmPrice} connectedWalletAddress={connectedWalletAddress} />}
+          placement="right"
+          mouseEnterDelay={0.12}
+        >
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap', cursor: 'pointer' }}>
+            <div style={getTokenIconStyle(record.asset)} aria-label={`${record.asset.toUpperCase()} token`}>
+              {record.asset.toUpperCase() === 'USDC' ? '$' : record.asset.slice(0, 1).toUpperCase()}
+            </div>
+            <Text strong style={{ fontSize: 14, color: 'var(--text-main)', fontWeight: 700, whiteSpace: 'nowrap' }}>
+              {formatTokenAmount(val, record.asset)}
+            </Text>
           </div>
-          <Text strong style={{ fontSize: 14, color: 'var(--text-main)', fontWeight: 700, whiteSpace: 'nowrap' }}>
-            {formatTokenAmount(val, record.asset)}
-          </Text>
-        </div>
+        </Popover>
       ),
     },
     {
       title: 'APR / Duration',
       key: 'aprDuration',
       render: (_: unknown, record: LoanOffer) => (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 3, whiteSpace: 'nowrap' }}>
-          <Tag
-            color="purple"
-            style={{
-              borderRadius: 6,
-              fontWeight: 800,
-              fontSize: 12,
-              padding: '2px 8px',
-              backgroundColor: 'rgba(139, 92, 246, 0.12)',
-              color: '#7c3aed',
-              border: '1px solid rgba(139, 92, 246, 0.25)',
-              margin: 0,
-              width: 'fit-content',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {record.apr}% APR
-          </Tag>
-          <Space size={4} style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-            <Clock size={12} />
-            <span>{record.duration} Days</span>
-          </Space>
-        </div>
+        <Popover
+          content={<OfferHoverCardContent offer={record} xlmPrice={xlmPrice} connectedWalletAddress={connectedWalletAddress} />}
+          placement="right"
+          mouseEnterDelay={0.12}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, whiteSpace: 'nowrap', cursor: 'pointer' }}>
+            <Tag
+              color="purple"
+              style={{
+                borderRadius: 6,
+                fontWeight: 800,
+                fontSize: 12,
+                padding: '2px 8px',
+                backgroundColor: 'rgba(139, 92, 246, 0.12)',
+                color: '#7c3aed',
+                border: '1px solid rgba(139, 92, 246, 0.25)',
+                margin: 0,
+                width: 'fit-content',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {record.apr}% APR
+            </Tag>
+            <Space size={4} style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+              <Clock size={12} />
+              <span>{record.duration} Days</span>
+            </Space>
+          </div>
+        </Popover>
       ),
     },
     {
@@ -329,19 +468,25 @@ export const MarketplacePage: React.FC = () => {
       render: (_: unknown, record: LoanOffer) => {
         const req = calculateRequiredCollateral(record.amount, 1.0, xlmPrice, record.maxLTV);
         return (
-          <div style={{ whiteSpace: 'nowrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Text strong style={{ fontSize: 13, whiteSpace: 'nowrap' }}>
-                {Math.ceil(req).toLocaleString()} {record.collateralAsset}
-              </Text>
-              <Tag color="blue" style={{ borderRadius: 4, fontWeight: 700, fontSize: 10, margin: 0, padding: '0 5px', whiteSpace: 'nowrap' }}>
-                {record.maxLTV}% LTV
-              </Tag>
+          <Popover
+            content={<OfferHoverCardContent offer={record} xlmPrice={xlmPrice} connectedWalletAddress={connectedWalletAddress} />}
+            placement="right"
+            mouseEnterDelay={0.12}
+          >
+            <div style={{ whiteSpace: 'nowrap', cursor: 'pointer' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Text strong style={{ fontSize: 13, whiteSpace: 'nowrap' }}>
+                  {Math.ceil(req).toLocaleString()} {record.collateralAsset}
+                </Text>
+                <Tag color="blue" style={{ borderRadius: 4, fontWeight: 700, fontSize: 10, margin: 0, padding: '0 5px', whiteSpace: 'nowrap' }}>
+                  {record.maxLTV}% LTV
+                </Tag>
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2, whiteSpace: 'nowrap' }}>
+                ~${(Math.ceil(req) * xlmPrice).toFixed(2)} USD
+              </div>
             </div>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2, whiteSpace: 'nowrap' }}>
-              ~${(Math.ceil(req) * xlmPrice).toFixed(2)} USD
-            </div>
-          </div>
+          </Popover>
         );
       },
     },
@@ -349,21 +494,25 @@ export const MarketplacePage: React.FC = () => {
       title: 'Lender Wallet',
       dataIndex: 'lender',
       key: 'lender',
-      render: (lender: string) => {
+      render: (lender: string, record: LoanOffer) => {
         const isOwner = isSameWalletAddress(lender, connectedWalletAddress);
         return (
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}>
-            <Tooltip title={lender}>
+          <Popover
+            content={<OfferHoverCardContent offer={record} xlmPrice={xlmPrice} connectedWalletAddress={connectedWalletAddress} />}
+            placement="right"
+            mouseEnterDelay={0.12}
+          >
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap', cursor: 'pointer' }}>
               <Text code style={{ fontSize: 11, borderRadius: 6, margin: 0, padding: '2px 6px', whiteSpace: 'nowrap', backgroundColor: '#f1f5f9', border: '1px solid #e2e8f0' }}>
                 {formatAddress(lender)}
               </Text>
-            </Tooltip>
-            {isOwner && (
-              <Tag color="cyan" style={{ fontSize: 9, margin: 0, padding: '0 4px', borderRadius: 4, fontWeight: 700, whiteSpace: 'nowrap' }}>
-                YOU
-              </Tag>
-            )}
-          </div>
+              {isOwner && (
+                <Tag color="cyan" style={{ fontSize: 9, margin: 0, padding: '0 4px', borderRadius: 4, fontWeight: 700, whiteSpace: 'nowrap' }}>
+                  YOU
+                </Tag>
+              )}
+            </div>
+          </Popover>
         );
       },
     },
