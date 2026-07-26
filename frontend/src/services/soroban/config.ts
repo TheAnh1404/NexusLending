@@ -50,7 +50,9 @@ export const CONTRACTS = {
 
 export const USDC_ASSET_CODE = import.meta.env.VITE_USDC_ASSET_CODE ?? 'USDC';
 export const USDC_ISSUER = (import.meta.env.VITE_USDC_ISSUER ?? '').trim();
-export const USDC_ASSET = USDC_ISSUER ? new Asset(USDC_ASSET_CODE, USDC_ISSUER) : undefined;
+export const USDC_ASSET = StrKey.isValidEd25519PublicKey(USDC_ISSUER)
+  ? new Asset(USDC_ASSET_CODE, USDC_ISSUER)
+  : undefined;
 
 export const ASSET_CONTRACTS: Record<string, string> = {
   XLM: import.meta.env.VITE_XLM_CONTRACT_ID || Asset.native().contractId(NETWORK_PASSPHRASE),
@@ -63,7 +65,7 @@ export const isValidContractId = (value: string | undefined): value is string =>
 
 export const requireUsdcAsset = (): Asset => {
   if (!USDC_ASSET) {
-    throw new Error('Missing USDC issuer. Set VITE_USDC_ISSUER for Horizon trustlines and classic DEX swaps, or configure a supported USDC asset.');
+    throw new Error('Missing USDC issuer. Set VITE_USDC_ISSUER environment variable for Horizon trustlines and classic DEX swaps.');
   }
   return USDC_ASSET;
 };
