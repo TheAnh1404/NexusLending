@@ -44,7 +44,19 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
       setAmount(undefined);
       setApr(undefined);
       setDuration(undefined);
-      form.resetFields();
+      setMaxLtv(75);
+      setLiquidationThreshold(80);
+      setMinHealthFactor(1.4);
+      setLiquidationBonus(10);
+      form.setFieldsValue({
+        amount: undefined,
+        apr: undefined,
+        duration: undefined,
+        maxLtv: 75,
+        liquidationThreshold: 80,
+        minHealthFactor: 1.4,
+        liquidationBonus: 10,
+      });
     }
   }, [open, form]);
 
@@ -202,6 +214,12 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
         <Form
           form={form}
           layout="vertical"
+          initialValues={{
+            maxLtv: 75,
+            liquidationThreshold: 80,
+            minHealthFactor: 1.4,
+            liquidationBonus: 10,
+          }}
         >
           {/* STEP 0: LOAN TERMS */}
           {currentStep === 0 && (
