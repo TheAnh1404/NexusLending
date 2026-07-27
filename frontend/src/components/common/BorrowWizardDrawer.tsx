@@ -326,6 +326,16 @@ export const BorrowWizardDrawer: React.FC<BorrowWizardDrawerProps> = ({ open, of
                 }
               />
             )}
+            {effectiveCollateral > 0 && effectiveCollateral < minRequiredXLM && (
+              <Alert
+                type="error"
+                showIcon
+                icon={<AlertTriangle size={20} color="#ef4444" />}
+                message="⚠️ Cảnh báo thế chấp chưa đủ tối thiểu"
+                description={`Mức thế chấp tối thiểu yêu cầu cho Offer này là ${minReqValue.toLocaleString()} XLM (LTV ${offer.maxLTV}%). Với ${effectiveCollateral.toLocaleString()} XLM, giao dịch sẽ bị ngắt (Signing Interrupted) do vi phạm quy định LTV hợp đồng thông minh.`}
+                style={{ borderRadius: 10 }}
+              />
+            )}
 
             {/* HEALTH FACTOR WARNING SYSTEM */}
             {!effectiveCollateral || effectiveCollateral <= 0 ? (

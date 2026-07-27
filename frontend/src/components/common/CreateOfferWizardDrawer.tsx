@@ -76,9 +76,21 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
   };
 
   const handlePublishOffer = async () => {
-    if (!amount || !apr || !duration) {
+    if (!amount || amount <= 0 || !apr || apr <= 0 || !duration || duration <= 0) {
       setTxState('failed');
-      setRawError('Please fill in all required loan term fields.');
+      setRawError('Vui lòng nhập đầy đủ các điều khoản hợp lệ của khoản vay (Số tiền > 0, Lãi suất > 0%, Thời hạn > 0 ngày).');
+      return;
+    }
+
+    if (!maxLtv || maxLtv <= 0 || maxLtv > 90) {
+      setTxState('failed');
+      setRawError('Max LTV không hợp lệ. Phải nằm trong khoảng từ 1% đến 90%.');
+      return;
+    }
+
+    if (maxLtv >= liquidationThreshold) {
+      setTxState('failed');
+      setRawError(`Max LTV (${maxLtv}%) phải nhỏ hơn Ngưỡng thanh lý Liquidation Threshold (${liquidationThreshold}%). Giao dịch bị dừng để tránh bị blockchain từ chối với lỗi Invalid max LTV.`);
       return;
     }
 
@@ -424,6 +436,10 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
                         validator: (_, value) => {
                           const num = Number(value);
                           if (isNaN(num) || num <= 0 || num > 90) return Promise.reject(new Error('Max LTV must be between 1% and 90%'));
+                          const liqThresh = form.getFieldValue('liquidationThreshold') ?? liquidationThreshold;
+                          if (liqThresh && num >= liqThresh) {
+                            return Promise.reject(new Error(`Max LTV (${num}%) must be less than Liquidation Threshold (${liqThresh}%)`));
+                          }
                           return Promise.resolve();
                         },
                       },
@@ -437,8 +453,10 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
                       value={maxLtv}
                       onChange={(val) => {
                         if (val !== null && val !== undefined) {
-                          setMaxLtv(val);
-                          form.setFieldsValue({ maxLtv: val });
+                          const num = Number(val);
+                          setMaxLtv(num);
+                          form.setFieldsValue({ maxLtv: num });
+                          form.validateFields(['maxLtv', 'liquidationThreshold']).catch(() => {});
                         }
                       }}
                       addonAfter={
@@ -450,6 +468,7 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
                             const num = Number(val);
                             setMaxLtv(num);
                             form.setFieldsValue({ maxLtv: num });
+                            form.validateFields(['maxLtv', 'liquidationThreshold']).catch(() => {});
                           }}
                           options={[
                             { value: 50, label: '50%' },
@@ -482,6 +501,10 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
                         validator: (_, value) => {
                           const num = Number(value);
                           if (isNaN(num) || num <= 0 || num > 95) return Promise.reject(new Error('Threshold must be between 1% and 95%'));
+                          const mLtv = form.getFieldValue('maxLtv') ?? maxLtv;
+                          if (mLtv && num <= mLtv) {
+                            return Promise.reject(new Error(`Liquidation Threshold (${num}%) must be greater than Max LTV (${mLtv}%)`));
+                          }
                           return Promise.resolve();
                         },
                       },
@@ -495,8 +518,10 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
                       value={liquidationThreshold}
                       onChange={(val) => {
                         if (val !== null && val !== undefined) {
-                          setLiquidationThreshold(val);
-                          form.setFieldsValue({ liquidationThreshold: val });
+                          const num = Number(val);
+                          setLiquidationThreshold(num);
+                          form.setFieldsValue({ liquidationThreshold: num });
+                          form.validateFields(['maxLtv', 'liquidationThreshold']).catch(() => {});
                         }
                       }}
                       addonAfter={
@@ -508,6 +533,7 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
                             const num = Number(val);
                             setLiquidationThreshold(num);
                             form.setFieldsValue({ liquidationThreshold: num });
+                            form.validateFields(['maxLtv', 'liquidationThreshold']).catch(() => {});
                           }}
                           options={[
                             { value: 75, label: '75%' },
@@ -642,6 +668,26 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
                   </Form.Item>
                 </Col>
               </Row>
+
+              {maxLtv >= liquidationThreshold && (
+                <Alert
+                  type="error"
+                  showIcon
+                  icon={<AlertTriangle size={20} color="#ef4444" />}
+                  message="Cảnh báo quy tắc An toàn (Max LTV ≥ Ngưỡng thanh lý)"
+                  description={`Max LTV (${maxLtv}%) phải nhỏ hơn Ngưỡng thanh lý Liquidation Threshold (${liquidationThreshold}%). Vui lòng điều chỉnh lại để hợp đồng thông minh không từ chối giao dịch với lỗi 'Invalid max LTV'.`}
+                  style={{ borderRadius: 10 }}
+                />
+              )}
+              {maxLtv <= 0 && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  message="Cảnh báo LTV không hợp lệ"
+                  description="Max LTV phải lớn hơn 0%. Vui lòng chọn tỷ lệ LTV gợi ý (ví dụ: 70% hoặc 75%)."
+                  style={{ borderRadius: 10 }}
+                />
+              )}
 
               <Form.Item label={<Text strong>Memo / Note (Optional)</Text>}>
                 <Input
