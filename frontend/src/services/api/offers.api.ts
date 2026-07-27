@@ -1,6 +1,6 @@
 import type { LoanOffer, OfferStatus } from '../../types';
 import type { CreateOfferInput } from '../offers/offers.service';
-import { apiClient, toBps, toHealthFactorBps, toNumber } from './client';
+import { apiClient, fromBpsToPercent, toBps, toHealthFactorBps, toNumber } from './client';
 import type { ConfirmedChainReceiptPayload } from './client';
 
 interface BackendLoanOffer {
@@ -32,9 +32,9 @@ export const mapBackendOffer = (offer: BackendLoanOffer): LoanOffer => ({
   apr: offer.fixedAprBps / 100,
   duration: offer.durationDays,
   collateralAsset: offer.collateralAsset,
-  maxLTV: offer.maxLtvBps / 100,
-  liquidationThreshold: offer.liquidationThresholdBps / 100,
-  liquidationBonus: offer.liquidationBonusBps / 100,
+  maxLTV: fromBpsToPercent(offer.maxLtvBps),
+  liquidationThreshold: fromBpsToPercent(offer.liquidationThresholdBps),
+  liquidationBonus: fromBpsToPercent(offer.liquidationBonusBps),
   gracePeriod: offer.gracePeriodDays,
   minHealthFactor: offer.minHealthFactorBps / 10_000,
   description: offer.description ?? '',

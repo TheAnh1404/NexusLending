@@ -134,6 +134,25 @@ export const toNumber = (value: string | number | null | undefined, fallback = 0
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-export const toBps = (percent: number): number => Math.round(percent * 100);
+export const toBps = (value: number): number => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+  if (numeric > 100) return Math.round(numeric);
+  if (numeric <= 1) return Math.round(numeric * 10_000);
+  return Math.round(numeric * 100);
+};
 
-export const toHealthFactorBps = (healthFactor: number): number => Math.round(healthFactor * 10_000);
+export const fromBpsToPercent = (value: number): number => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) return 0;
+  if (numeric > 10_000) return numeric / 10_000;
+  if (numeric > 100) return numeric / 100;
+  return numeric;
+};
+
+export const toHealthFactorBps = (healthFactor: number): number => {
+  const numeric = Number(healthFactor);
+  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+  if (numeric >= 100) return Math.round(numeric);
+  return Math.round(numeric * 10_000);
+};

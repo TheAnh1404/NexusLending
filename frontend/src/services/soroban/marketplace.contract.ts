@@ -41,20 +41,29 @@ const enumVariantName = (value: unknown): string | null => {
  * - Percentage (e.g. 75 -> 7500)
  */
 export const toBpsValue = (val: number): number => {
-  if (!Number.isFinite(val) || val <= 0) return 0;
-  if (val > 100) return Math.round(val); // Already BPS (e.g. 7500)
-  if (val <= 1) return Math.round(val * 10000); // Decimal ratio (e.g. 0.75 -> 7500)
-  return Math.round(val * 100); // Percentage (e.g. 75 -> 7500)
+  const numeric = Number(val);
+  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+  if (numeric > 100) return Math.round(numeric); // Already BPS (e.g. 7500)
+  if (numeric <= 1) return Math.round(numeric * 10000); // Decimal ratio (e.g. 0.75 -> 7500)
+  return Math.round(numeric * 100); // Percentage (e.g. 75 -> 7500)
 };
 
 /**
  * Safely convert Health Factor into BPS (e.g. 1.4 -> 14000).
  */
 export const toHfBpsValue = (val: number): number => {
-  if (!Number.isFinite(val) || val <= 0) return 14000;
-  if (val >= 100) return Math.round(val); // Already BPS (e.g. 14000)
-  return Math.round(val * 10000); // Ratio (e.g. 1.4 -> 14000)
+  const numeric = Number(val);
+  if (!Number.isFinite(numeric) || numeric <= 0) return 14000;
+  if (numeric >= 100) return Math.round(numeric); // Already BPS (e.g. 14000)
+  return Math.round(numeric * 10000); // Ratio (e.g. 1.4 -> 14000)
 };
+
+const riskInputDetails = (
+  input: CreateOfferInput,
+  values: { maxLtvBps: number; liqThreshBps: number; liqBonusBps: number; minHfBps: number }
+): string =>
+  `raw maxLTV=${input.maxLTV}, threshold=${input.liquidationThreshold}, bonus=${input.liquidationBonus}, minHF=${input.minHealthFactor}; `
+  + `normalized maxLTV=${values.maxLtvBps}bps, threshold=${values.liqThreshBps}bps, bonus=${values.liqBonusBps}bps, minHF=${values.minHfBps}bps`;
 
 export const marketplaceContract = {
   async getOfferStatus(contractOfferId: string | number | bigint, sourceWallet: string): Promise<string | null> {
@@ -76,7 +85,11 @@ export const marketplaceContract = {
       throw new Error(`APR cannot exceed ${MAX_FIXED_APR_PERCENT}% per year.`);
     }
     if (input.duration <= 0) throw new Error('Duration must be at least 1 day.');
-    if (maxLtvBps <= 0 || maxLtvBps > 10000) throw new Error('Max LTV must be between 1% and 100%.');
+    const riskDetails = riskInputDetails(input, { maxLtvBps, liqThreshBps, liqBonusBps, minHfBps });
+
+    if (maxLtvBps <= 0 || maxLtvBps > 10000) {
+      throw new Error(`Invalid max LTV before simulation (${riskDetails}). Use 1-100%, 0.01-1 ratio, or 100-10000 bps.`);
+    }
     if (maxLtvBps > liqThreshBps) {
       throw new Error('Max LTV must be less than or equal to the Liquidation Threshold.');
     }
@@ -111,7 +124,19 @@ export const marketplaceContract = {
       toU32(input.gracePeriod),                                     // grace_period_days: u32
       toU32(minHfBps),                                              // min_health_factor_bps: u32
     ];
-    return buildAndSubmitTx(CONTRACTS.marketplace, 'create_offer', args, wallet, onStage);
+    if (import.meta.env.DEV) {
+      console.debug('[Soroban] create_offer risk params', riskDetails);
+    }
+
+    try {
+      return await buildAndSubmitTx(CONTRACTS.marketplace, 'create_offer', args, wallet, onStage);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes('Invalid max LTV')) {
+        throw new Error(`${message} (${riskDetails})`);
+      }
+      throw error;
+    }
   },
 
   async fundOfferTx(contractOfferId: string | number | bigint, wallet: string, onStage?: (stage: TxStage) => void) {

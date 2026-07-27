@@ -292,7 +292,9 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
                         validator: (_, value) => {
                           const num = Number(value);
                           if (isNaN(num) || num <= 0) return Promise.reject(new Error('APR must be greater than 0%'));
-                          if (num > 50) return Promise.reject(new Error('Maximum allowed APR limit is 50%'));
+                          if (num > MAX_FIXED_APR_PERCENT) {
+                            return Promise.reject(new Error(`Maximum allowed APR limit is ${MAX_FIXED_APR_PERCENT}%`));
+                          }
                           return Promise.resolve();
                         },
                       },
@@ -310,7 +312,7 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
                       style={{ width: '100%', borderRadius: 10 }}
                       size="large"
                       min={0.1}
-                      max={50}
+                      max={MAX_FIXED_APR_PERCENT}
                       placeholder="e.g. 8"
                       value={apr}
                       onChange={(val) => {
@@ -338,8 +340,6 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
                             { value: 15, label: '15% APR' },
                             { value: 18, label: '18% APR' },
                             { value: 20, label: '20% APR' },
-                            { value: 25, label: '25% APR' },
-                            { value: 30, label: '30% APR' },
                           ]}
                         />
                       }

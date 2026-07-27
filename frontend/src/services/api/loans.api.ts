@@ -1,6 +1,6 @@
 import type { Loan, LoanOffer, LoanStatus, RiskZone } from '../../types';
 import { calculateRepaymentAmount } from '../../utils/finance';
-import { apiClient, toBps, toHealthFactorBps, toNumber } from './client';
+import { apiClient, fromBpsToPercent, toBps, toHealthFactorBps, toNumber } from './client';
 import type { ConfirmedChainReceiptPayload } from './client';
 import { mapBackendOffer } from './offers.api';
 
@@ -56,9 +56,9 @@ export const mapBackendLoan = (loan: BackendLoan): Loan => {
     collateralAsset: loan.collateralAsset,
     collateralAmount: toNumber(loan.collateralAmount),
     outstandingDebt: toNumber(loan.outstandingDebt),
-    maxLTV: loan.maxLtvBps / 100,
-    liquidationThreshold: loan.liquidationThresholdBps / 100,
-    liquidationBonus: loan.liquidationBonusBps / 100,
+    maxLTV: fromBpsToPercent(loan.maxLtvBps),
+    liquidationThreshold: fromBpsToPercent(loan.liquidationThresholdBps),
+    liquidationBonus: fromBpsToPercent(loan.liquidationBonusBps),
     healthFactor: toNumber(loan.healthFactor, 99.99),
     status: loan.status,
     borrowTime: loan.startTime ?? loan.createdAt,
