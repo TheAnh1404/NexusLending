@@ -33,6 +33,29 @@ const enumVariantName = (value: unknown): string | null => {
   return null;
 };
 
+/**
+ * Safely convert a percentage, ratio, or BPS number into raw BPS (1% = 100 bps, 100% = 10000 bps).
+ * Handles all representations robustly:
+ * - BPS already (e.g. 7500 -> 7500)
+ * - Decimal ratio (e.g. 0.75 -> 7500)
+ * - Percentage (e.g. 75 -> 7500)
+ */
+export const toBpsValue = (val: number): number => {
+  if (!Number.isFinite(val) || val <= 0) return 0;
+  if (val > 100) return Math.round(val); // Already BPS (e.g. 7500)
+  if (val <= 1) return Math.round(val * 10000); // Decimal ratio (e.g. 0.75 -> 7500)
+  return Math.round(val * 100); // Percentage (e.g. 75 -> 7500)
+};
+
+/**
+ * Safely convert Health Factor into BPS (e.g. 1.4 -> 14000).
+ */
+export const toHfBpsValue = (val: number): number => {
+  if (!Number.isFinite(val) || val <= 0) return 14000;
+  if (val >= 100) return Math.round(val); // Already BPS (e.g. 14000)
+  return Math.round(val * 10000); // Ratio (e.g. 1.4 -> 14000)
+};
+
 export const marketplaceContract = {
   async getOfferStatus(contractOfferId: string | number | bigint, sourceWallet: string): Promise<string | null> {
     const offer = await readContractValue(CONTRACTS.marketplace, 'get_offer', [toU64(contractOfferId)], sourceWallet);
@@ -40,24 +63,30 @@ export const marketplaceContract = {
   },
 
   async createOfferTx(input: CreateOfferInput, wallet: string, onStage?: (stage: TxStage) => void) {
+    const aprBps = toBpsValue(input.apr);
+    const maxLtvBps = toBpsValue(input.maxLTV);
+    const liqThreshBps = toBpsValue(input.liquidationThreshold);
+    const liqBonusBps = toBpsValue(input.liquidationBonus);
+    const minHfBps = toHfBpsValue(input.minHealthFactor);
+
     // Pre-validate before building the transaction to show clear errors
     if (input.amount <= 0) throw new Error('Loan amount must be greater than 0.');
-    if (input.apr <= 0) throw new Error('APR must be greater than 0%.');
-    if (input.apr > MAX_FIXED_APR_PERCENT) {
+    if (aprBps <= 0) throw new Error('APR must be greater than 0%.');
+    if (aprBps > MAX_FIXED_APR_PERCENT * 100) {
       throw new Error(`APR cannot exceed ${MAX_FIXED_APR_PERCENT}% per year.`);
     }
     if (input.duration <= 0) throw new Error('Duration must be at least 1 day.');
-    if (input.maxLTV <= 0) throw new Error('Max LTV must be greater than 0%.');
-    if (input.maxLTV > input.liquidationThreshold) {
+    if (maxLtvBps <= 0 || maxLtvBps > 10000) throw new Error('Max LTV must be between 1% and 100%.');
+    if (maxLtvBps > liqThreshBps) {
       throw new Error('Max LTV must be less than or equal to the Liquidation Threshold.');
     }
-    if (input.liquidationThreshold <= 0 || input.liquidationThreshold > 100) {
+    if (liqThreshBps <= 0 || liqThreshBps > 10000) {
       throw new Error('Liquidation Threshold must be between 0% and 100%.');
     }
-    if (input.liquidationBonus < 0 || input.liquidationBonus > 50) {
+    if (liqBonusBps < 0 || liqBonusBps > 5000) {
       throw new Error('Liquidation Bonus must be between 0% and 50%.');
     }
-    if (input.minHealthFactor > 0 && input.minHealthFactor < 1.4) {
+    if (minHfBps > 0 && minHfBps < 14000) {
       throw new Error('Min Health Factor must be at least 1.4 (14000 bps).');
     }
 
@@ -73,14 +102,14 @@ export const marketplaceContract = {
       Address.fromString(wallet).toScVal(),                         // lender: Address
       Address.fromString(loanAssetContract).toScVal(),              // loan_asset: Address
       toContractAmount(input.amount),                               // loan_amount: i128
-      toU32(Math.round(input.apr * 100)),                           // fixed_apr_bps: u32
+      toU32(aprBps),                                                // fixed_apr_bps: u32
       toU32(input.duration),                                        // duration_days: u32
       Address.fromString(collateralAssetContract).toScVal(),        // collateral_asset: Address
-      toU32(Math.round(input.maxLTV * 100)),                        // max_ltv_bps: u32
-      toU32(Math.round(input.liquidationThreshold * 100)),          // liquidation_threshold_bps: u32
-      toU32(Math.round(input.liquidationBonus * 100)),              // liquidation_bonus_bps: u32
+      toU32(maxLtvBps),                                             // max_ltv_bps: u32
+      toU32(liqThreshBps),                                          // liquidation_threshold_bps: u32
+      toU32(liqBonusBps),                                           // liquidation_bonus_bps: u32
       toU32(input.gracePeriod),                                     // grace_period_days: u32
-      toU32(Math.round(input.minHealthFactor * 10000)),             // min_health_factor_bps: u32
+      toU32(minHfBps),                                              // min_health_factor_bps: u32
     ];
     return buildAndSubmitTx(CONTRACTS.marketplace, 'create_offer', args, wallet, onStage);
   },

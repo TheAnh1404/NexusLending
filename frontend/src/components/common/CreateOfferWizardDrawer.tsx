@@ -94,15 +94,20 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
       return;
     }
 
-    if (!maxLtv || maxLtv <= 0 || maxLtv > 90) {
+    const safeMaxLtv = maxLtv || 75;
+    const safeLiqThreshold = liquidationThreshold || 80;
+    const safeLiqBonus = liquidationBonus || 10;
+    const safeMinHf = minHealthFactor || 1.4;
+
+    if (safeMaxLtv <= 0 || safeMaxLtv > 90) {
       setTxState('failed');
       setRawError('Max LTV không hợp lệ. Phải nằm trong khoảng từ 1% đến 90%.');
       return;
     }
 
-    if (maxLtv >= liquidationThreshold) {
+    if (safeMaxLtv >= safeLiqThreshold) {
       setTxState('failed');
-      setRawError(`Max LTV (${maxLtv}%) phải nhỏ hơn Ngưỡng thanh lý Liquidation Threshold (${liquidationThreshold}%). Giao dịch bị dừng để tránh bị blockchain từ chối với lỗi Invalid max LTV.`);
+      setRawError(`Max LTV (${safeMaxLtv}%) phải nhỏ hơn Ngưỡng thanh lý Liquidation Threshold (${safeLiqThreshold}%). Giao dịch bị dừng để tránh bị blockchain từ chối với lỗi Invalid max LTV.`);
       return;
     }
 
@@ -117,11 +122,11 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
         apr,
         duration,
         collateralAsset: 'XLM',
-        maxLTV: maxLtv,
-        liquidationThreshold,
-        liquidationBonus,
+        maxLTV: safeMaxLtv,
+        liquidationThreshold: safeLiqThreshold,
+        liquidationBonus: safeLiqBonus,
         gracePeriod: DEFAULT_GRACE_PERIOD_DAYS,
-        minHealthFactor,
+        minHealthFactor: safeMinHf,
         description: description || 'Standard Nexus Fixed Loan Offer',
       });
 
