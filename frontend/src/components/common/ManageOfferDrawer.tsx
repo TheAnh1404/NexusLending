@@ -17,7 +17,7 @@ interface ManageOfferDrawerProps {
 }
 
 export const ManageOfferDrawer: React.FC<ManageOfferDrawerProps> = ({ open, offer, onClose, onSuccess }) => {
-  const { oraclePrices, cancelOffer } = useAppContext();
+  const { oraclePrices, cancelOffer, fundOffer, activateOffer, wallet } = useAppContext();
 
   const [txState, setTxState] = useState<TransactionStepState>('idle');
   const [rawError, setRawError] = useState<string | undefined>(undefined);
@@ -29,6 +29,52 @@ export const ManageOfferDrawer: React.FC<ManageOfferDrawerProps> = ({ open, offe
   const requiredCollateral = calculateRequiredCollateral(offer.amount, 1.0, xlmPrice, offer.maxLTV);
   const collateralValueUsd = Math.ceil(requiredCollateral) * xlmPrice;
   const interestReturn = (offer.amount * (offer.apr / 100) * offer.duration) / 365;
+
+  const handleFundAndActivateDraft = async () => {
+    const userUsdc = wallet.balanceUSDC || 0;
+    const userXlm = wallet.balanceXLM || 0;
+
+    if (userUsdc < offer.amount) {
+      setTxState('failed');
+      setRawError(`Insufficient USDC balance to fund offer escrow (${userUsdc.toLocaleString()} USDC available, ${offer.amount.toLocaleString()} USDC required). Please top up via Faucet.`);
+      return;
+    }
+    if (userXlm < 2.0) {
+      setTxState('failed');
+      setRawError(`Insufficient XLM balance for Stellar gas fees (${userXlm.toLocaleString()} XLM available, minimum 2.0 XLM required). Please top up via Faucet.`);
+      return;
+    }
+
+    setTxState('preparing');
+    setRawError(undefined);
+
+    try {
+      setTxState('simulating');
+      const funded = await fundOffer(offer.id);
+      if (!funded) {
+        setTxState('failed');
+        setRawError('Failed to fund offer escrow with USDC.');
+        return;
+      }
+
+      setTxState('submitting');
+      const activated = await activateOffer(offer.id);
+      if (activated) {
+        setTxState('success');
+        setTimeout(() => {
+          onSuccess?.();
+          onClose();
+          setTxState('idle');
+        }, 1500);
+      } else {
+        setTxState('failed');
+        setRawError('Offer funded successfully, but marketplace activation failed.');
+      }
+    } catch (error) {
+      setTxState('failed');
+      setRawError(error instanceof Error ? error.message : String(error));
+    }
+  };
 
   const handleCancelOffer = async () => {
     setTxState('preparing');
@@ -100,19 +146,34 @@ export const ManageOfferDrawer: React.FC<ManageOfferDrawerProps> = ({ open, offe
 
         {txState === 'idle' && (
           <>
-            {/* Active Status Alert */}
-            <Alert
-              type="info"
-              showIcon
-              icon={<ShieldCheck size={18} style={{ color: '#2563eb' }} />}
-              message={<Text strong style={{ color: '#1e40af' }}>Active Liquidity Deposited</Text>}
-              description={
-                <Text style={{ fontSize: 12, color: '#1e3a8a' }}>
-                  Your {offer.amount.toLocaleString()} {offer.asset} is safely deposited in the Soroban Marketplace Smart Contract escrow. Any borrower matching your terms can accept this offer.
-                </Text>
-              }
-              style={{ borderRadius: 12, backgroundColor: '#eff6ff', border: '1px solid #bfdbfe' }}
-            />
+            {/* Status Alert */}
+            {offer.status === 'Draft' ? (
+              <Alert
+                type="warning"
+                showIcon
+                icon={<ShieldCheck size={18} style={{ color: '#d97706' }} />}
+                message={<Text strong style={{ color: '#92400e' }}>Offer Currently in Draft Status</Text>}
+                description={
+                  <Text style={{ fontSize: 12, color: '#78350f' }}>
+                    This offer is saved as a draft and HAS NOT been funded with USDC escrow on-chain. Click "Fund & Activate Offer" below to complete funding and list it on the marketplace.
+                  </Text>
+                }
+                style={{ borderRadius: 12, backgroundColor: '#fffbeb', border: '1px solid #fde68a' }}
+              />
+            ) : (
+              <Alert
+                type="info"
+                showIcon
+                icon={<ShieldCheck size={18} style={{ color: '#2563eb' }} />}
+                message={<Text strong style={{ color: '#1e40af' }}>Active Liquidity Deposited</Text>}
+                description={
+                  <Text style={{ fontSize: 12, color: '#1e3a8a' }}>
+                    Your {offer.amount.toLocaleString()} {offer.asset} is safely deposited in the Soroban Marketplace Smart Contract escrow. Any borrower matching your terms can accept this offer.
+                  </Text>
+                }
+                style={{ borderRadius: 12, backgroundColor: '#eff6ff', border: '1px solid #bfdbfe' }}
+              />
+            )}
 
             {/* Financial Overview Card */}
             <div style={{ backgroundColor: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0', padding: '16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -168,7 +229,9 @@ export const ManageOfferDrawer: React.FC<ManageOfferDrawerProps> = ({ open, offe
             {/* Smart Contract Info */}
             <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f1f5f9', padding: '10px 12px', borderRadius: 8 }}>
               <span>Lender Wallet: <Text code style={{ fontSize: 11 }}>{formatAddress(offer.lender)}</Text></span>
-              <Tag color="green" style={{ borderRadius: 4, fontWeight: 700, margin: 0 }}>SOROBAN ACTIVE</Tag>
+              <Tag color={offer.status === 'Draft' ? 'orange' : 'green'} style={{ borderRadius: 4, fontWeight: 700, margin: 0 }}>
+                {offer.status === 'Draft' ? 'SOROBAN DRAFT' : 'SOROBAN ACTIVE'}
+              </Tag>
             </div>
 
             {/* Actions */}
@@ -183,23 +246,33 @@ export const ManageOfferDrawer: React.FC<ManageOfferDrawerProps> = ({ open, offe
                 Close
               </Button>
 
-              <Popconfirm
-                title="Cancel Offer & Withdraw Funds?"
-                description={`This will cancel ${offer.id} on Soroban and return your ${offer.amount.toLocaleString()} ${offer.asset} liquidity back to your connected wallet.`}
-                onConfirm={handleCancelOffer}
-                okText="Yes, Cancel Offer"
-                cancelText="No, Keep Active"
-                okButtonProps={{ danger: true, style: { fontWeight: 700 } }}
-              >
+              {offer.status === 'Draft' ? (
                 <Button
                   type="primary"
-                  danger
-                  icon={<Trash2 size={16} />}
-                  style={{ borderRadius: 8, height: 40, fontWeight: 700, padding: '0 20px' }}
+                  onClick={handleFundAndActivateDraft}
+                  style={{ borderRadius: 8, height: 40, fontWeight: 700, padding: '0 20px', backgroundColor: '#2563eb' }}
                 >
-                  Cancel & Withdraw Offer
+                  Fund & Activate Offer
                 </Button>
-              </Popconfirm>
+              ) : (
+                <Popconfirm
+                  title="Cancel Offer & Withdraw Funds?"
+                  description={`This will cancel ${offer.id} on Soroban and return your ${offer.amount.toLocaleString()} ${offer.asset} liquidity back to your connected wallet.`}
+                  onConfirm={handleCancelOffer}
+                  okText="Yes, Cancel Offer"
+                  cancelText="No, Keep Active"
+                  okButtonProps={{ danger: true, style: { fontWeight: 700 } }}
+                >
+                  <Button
+                    type="primary"
+                    danger
+                    icon={<Trash2 size={16} />}
+                    style={{ borderRadius: 8, height: 40, fontWeight: 700, padding: '0 20px' }}
+                  >
+                    Cancel & Withdraw Offer
+                  </Button>
+                </Popconfirm>
+              )}
             </div>
           </>
         )}

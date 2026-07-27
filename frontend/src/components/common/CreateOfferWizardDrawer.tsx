@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Modal, Steps, Form, InputNumber, Select, Input, Button, Typography, Space, Tooltip, Row, Col, Alert } from 'antd';
+import { Modal, Steps, Form, InputNumber, Select, Input, Button, Typography, Space, Tooltip, Row, Col, Alert, Tag } from 'antd';
 import { HelpCircle, PlusCircle, ArrowRight, ArrowLeft, CheckCircle2, AlertTriangle, ChevronDown } from 'lucide-react';
 import { useAppContext } from '../../app/AppContext';
 import { DEFAULT_GRACE_PERIOD_DAYS, MAX_FIXED_APR_PERCENT, calculateRepaymentAmount, formatCurrency } from '../../utils/finance';
@@ -69,6 +69,16 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
   const minCollateralUsdRequired = maxLtv > 0 ? (safeAmount / (maxLtv / 100)) : 0;
   const minCollateralXlmRequired = minCollateralUsdRequired / xlmPrice;
 
+  const MIN_REQUIRED_XLM_GAS = 2.0;
+
+  const isWalletConnected = wallet.connected && Boolean(wallet.address);
+  const hasEnoughUSDC = (wallet.balanceUSDC || 0) >= safeAmount;
+  const hasEnoughXLMGas = (wallet.balanceXLM || 0) >= MIN_REQUIRED_XLM_GAS;
+  const isLtvValid = maxLtv > 0 && maxLtv < liquidationThreshold && maxLtv <= 90;
+  const isTermsValid = safeAmount > 0 && safeApr > 0 && safeDuration > 0;
+
+  const canPublishOffer = isWalletConnected && hasEnoughUSDC && hasEnoughXLMGas && isLtvValid && isTermsValid;
+
   const handleNextFromTerms = async () => {
     try {
       await form.validateFields(['amount', 'apr', 'duration']);
@@ -88,9 +98,27 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
   };
 
   const handlePublishOffer = async () => {
+    if (!isWalletConnected) {
+      setTxState('failed');
+      setRawError('Wallet not connected. Please connect your Freighter wallet before creating a loan offer.');
+      return;
+    }
+
+    if (!hasEnoughUSDC) {
+      setTxState('failed');
+      setRawError(`Insufficient USDC balance to fund this offer (${(wallet.balanceUSDC || 0).toLocaleString()} USDC available, ${safeAmount.toLocaleString()} USDC required). Please top up via Faucet.`);
+      return;
+    }
+
+    if (!hasEnoughXLMGas) {
+      setTxState('failed');
+      setRawError(`Insufficient XLM balance for Stellar network gas fees and account reserve (${(wallet.balanceXLM || 0).toLocaleString()} XLM available, minimum ${MIN_REQUIRED_XLM_GAS} XLM required). Please top up via Faucet.`);
+      return;
+    }
+
     if (!amount || amount <= 0 || !apr || apr <= 0 || !duration || duration <= 0) {
       setTxState('failed');
-      setRawError('Vui lòng nhập đầy đủ các điều khoản hợp lệ của khoản vay (Số tiền > 0, Lãi suất > 0%, Thời hạn > 0 ngày).');
+      setRawError('Please enter valid loan terms (Amount > 0, APR > 0%, Duration > 0 days).');
       return;
     }
 
@@ -101,13 +129,13 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
 
     if (safeMaxLtv <= 0 || safeMaxLtv > 90) {
       setTxState('failed');
-      setRawError('Max LTV không hợp lệ. Phải nằm trong khoảng từ 1% đến 90%.');
+      setRawError('Invalid Max LTV. Must be between 1% and 90%.');
       return;
     }
 
     if (safeMaxLtv >= safeLiqThreshold) {
       setTxState('failed');
-      setRawError(`Max LTV (${safeMaxLtv}%) phải nhỏ hơn Ngưỡng thanh lý Liquidation Threshold (${safeLiqThreshold}%). Giao dịch bị dừng để tránh bị blockchain từ chối với lỗi Invalid max LTV.`);
+      setRawError(`Max LTV (${safeMaxLtv}%) must be less than Liquidation Threshold (${safeLiqThreshold}%). Transaction halted to prevent smart contract simulation failure (Invalid max LTV).`);
       return;
     }
 
@@ -697,8 +725,8 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
                   type="error"
                   showIcon
                   icon={<AlertTriangle size={20} color="#ef4444" />}
-                  message="Cảnh báo quy tắc An toàn (Max LTV ≥ Ngưỡng thanh lý)"
-                  description={`Max LTV (${maxLtv}%) phải nhỏ hơn Ngưỡng thanh lý Liquidation Threshold (${liquidationThreshold}%). Vui lòng điều chỉnh lại để hợp đồng thông minh không từ chối giao dịch với lỗi 'Invalid max LTV'.`}
+                  message="Safety Rule Warning (Max LTV ≥ Liquidation Threshold)"
+                  description={`Max LTV (${maxLtv}%) must be less than Liquidation Threshold (${liquidationThreshold}%). Please adjust parameters to prevent smart contract simulation failure (Invalid max LTV).`}
                   style={{ borderRadius: 10 }}
                 />
               )}
@@ -706,8 +734,8 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
                 <Alert
                   type="warning"
                   showIcon
-                  message="Cảnh báo LTV không hợp lệ"
-                  description="Max LTV phải lớn hơn 0%. Vui lòng chọn tỷ lệ LTV gợi ý (ví dụ: 70% hoặc 75%)."
+                  message="Invalid Max LTV Warning"
+                  description="Max LTV must be greater than 0%. Please select a recommended LTV preset (e.g. 70% or 75%)."
                   style={{ borderRadius: 10 }}
                 />
               )}
@@ -777,20 +805,116 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
                 </div>
               </div>
 
-              {wallet.balanceUSDC < (amount || 0) && (
+              {/* Pre-Flight Eligibility Check Card */}
+              <div
+                style={{
+                  background: 'var(--bg-subtle, #f8fafc)',
+                  border: '1px solid var(--border-color, #e2e8f0)',
+                  borderRadius: 14,
+                  padding: 16,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 10,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Text strong style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)' }}>
+                    📋 Pre-Flight Eligibility Check
+                  </Text>
+                  {canPublishOffer ? (
+                    <Tag color="success" style={{ fontWeight: 700, margin: 0 }}>
+                      ✓ Eligible to Publish
+                    </Tag>
+                  ) : (
+                    <Tag color="error" style={{ fontWeight: 700, margin: 0 }}>
+                      ⚠️ Action Required
+                    </Tag>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text type="secondary">1. Freighter Wallet Status:</Text>
+                    {isWalletConnected ? (
+                      <Tag color="success" style={{ margin: 0 }}>✓ Wallet Connected</Tag>
+                    ) : (
+                      <Tag color="error" style={{ margin: 0 }}>✗ Wallet Not Connected</Tag>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text type="secondary">2. Principal USDC Balance:</Text>
+                    {hasEnoughUSDC ? (
+                      <Tag color="success" style={{ margin: 0 }}>
+                        ✓ ${(wallet.balanceUSDC || 0).toLocaleString()} / ${safeAmount.toLocaleString()} USDC
+                      </Tag>
+                    ) : (
+                      <Tag color="error" style={{ margin: 0 }}>
+                        ✗ ${(wallet.balanceUSDC || 0).toLocaleString()} USDC (Short ${(safeAmount - (wallet.balanceUSDC || 0)).toLocaleString()} USDC)
+                      </Tag>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text type="secondary">3. XLM Gas Fee & Reserve:</Text>
+                    {hasEnoughXLMGas ? (
+                      <Tag color="success" style={{ margin: 0 }}>
+                        ✓ {(wallet.balanceXLM || 0).toLocaleString()} XLM (Sufficient)
+                      </Tag>
+                    ) : (
+                      <Tag color="error" style={{ margin: 0 }}>
+                        ✗ {(wallet.balanceXLM || 0).toLocaleString()} XLM (Min {MIN_REQUIRED_XLM_GAS} XLM required)
+                      </Tag>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text type="secondary">4. Safety LTV Rule:</Text>
+                    {isLtvValid ? (
+                      <Tag color="success" style={{ margin: 0 }}>
+                        ✓ {maxLtv}% LTV &lt; {liquidationThreshold}% Threshold
+                      </Tag>
+                    ) : (
+                      <Tag color="error" style={{ margin: 0 }}>
+                        ✗ Invalid LTV Parameter
+                      </Tag>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {!hasEnoughUSDC && (
                 <Alert
                   type="warning"
                   showIcon
-                  message="Insufficient USDC Balance"
+                  message="Insufficient USDC Balance to Fund Offer"
                   description={
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
-                      <span>You need more test USDC to fund this offer.</span>
+                      <span>You need testnet USDC to fund the escrow for this loan offer.</span>
                       <Button size="small" type="primary" onClick={() => navigate('/faucet?asset=USDC&returnTo=/app/marketplace')}>
-                        Open Faucet
+                        Open USDC Faucet
                       </Button>
                     </div>
                   }
-                  style={{ marginBottom: 16 }}
+                  style={{ borderRadius: 10 }}
+                />
+              )}
+
+              {!hasEnoughXLMGas && (
+                <Alert
+                  type="error"
+                  showIcon
+                  icon={<AlertTriangle size={20} color="#ef4444" />}
+                  message="Insufficient XLM Network Fee & Reserve"
+                  description={
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+                      <span>Your wallet requires at least {MIN_REQUIRED_XLM_GAS} XLM for network fees and base reserve.</span>
+                      <Button size="small" type="primary" onClick={() => navigate('/faucet?asset=XLM&returnTo=/app/marketplace')}>
+                        Open XLM Faucet
+                      </Button>
+                    </div>
+                  }
+                  style={{ borderRadius: 10 }}
                 />
               )}
 
@@ -803,10 +927,11 @@ export const CreateOfferWizardDrawer: React.FC<CreateOfferWizardDrawerProps> = (
                   type="primary"
                   size="large"
                   block
+                  disabled={!canPublishOffer}
                   onClick={handlePublishOffer}
                   style={{ borderRadius: 10, height: 46, fontWeight: 700 }}
                 >
-                  Fund and Publish Offer
+                  {canPublishOffer ? 'Fund and Publish Offer' : 'Ineligible to Fund Offer'}
                 </Button>
               </div>
             </div>

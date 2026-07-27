@@ -331,8 +331,8 @@ export const BorrowWizardDrawer: React.FC<BorrowWizardDrawerProps> = ({ open, of
                 type="error"
                 showIcon
                 icon={<AlertTriangle size={20} color="#ef4444" />}
-                message="⚠️ Cảnh báo thế chấp chưa đủ tối thiểu"
-                description={`Mức thế chấp tối thiểu yêu cầu cho Offer này là ${minReqValue.toLocaleString()} XLM (LTV ${offer.maxLTV}%). Với ${effectiveCollateral.toLocaleString()} XLM, giao dịch sẽ bị ngắt (Signing Interrupted) do vi phạm quy định LTV hợp đồng thông minh.`}
+                message="⚠️ Insufficient Collateral Deposit"
+                description={`Minimum required collateral for this offer is ${minReqValue.toLocaleString()} XLM (Max LTV ${offer.maxLTV}%). Depositing ${effectiveCollateral.toLocaleString()} XLM will cause smart contract simulation failure.`}
                 style={{ borderRadius: 10 }}
               />
             )}
