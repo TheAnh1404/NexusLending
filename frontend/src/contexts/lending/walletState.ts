@@ -1,5 +1,11 @@
+import { Asset, StrKey } from '@stellar/stellar-sdk';
 import type { Loan, Transaction } from '../../types';
-import { HORIZON_URL, USDC_ASSET_CODE, USDC_ISSUER } from '../../services/soroban/config';
+import {
+  ASSET_CONTRACTS,
+  HORIZON_URL,
+  NETWORK_PASSPHRASE,
+  USDC_ASSET_CODE,
+} from '../../services/soroban/config';
 
 export interface WalletBalances {
   balanceXLM: number;
@@ -110,9 +116,12 @@ export const calculateMockWalletBalances = (
 const isUsdcBalance = (balance: HorizonBalance): boolean => {
   if (balance.asset_type === 'native') return false;
   const code = (balance.asset_code || '').toUpperCase();
-  if (code === 'USDC' || code === USDC_ASSET_CODE.toUpperCase()) return true;
-  if (USDC_ISSUER && balance.asset_issuer === USDC_ISSUER) return true;
-  return false;
+  const issuer = balance.asset_issuer ?? '';
+  if (code !== USDC_ASSET_CODE.toUpperCase() || !StrKey.isValidEd25519PublicKey(issuer)) {
+    return false;
+  }
+
+  return new Asset(code, issuer).contractId(NETWORK_PASSPHRASE) === ASSET_CONTRACTS.USDC;
 };
 
 export const fetchWalletBalances = async (

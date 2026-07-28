@@ -49,16 +49,25 @@ export const CONTRACTS = {
 };
 
 export const USDC_ASSET_CODE = import.meta.env.VITE_USDC_ASSET_CODE ?? 'USDC';
-export const USDC_ISSUER = (import.meta.env.VITE_USDC_ISSUER ?? '').trim();
+const defaultTestnetUsdcIssuer = NETWORK === 'testnet' ? testnetDeployments.deployer : '';
+export const USDC_ISSUER = (import.meta.env.VITE_USDC_ISSUER ?? defaultTestnetUsdcIssuer).trim();
 export const USDC_ASSET = StrKey.isValidEd25519PublicKey(USDC_ISSUER)
   ? new Asset(USDC_ASSET_CODE, USDC_ISSUER)
   : undefined;
+const configuredUsdcContractId = (import.meta.env.VITE_USDC_CONTRACT_ID ?? '').trim();
+const derivedUsdcContractId = USDC_ASSET?.contractId(NETWORK_PASSPHRASE) ?? '';
 
 export const ASSET_CONTRACTS: Record<string, string> = {
   XLM: import.meta.env.VITE_XLM_CONTRACT_ID || Asset.native().contractId(NETWORK_PASSPHRASE),
-  USDC: import.meta.env.VITE_USDC_CONTRACT_ID || USDC_ASSET?.contractId(NETWORK_PASSPHRASE) || '',
+  USDC: configuredUsdcContractId || derivedUsdcContractId,
   COLLATERAL: import.meta.env.VITE_COLLATERAL_CONTRACT_ID || '',
 };
+
+export const USDC_CONFIGURATION_ERROR = configuredUsdcContractId
+  && derivedUsdcContractId
+  && configuredUsdcContractId !== derivedUsdcContractId
+  ? `Configured USDC issuer resolves to ${derivedUsdcContractId}, but VITE_USDC_CONTRACT_ID is ${configuredUsdcContractId}.`
+  : null;
 
 export const isValidContractId = (value: string | undefined): value is string =>
   Boolean(value && StrKey.isValidContract(value));
@@ -66,6 +75,9 @@ export const isValidContractId = (value: string | undefined): value is string =>
 export const requireUsdcAsset = (): Asset => {
   if (!USDC_ASSET) {
     throw new Error('Missing USDC issuer. Set VITE_USDC_ISSUER environment variable for Horizon trustlines and classic DEX swaps.');
+  }
+  if (USDC_CONFIGURATION_ERROR) {
+    throw new Error(`Nexus USDC configuration mismatch. ${USDC_CONFIGURATION_ERROR}`);
   }
   return USDC_ASSET;
 };

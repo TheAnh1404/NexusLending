@@ -403,10 +403,30 @@ export const LendingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       message.error('Only the offer lender can fund this offer.');
       return null;
     }
-    const fundingBalance = offer.asset === 'XLM' ? snapshot.wallet.balanceXLM : snapshot.wallet.balanceUSDC;
-    if (fundingBalance < offer.amount) {
-      message.error(`Insufficient ${offer.asset} balance to fund this offer.`);
-      return null;
+    if (!isApiMode) {
+      const fundingBalance = offer.asset === 'XLM' ? snapshot.wallet.balanceXLM : snapshot.wallet.balanceUSDC;
+      if (fundingBalance < offer.amount) {
+        message.error(`Insufficient ${offer.asset} balance to fund this offer.`);
+        return null;
+      }
+    }
+
+    if (isApiMode) {
+      if (offer.asset === 'USDC') {
+        const hasConfiguredTrustline = await hasUsdcTrustline(walletAddress);
+        if (!hasConfiguredTrustline) {
+          throw new Error('Your wallet does not have the configured Nexus USDC trustline. Claim Nexus USDC from Faucet before funding an offer.');
+        }
+      }
+
+      const liveBalances = await fetchWalletBalances(walletAddress);
+      const liveFundingBalance = offer.asset === 'XLM' ? liveBalances.balanceXLM : liveBalances.balanceUSDC;
+      if (liveFundingBalance < offer.amount) {
+        throw new Error(
+          `Insufficient Nexus ${offer.asset} balance to fund this offer. `
+          + `Required ${offer.amount.toLocaleString()}, available ${liveFundingBalance.toLocaleString()}.`
+        );
+      }
     }
 
     if (isApiMode) {

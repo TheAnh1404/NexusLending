@@ -227,6 +227,30 @@ const SOROBAN_PANIC_MESSAGES: Record<string, string> = {
   'amount must be positive': 'Amount must be greater than zero.',
 };
 
+const sacTransferErrorMessage = (code: number, functionName?: string): string | null => {
+  if (functionName === 'fund_offer') {
+    if (code === 10) {
+      return 'Your Nexus USDC balance is insufficient to fund this offer. Claim the configured Nexus USDC asset from Faucet and try again.';
+    }
+    if (code === 11) {
+      return 'Your Nexus USDC trustline is not authorized by the issuer.';
+    }
+    if (code === 13) {
+      return 'Your wallet is missing the configured Nexus USDC trustline. Open Nexus Faucet, add the USDC trustline, claim USDC, and try again.';
+    }
+  }
+
+  if (functionName === 'request_tokens' && code === 13) {
+    return 'Your wallet is missing the configured Nexus USDC trustline. Approve the trustline transaction before claiming USDC.';
+  }
+
+  if (functionName === 'activate_loan' && code === 13) {
+    return 'The borrower wallet is missing the configured Nexus USDC trustline required to receive the loan principal.';
+  }
+
+  return null;
+};
+
 const normalizeSorobanSimulationError = (rawError: string, functionName?: string): string => {
   const lowerRawError = rawError.toLowerCase();
   const panicMessage = Object.entries(SOROBAN_PANIC_MESSAGES)
@@ -241,6 +265,8 @@ const normalizeSorobanSimulationError = (rawError: string, functionName?: string
   const contractErrMatch = rawError.match(/Error\(Contract,\s*#?(\d+)\)/);
   if (contractErrMatch) {
     const code = parseInt(contractErrMatch[1], 10);
+    const sacMessage = sacTransferErrorMessage(code, functionName);
+    if (sacMessage) return sacMessage;
     return CONTRACT_ERROR_MESSAGES[code] ?? `Contract error #${code}`;
   }
 
