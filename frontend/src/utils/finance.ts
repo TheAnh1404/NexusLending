@@ -5,6 +5,13 @@ export const LIQUIDATION_CLOSE_FACTOR = 0.5;
 export const MAX_FIXED_APR_PERCENT = 20;
 export const MAX_FIXED_APR_BPS = MAX_FIXED_APR_PERCENT * 100;
 
+export const PROTOCOL_RISK_PARAMETERS = {
+  maxLTV: 75,
+  liquidationThreshold: 80,
+  minHealthFactor: 1.4,
+  liquidationBonus: 10,
+} as const;
+
 export const calculateHealthFactor = (
   collateralAmount: number,
   collateralPrice: number,

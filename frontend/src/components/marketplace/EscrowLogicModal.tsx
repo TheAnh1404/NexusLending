@@ -1,6 +1,7 @@
 import React from 'react';
 import { Modal, Typography, Row, Col, Timeline, Button } from 'antd';
 import { ShieldCheck, Lock, RefreshCw, Zap, CheckCircle2 } from 'lucide-react';
+import { PROTOCOL_RISK_PARAMETERS } from '../../utils/finance';
 
 const { Title, Paragraph, Text } = Typography;
 
@@ -11,6 +12,8 @@ interface EscrowLogicModalProps {
 }
 
 export const EscrowLogicModal: React.FC<EscrowLogicModalProps> = ({ open, onClose, onExploreMarketplace }) => {
+  const { maxLTV, liquidationThreshold, liquidationBonus, minHealthFactor } = PROTOCOL_RISK_PARAMETERS;
+
   return (
     <Modal
       open={open}
@@ -179,16 +182,16 @@ export const EscrowLogicModal: React.FC<EscrowLogicModalProps> = ({ open, onClos
 
           <Row gutter={[16, 8]} style={{ fontSize: 12 }}>
             <Col span={12}>
-              <Text type="secondary">Maximum Loan-to-Value (LTV):</Text> <Text strong>75%</Text>
+              <Text type="secondary">Maximum Loan-to-Value (LTV):</Text> <Text strong>{maxLTV}%</Text>
             </Col>
             <Col span={12}>
-              <Text type="secondary">Liquidation Threshold:</Text> <Text strong>80%</Text>
+              <Text type="secondary">Liquidation Threshold:</Text> <Text strong>{liquidationThreshold}%</Text>
             </Col>
             <Col span={12}>
-              <Text type="secondary">Liquidation Bonus:</Text> <Text strong>5%</Text>
+              <Text type="secondary">Liquidation Bonus:</Text> <Text strong>{liquidationBonus}%</Text>
             </Col>
             <Col span={12}>
-              <Text type="secondary">Minimum Health Factor:</Text> <Text strong>1.4 (Safe)</Text>
+              <Text type="secondary">Minimum Health Factor:</Text> <Text strong>{minHealthFactor.toFixed(1)} (Safe)</Text>
             </Col>
           </Row>
         </div>
