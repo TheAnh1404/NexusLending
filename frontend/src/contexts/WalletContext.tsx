@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useEffect, useMemo, useState } from 'react';
+import { usersApi } from '../services/api/users.api';
 import {
   expectedNetworkLabel,
   freighterService,
@@ -58,6 +59,11 @@ const stateFromConnection = (connection: FreighterConnection): WalletContextStat
   error: connection.isExpectedNetwork ? null : `Freighter is connected to ${networkLabel(connection.network.network)}, but Nexus is configured for ${expectedNetworkLabel}.`,
 });
 
+const ensureConnectedUser = async (connection: FreighterConnection): Promise<void> => {
+  if (!connection.isExpectedNetwork) return;
+  await usersApi.ensureExists(connection.publicKey);
+};
+
 export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [wallet, setWallet] = useState<WalletContextState>(initialState);
 
@@ -81,14 +87,14 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const isTestnet = isNetworkTestnet(network);
       const isExpectedNetwork = isNetworkExpected(network);
 
-      setWallet(
-        stateFromConnection({
-          publicKey,
-          network,
-          isTestnet,
-          isExpectedNetwork,
-        })
-      );
+      const connection = {
+        publicKey,
+        network,
+        isTestnet,
+        isExpectedNetwork,
+      };
+      await ensureConnectedUser(connection);
+      setWallet(stateFromConnection(connection));
     } catch (error) {
       freighterService.disconnectWallet();
       setWallet({
@@ -120,7 +126,17 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         return;
       }
       if (!connection) return;
-      setWallet(stateFromConnection(connection));
+      setWallet((prev) => ({ ...prev, isLoading: true, error: null }));
+      void ensureConnectedUser(connection)
+        .then(() => setWallet(stateFromConnection(connection)))
+        .catch((syncError) => {
+          freighterService.disconnectWallet();
+          setWallet({
+            ...initialState,
+            isLoading: false,
+            error: errorMessage(syncError),
+          });
+        });
     });
 
     return () => watcher.stop();
@@ -131,10 +147,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     try {
       const connection = await freighterService.connectWallet();
+      await ensureConnectedUser(connection);
       setWallet(stateFromConnection(connection));
       return connection;
     } catch (error) {
       const message = errorMessage(error);
+      freighterService.disconnectWallet();
       setWallet((prev) => ({
         ...prev,
         isConnected: false,
