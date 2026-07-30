@@ -10,6 +10,7 @@
 
 <p align="center">
   <a href="https://nexus-nta9.vercel.app/"><img src="https://img.shields.io/badge/Live_Demo-0727-blueviolet?style=for-the-badge&logo=vercel" alt="Live Demo" /></a>
+  <a href="https://x.com/Nexus_Lending"><img src="https://img.shields.io/badge/X-@Nexus__Lending-000000?style=for-the-badge&logo=x" alt="X (Twitter)" /></a>
   <a href="https://stellar.org/"><img src="https://img.shields.io/badge/Network-Stellar_Testnet-14B8A6?style=for-the-badge&logo=stellar" alt="Stellar Testnet" /></a>
   <a href="https://soroban.stellar.org/"><img src="https://img.shields.io/badge/Soroban_SDK-v25.3.1-6366F1?style=for-the-badge&logo=rust" alt="Soroban SDK" /></a>
   <a href="https://react.dev/"><img src="https://img.shields.io/badge/Frontend-React_19_+_Vite-0EA5E9?style=for-the-badge&logo=react" alt="React 19" /></a>
@@ -26,6 +27,7 @@ Lenders create fixed APR offers with custom parameters (principal asset, collate
 
 - **🌐 Live Demo (07/27 Release):** [https://nexus-nta9.vercel.app/](https://nexus-nta9.vercel.app/)
 - **🚰 Testnet Faucet:** [https://nexus-nta9.vercel.app/faucet](https://nexus-nta9.vercel.app/faucet)
+- **🐤 X (Twitter):** [https://x.com/Nexus_Lending](https://x.com/Nexus_Lending)
 - **📖 Technical Documentation:** [docs/](docs/)
 
 ---
