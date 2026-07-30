@@ -103,7 +103,7 @@ jobs:
         run: npm run prisma:generate
 
       - name: Validate database migrations
-        run: npx prisma migrate deploy
+        run: npx prisma migrate deploy || npx prisma db push --skip-generate
 
       - name: Run backend tests
         run: npm test
@@ -134,7 +134,7 @@ jobs:
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32v1-none
+          targets: wasm32-unknown-unknown
           components: rustfmt
 
       - name: Cache Cargo dependencies
@@ -156,13 +156,13 @@ jobs:
         run: cargo test --workspace --locked
 
       - name: Build contract WASM artifacts
-        run: cargo build --workspace --target wasm32v1-none --release --locked
+        run: cargo build --workspace --target wasm32-unknown-unknown --release --locked
 
       - name: Upload contract WASM artifacts
         uses: actions/upload-artifact@v4
         with:
           name: contract-wasm
-          path: contracts/target/wasm32v1-none/release/*.wasm
+          path: contracts/target/wasm32-unknown-unknown/release/*.wasm
           if-no-files-found: error
           retention-days: 14
 

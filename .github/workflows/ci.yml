@@ -36,7 +36,7 @@ jobs:
       - name: Setup Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32v1-none
+          targets: wasm32-unknown-unknown
           components: rustfmt, clippy
 
       - name: Check Rust Formatting
@@ -46,7 +46,7 @@ jobs:
         run: cargo test --workspace --locked
 
       - name: Build WASM Contract Artifacts
-        run: cargo build --workspace --target wasm32v1-none --release --locked
+        run: cargo build --workspace --target wasm32-unknown-unknown --release --locked
 
   frontend-ci:
     name: Frontend CI
