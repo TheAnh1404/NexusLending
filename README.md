@@ -35,6 +35,13 @@ Lenders create fixed APR offers with custom parameters (principal asset, collate
 The **Demo 0727** release represents a fully integrated, end-to-end testnet milestone. It showcases the complete lifecycle of peer-to-peer lending backed by Soroban Rust contracts, real-time transaction verification, off-chain event indexing, and active risk monitoring.
 
 <p align="center">
+  <video src="frontend/src/assets/0727.mp4" controls width="900" style="max-width: 100%; border-radius: 8px;"></video>
+</p>
+<p align="center">
+  📹 <strong>Demo 0727 Video Walkthrough</strong> (<a href="frontend/src/assets/0727.mp4">Click to download/view 0727.mp4 directly</a>)
+</p>
+
+<p align="center">
   <a href="https://nexus-nta9.vercel.app/">
     <img src="assets/screenshots/demo-home.png" alt="Nexus Live Demo Home Page" width="900" />
   </a>
